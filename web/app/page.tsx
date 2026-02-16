@@ -134,19 +134,24 @@ export default function Home() {
     <div className="py-24">
       {/* Hero */}
       <div className="mx-auto max-w-2xl px-6 text-center">
-        <h1 className="text-4xl font-bold tracking-tight sm:text-5xl">
-          Tileforge
-        </h1>
+        <div className="inline-flex items-center gap-3">
+          <svg
+            viewBox="0 0 32 32"
+            className="text-primary h-10 w-10 sm:h-12 sm:w-12"
+            aria-hidden="true"
+          >
+            <rect x="1" y="1" width="13.5" height="13.5" rx="3" fill="currentColor" />
+            <rect x="17.5" y="1" width="13.5" height="13.5" rx="3" fill="currentColor" opacity="0.7" />
+            <rect x="1" y="17.5" width="13.5" height="13.5" rx="3" fill="currentColor" opacity="0.7" />
+            <rect x="17.5" y="17.5" width="13.5" height="13.5" rx="3" fill="currentColor" opacity="0.4" />
+          </svg>
+          <h1 className="text-4xl font-bold tracking-tight sm:text-5xl">
+            Tileforge
+          </h1>
+        </div>
         <p className="text-muted-foreground mt-4 text-lg">
           Slice any image into XYZ map tiles — entirely in your browser, powered by WebAssembly.
         </p>
-      </div>
-
-      {/* Placeholder image area */}
-      <div className="mx-auto mt-10 max-w-2xl px-6">
-        <div className="bg-muted/50 hidden aspect-[3/1] items-center justify-center rounded-xl">
-          <span className="text-muted-foreground text-sm">Hero image placeholder</span>
-        </div>
       </div>
 
       {/* Main tool card */}
