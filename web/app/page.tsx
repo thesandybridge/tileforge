@@ -346,6 +346,7 @@ export default function Home() {
             imageHeight={imageInfo.height}
             maxZoom={mz}
             tileSize={ts}
+            projection={projection}
           />
         </div>
       )}

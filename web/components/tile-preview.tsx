@@ -12,16 +12,19 @@ interface TilePreviewProps {
   imageHeight: number;
   maxZoom: number;
   tileSize: number;
+  projection: "flat" | "mercator";
 }
 
 function BlobTileLayer({
   tiles,
   tileSize,
   maxZoom,
+  projection,
 }: {
   tiles: Map<string, string>;
   tileSize: number;
   maxZoom: number;
+  projection: "flat" | "mercator";
 }) {
   const map = useMap();
   const layerRef = useRef<L.GridLayer | null>(null);
@@ -48,20 +51,25 @@ function BlobTileLayer({
       },
     });
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const layer = new (BlobLayer as any)({
+    const layerOptions: Record<string, unknown> = {
       tileSize,
       noWrap: true,
       maxNativeZoom: maxZoom,
       minNativeZoom: 0,
-      bounds: [
+    };
+
+    if (projection === "flat") {
+      layerOptions.bounds = [
         [-tileSize, 0],
         [0, tileSize],
-      ],
-    });
+      ];
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const layer = new (BlobLayer as any)(layerOptions);
     layer.addTo(map);
     layerRef.current = layer;
-  }, [map, tiles, tileSize, maxZoom]);
+  }, [map, tiles, tileSize, maxZoom, projection]);
 
   useEffect(() => {
     map.whenReady(addLayer);
@@ -83,6 +91,7 @@ export default function TilePreview({
   imageHeight,
   maxZoom,
   tileSize,
+  projection,
 }: TilePreviewProps) {
   const [tiles, setTiles] = useState<Map<string, string> | null>(null);
   const tilesRef = useRef<Map<string, string> | null>(null);
@@ -122,6 +131,30 @@ export default function TilePreview({
     );
   }
 
+  const isMercator = projection === "mercator";
+
+  if (isMercator) {
+    const mercatorBounds: L.LatLngBoundsExpression = [
+      [-85.051, -180],
+      [85.051, 180],
+    ];
+
+    return (
+      <div className="mt-4 overflow-hidden rounded-xl border">
+        <MapContainer
+          bounds={mercatorBounds}
+          maxZoom={maxZoom}
+          minZoom={0}
+          zoomSnap={1}
+          style={{ aspectRatio: "1 / 1", width: "100%", background: "var(--background)" }}
+          attributionControl={false}
+        >
+          <BlobTileLayer tiles={tiles} tileSize={tileSize} maxZoom={maxZoom} projection={projection} />
+        </MapContainer>
+      </div>
+    );
+  }
+
   const maxDim = Math.max(imageWidth, imageHeight);
   const mapW = (imageWidth / maxDim) * tileSize;
   const mapH = (imageHeight / maxDim) * tileSize;
@@ -141,7 +174,7 @@ export default function TilePreview({
         style={{ aspectRatio: "1 / 1", width: "100%", background: "var(--background)" }}
         attributionControl={false}
       >
-        <BlobTileLayer tiles={tiles} tileSize={tileSize} maxZoom={maxZoom} />
+        <BlobTileLayer tiles={tiles} tileSize={tileSize} maxZoom={maxZoom} projection={projection} />
       </MapContainer>
     </div>
   );
