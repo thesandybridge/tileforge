@@ -11,7 +11,7 @@
 <p align="center">
   <a href="https://github.com/thesandybridge/tileforge/actions"><img src="https://github.com/thesandybridge/tileforge/actions/workflows/wasm-build.yml/badge.svg" alt="WASM Build" /></a>
   <img src="https://img.shields.io/badge/rust-stable-orange" alt="Rust" />
-  <img src="https://img.shields.io/badge/license-MIT-blue" alt="License" />
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="License" /></a>
 </p>
 
 ---
@@ -248,7 +248,7 @@ A GitHub Actions workflow (`.github/workflows/wasm-build.yml`) automatically reb
 
 ## License
 
-MIT
+[MIT](LICENSE)
 
 ---
 
