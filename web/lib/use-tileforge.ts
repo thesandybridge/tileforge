@@ -14,10 +14,12 @@ export interface TileforgeProgress {
 
 export function useTileforge() {
   const workerRef = useRef<Worker | null>(null);
+  const startTimeRef = useRef<number>(0);
   const [status, setStatus] = useState<TileforgeStatus>("idle");
   const [progress, setProgress] = useState<TileforgeProgress | null>(null);
   const [zipBlob, setZipBlob] = useState<Blob | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [durationMs, setDurationMs] = useState<number | null>(null);
 
   useEffect(() => {
     const worker = new Worker("/tileforge.worker.js");
@@ -42,6 +44,7 @@ export function useTileforge() {
             type: "application/zip",
           });
           setZipBlob(blob);
+          setDurationMs(performance.now() - startTimeRef.current);
           setStatus("done");
           setProgress(null);
           break;
@@ -75,10 +78,12 @@ export function useTileforge() {
       } = {},
     ) => {
       if (!workerRef.current) return;
+      startTimeRef.current = performance.now();
       setStatus("processing");
       setProgress(null);
       setZipBlob(null);
       setError(null);
+      setDurationMs(null);
 
       const msg: WorkerRequest = {
         type: "process",
@@ -100,5 +105,5 @@ export function useTileforge() {
     setError(null);
   }, []);
 
-  return { status, progress, zipBlob, error, process, reset };
+  return { status, progress, zipBlob, error, durationMs, process, reset };
 }

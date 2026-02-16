@@ -59,7 +59,7 @@ function calcTotalTiles(minZoom: number, maxZoom: number): number {
 }
 
 export default function Home() {
-  const { status, progress, zipBlob, error, process, reset } = useTileforge();
+  const { status, progress, zipBlob, error, durationMs, process, reset } = useTileforge();
   const [fileName, setFileName] = useState<string | null>(null);
   const [imageInfo, setImageInfo] = useState<ImageInfo | null>(null);
   const [tileSize, setTileSize] = useState("256");
@@ -245,7 +245,7 @@ export default function Home() {
 
             {imageInfo && (
               <p className="text-muted-foreground text-xs">
-                {totalTiles} tiles
+                {totalTiles} tiles — ~{Math.round(imageInfo.decodedMB)} MB RAM
               </p>
             )}
           </div>
@@ -269,6 +269,12 @@ export default function Home() {
               </Button>
             )}
           </div>
+
+          {status === "done" && durationMs != null && imageInfo && (
+            <p className="text-muted-foreground text-xs">
+              Done in {(durationMs / 1000).toFixed(1)}s — {totalTiles} tiles — est. peak memory ~{Math.round(imageInfo.decodedMB)} MB
+            </p>
+          )}
 
           {error && (
             <p className="text-destructive text-sm">{error}</p>
