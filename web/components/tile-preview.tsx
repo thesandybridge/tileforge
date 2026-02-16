@@ -131,14 +131,14 @@ export default function TilePreview({
   ];
 
   return (
-    <div className="mt-4 overflow-hidden rounded-lg border">
+    <div className="mt-4 overflow-hidden rounded-xl border">
       <MapContainer
         bounds={bounds}
         maxZoom={maxZoom}
         minZoom={0}
         zoomSnap={1}
         crs={L.CRS.Simple}
-        style={{ aspectRatio: "1 / 1", width: "100%", background: "#09090b" }}
+        style={{ aspectRatio: "1 / 1", width: "100%", background: "var(--background)" }}
         attributionControl={false}
       >
         <BlobTileLayer tiles={tiles} tileSize={tileSize} maxZoom={maxZoom} />

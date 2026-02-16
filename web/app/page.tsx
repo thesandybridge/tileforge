@@ -128,177 +128,206 @@ export default function Home() {
     reset();
   }, [reset]);
 
-  const isReady = status === "ready" || status === "done" || status === "error";
+  const showCard = status === "ready" || status === "done" || status === "error" || status === "processing";
 
   return (
-    <div className="py-20">
-      <div className="mx-auto max-w-lg px-4">
-      <h1 className="text-2xl font-bold tracking-tight">Tileforge</h1>
-      <p className="text-muted-foreground mb-8 text-sm">
-        Slice images into XYZ tile sets — entirely in your browser.
-      </p>
+    <div className="py-24">
+      {/* Hero */}
+      <div className="mx-auto max-w-2xl px-6 text-center">
+        <h1 className="text-4xl font-bold tracking-tight sm:text-5xl">
+          Tileforge
+        </h1>
+        <p className="text-muted-foreground mt-4 text-lg">
+          Slice any image into XYZ map tiles — entirely in your browser, powered by WebAssembly.
+        </p>
+      </div>
 
-      {(status === "idle" || status === "loading") && (
-        <p className="text-muted-foreground text-sm">Loading WASM engine...</p>
-      )}
+      {/* Placeholder image area */}
+      <div className="mx-auto mt-10 max-w-2xl px-6">
+        <div className="bg-muted/50 hidden aspect-[3/1] items-center justify-center rounded-xl">
+          <span className="text-muted-foreground text-sm">Hero image placeholder</span>
+        </div>
+      </div>
 
-      {isReady && (
-        <div className="space-y-4">
-          {/* Drop zone */}
-          <Card
-            onDragOver={(e) => {
-              e.preventDefault();
-              setDragging(true);
-            }}
-            onDragLeave={() => setDragging(false)}
-            onDrop={onDrop}
-            className={`cursor-pointer border-dashed transition-colors ${
-              dragging ? "border-primary bg-primary/5" : ""
-            }`}
-          >
-            <CardContent className="flex flex-col items-center justify-center py-10 text-center">
-              <Upload className="text-muted-foreground mb-3 h-8 w-8" />
-              {fileName ? (
-                <div>
-                  <p className="text-sm font-medium">{fileName}</p>
-                  {imageInfo && (
-                    <p className="text-muted-foreground mt-1 text-xs">
-                      {imageInfo.width} x {imageInfo.height} — ~{Math.round(imageInfo.decodedMB)} MB decoded
-                    </p>
+      {/* Main tool card */}
+      <div className="mx-auto mt-10 max-w-2xl px-6">
+        {(status === "idle" || status === "loading") && (
+          <p className="text-muted-foreground text-center text-sm">Loading WASM engine...</p>
+        )}
+
+        {showCard && (
+          <Card className="border-border/50 shadow-lg">
+            <CardContent className="space-y-6 p-6 sm:p-8">
+              {/* Drop zone */}
+              <div
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  setDragging(true);
+                }}
+                onDragLeave={() => setDragging(false)}
+                onDrop={onDrop}
+                className={`cursor-pointer rounded-xl border-2 border-dashed transition-colors ${
+                  dragging
+                    ? "border-primary bg-primary/5"
+                    : "border-border hover:border-muted-foreground/30"
+                }`}
+              >
+                <div className="flex flex-col items-center justify-center py-12 text-center">
+                  <Upload className="text-muted-foreground mb-4 h-10 w-10" />
+                  {fileName ? (
+                    <div>
+                      <p className="font-medium">{fileName}</p>
+                      {imageInfo && (
+                        <p className="text-muted-foreground mt-1 text-sm">
+                          {imageInfo.width} &times; {imageInfo.height} &mdash; ~{Math.round(imageInfo.decodedMB)} MB decoded
+                        </p>
+                      )}
+                    </div>
+                  ) : (
+                    <div>
+                      <p className="text-muted-foreground">
+                        Drop an image here or{" "}
+                        <label className="text-primary cursor-pointer underline underline-offset-4">
+                          browse
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) handleFile(file);
+                            }}
+                            className="hidden"
+                          />
+                        </label>
+                      </p>
+                      <p className="text-muted-foreground/60 mt-1 text-sm">
+                        PNG, JPEG, WebP supported
+                      </p>
+                    </div>
                   )}
                 </div>
-              ) : (
-                <div>
-                  <p className="text-sm">Drop an image here or</p>
-                  <label className="text-primary cursor-pointer text-sm underline">
-                    browse
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={(e) => {
-                        const file = e.target.files?.[0];
-                        if (file) handleFile(file);
-                      }}
-                      className="hidden"
-                    />
+              </div>
+
+              {memoryWarning && (
+                <p className="text-sm text-yellow-500">
+                  This image requires ~{Math.round(imageInfo!.decodedMB)} MB of memory to decode.
+                  Processing may fail on devices with limited RAM.
+                </p>
+              )}
+
+              {/* Config */}
+              <div className="grid grid-cols-3 gap-4">
+                <div className="space-y-2">
+                  <label className="text-muted-foreground text-xs font-medium uppercase tracking-wider">
+                    Tile size
                   </label>
+                  <Select value={tileSize} onValueChange={setTileSize}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="128">128</SelectItem>
+                      <SelectItem value="256">256</SelectItem>
+                      <SelectItem value="512">512</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
+
+                <div className="space-y-2">
+                  <label className="text-muted-foreground text-xs font-medium uppercase tracking-wider">
+                    Max zoom
+                  </label>
+                  <Select value={maxZoom} onValueChange={setMaxZoom}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {Array.from({ length: 9 }, (_, i) => (
+                        <SelectItem
+                          key={i}
+                          value={String(i)}
+                          disabled={imageInfo ? i > calculatedMaxZoom : false}
+                        >
+                          {i}{imageInfo && i === calculatedMaxZoom ? " (max)" : ""}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-muted-foreground text-xs font-medium uppercase tracking-wider">
+                    Projection
+                  </label>
+                  <Select value={projection} onValueChange={(v) => setProjection(v as "flat" | "mercator")}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="flat">Flat</SelectItem>
+                      <SelectItem value="mercator">Mercator</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              {imageInfo && (
+                <p className="text-muted-foreground text-center text-sm">
+                  {totalTiles} tiles &mdash; ~{Math.round(imageInfo.decodedMB)} MB peak memory
+                </p>
+              )}
+
+              {/* Progress */}
+              {status === "processing" && (
+                <div className="space-y-2">
+                  <Progress value={progress?.percent ?? 0} />
+                  <p className="text-muted-foreground text-center text-xs">
+                    {progress
+                      ? `Zoom ${progress.zoom} — ${progress.tilesDone}/${progress.tilesTotal} tiles (${Math.round(progress.percent)}%)`
+                      : "Starting..."}
+                  </p>
+                </div>
+              )}
+
+              {/* Actions */}
+              <div className="flex items-center justify-center gap-3">
+                <Button
+                  size="lg"
+                  onClick={onProcess}
+                  disabled={!hasFile || status !== "ready"}
+                >
+                  Process
+                </Button>
+                {status === "done" && zipBlob && (
+                  <Button size="lg" variant="secondary" onClick={onDownload}>
+                    Download ZIP ({(zipBlob.size / (1024 * 1024)).toFixed(1)} MB)
+                  </Button>
+                )}
+                {(status === "done" || status === "error") && (
+                  <Button size="lg" variant="outline" onClick={onReset}>
+                    Reset
+                  </Button>
+                )}
+              </div>
+
+              {/* Stats */}
+              {status === "done" && durationMs != null && imageInfo && (
+                <p className="text-muted-foreground text-center text-xs">
+                  Done in {(durationMs / 1000).toFixed(1)}s &mdash; {totalTiles} tiles &mdash; peak memory ~{Math.round(imageInfo.decodedMB)} MB
+                </p>
+              )}
+
+              {error && (
+                <p className="text-destructive text-center text-sm">{error}</p>
               )}
             </CardContent>
           </Card>
-
-          {memoryWarning && (
-            <p className="text-sm text-yellow-500">
-              This image requires ~{Math.round(imageInfo!.decodedMB)} MB of memory to decode.
-              Processing may fail on devices with limited RAM.
-            </p>
-          )}
-
-          {/* Config */}
-          <div className="flex flex-wrap items-center gap-4">
-            <div className="flex items-center gap-2">
-              <label className="text-sm">Tile size</label>
-              <Select value={tileSize} onValueChange={setTileSize}>
-                <SelectTrigger className="w-24">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="128">128</SelectItem>
-                  <SelectItem value="256">256</SelectItem>
-                  <SelectItem value="512">512</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <label className="text-sm">Max zoom</label>
-              <Select value={maxZoom} onValueChange={setMaxZoom}>
-                <SelectTrigger className="w-24">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {Array.from({ length: 9 }, (_, i) => (
-                    <SelectItem
-                      key={i}
-                      value={String(i)}
-                      disabled={imageInfo ? i > calculatedMaxZoom : false}
-                    >
-                      {i}{imageInfo && i === calculatedMaxZoom ? " (max)" : ""}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <label className="text-sm">Projection</label>
-              <Select value={projection} onValueChange={(v) => setProjection(v as "flat" | "mercator")}>
-                <SelectTrigger className="w-32">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="flat">Flat</SelectItem>
-                  <SelectItem value="mercator">Mercator</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            {imageInfo && (
-              <p className="text-muted-foreground text-xs">
-                {totalTiles} tiles — ~{Math.round(imageInfo.decodedMB)} MB RAM
-              </p>
-            )}
-          </div>
-
-          {/* Actions */}
-          <div className="flex gap-2">
-            <Button
-              onClick={onProcess}
-              disabled={!hasFile || status !== "ready"}
-            >
-              Process
-            </Button>
-            {status === "done" && zipBlob && (
-              <Button variant="secondary" onClick={onDownload}>
-                Download ZIP ({(zipBlob.size / (1024 * 1024)).toFixed(1)} MB)
-              </Button>
-            )}
-            {(status === "done" || status === "error") && (
-              <Button variant="outline" onClick={onReset}>
-                Reset
-              </Button>
-            )}
-          </div>
-
-          {status === "done" && durationMs != null && imageInfo && (
-            <p className="text-muted-foreground text-xs">
-              Done in {(durationMs / 1000).toFixed(1)}s — {totalTiles} tiles — est. peak memory ~{Math.round(imageInfo.decodedMB)} MB
-            </p>
-          )}
-
-          {error && (
-            <p className="text-destructive text-sm">{error}</p>
-          )}
-        </div>
-      )}
-
-      {/* Progress */}
-      {status === "processing" && (
-        <div className="space-y-2">
-          <Progress value={progress?.percent ?? 0} />
-          <p className="text-muted-foreground text-xs">
-            {progress
-              ? `Zoom ${progress.zoom} — ${progress.tilesDone}/${progress.tilesTotal} tiles (${Math.round(progress.percent)}%)`
-              : "Starting…"}
-          </p>
-        </div>
-      )}
-
+        )}
       </div>
 
       {/* Tile preview — full width */}
       {status === "done" && zipBlob && imageInfo && (
-        <div className="mx-auto max-w-6xl px-4">
+        <div className="mx-auto mt-8 max-w-6xl px-6">
           <TilePreview
             zipBlob={zipBlob}
             imageWidth={imageInfo.width}
