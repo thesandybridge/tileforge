@@ -4,7 +4,7 @@ use std::io::{BufRead, Seek, Write};
 use zip::write::SimpleFileOptions;
 use zip::ZipWriter;
 
-use crate::{TileConfig, TileOutput, TileProgress, Tiler, TilerError};
+use crate::{Projection, TileConfig, TileOutput, TileProgress, Tiler, TilerError};
 
 /// Streaming tiler that processes PNG images row-by-row.
 ///
@@ -159,13 +159,23 @@ impl StreamingTiler {
         let mut strip_start_row: u32 = 0;
         let max_dim = src_w.max(src_h) as f64;
 
+        let projection = self.config.projection;
+
         // 6. Process each tile row at max zoom
         for tile_row in 0..grid {
-            // Source Y range needed (uniform scale, with 1px margin for interpolation)
-            let src_y_start_f =
-                tile_row as f64 * tile_size as f64 * max_dim / canvas as f64;
-            let src_y_end_f =
-                (tile_row + 1) as f64 * tile_size as f64 * max_dim / canvas as f64;
+            // Source Y range needed (with 1px margin for interpolation)
+            let (src_y_start_f, src_y_end_f) = match projection {
+                Projection::Flat => {
+                    let start = tile_row as f64 * tile_size as f64 * max_dim / canvas as f64;
+                    let end = (tile_row + 1) as f64 * tile_size as f64 * max_dim / canvas as f64;
+                    (start, end)
+                }
+                Projection::Mercator => {
+                    let (sy_start, sy_end) =
+                        crate::mercator::tile_row_source_range(tile_row, grid);
+                    (sy_start * src_h as f64, sy_end * src_h as f64)
+                }
+            };
 
             // If this tile row is entirely beyond the image, emit transparent tiles
             if src_y_start_f >= src_h as f64 {
@@ -242,6 +252,7 @@ impl StreamingTiler {
                     src_w,
                     src_h,
                     canvas,
+                    projection,
                 );
 
                 write_tile_png(
@@ -337,6 +348,8 @@ impl StreamingTiler {
         // Convert to RGBA once — no per-zoom-level resize
         let source = img.to_rgba8();
 
+        let projection = self.config.projection;
+
         for tile_row in 0..grid {
             let mut row_tiles = Vec::with_capacity(grid as usize);
 
@@ -350,6 +363,7 @@ impl StreamingTiler {
                     src_w,
                     src_h,
                     canvas,
+                    projection,
                 );
 
                 write_tile_png(
@@ -404,6 +418,10 @@ impl StreamingTiler {
 ///
 /// Uses uniform scaling based on max(src_w, src_h) so non-square images
 /// maintain their aspect ratio. Tiles outside the image bounds are transparent.
+///
+/// When `projection == Mercator`, the Y axis is remapped using Web Mercator
+/// math so that equal-size tile rows cover equal Mercator-projected latitude
+/// bands rather than equal pixel bands.
 fn extract_tile(
     strip: &RgbaImage,
     strip_start_row: u32,
@@ -413,16 +431,28 @@ fn extract_tile(
     src_w: u32,
     src_h: u32,
     canvas: u64,
+    projection: Projection,
 ) -> RgbaImage {
     let max_dim = src_w.max(src_h) as f64;
+    let grid = (canvas / tile_size as u64) as u32;
 
     // Map tile canvas position back to source using uniform scale
     let src_x_start_f = tile_col as f64 * tile_size as f64 * max_dim / canvas as f64;
     let src_x_end_f =
         (tile_col + 1) as f64 * tile_size as f64 * max_dim / canvas as f64;
-    let src_y_start_f = tile_row as f64 * tile_size as f64 * max_dim / canvas as f64;
-    let src_y_end_f =
-        (tile_row + 1) as f64 * tile_size as f64 * max_dim / canvas as f64;
+
+    let (src_y_start_f, src_y_end_f) = match projection {
+        Projection::Flat => {
+            let start = tile_row as f64 * tile_size as f64 * max_dim / canvas as f64;
+            let end = (tile_row + 1) as f64 * tile_size as f64 * max_dim / canvas as f64;
+            (start, end)
+        }
+        Projection::Mercator => {
+            let (sy_start_norm, sy_end_norm) =
+                crate::mercator::tile_row_source_range(tile_row, grid);
+            (sy_start_norm * src_h as f64, sy_end_norm * src_h as f64)
+        }
+    };
 
     // Tile is fully outside the image — return transparent
     if src_x_start_f >= src_w as f64 || src_y_start_f >= src_h as f64 {

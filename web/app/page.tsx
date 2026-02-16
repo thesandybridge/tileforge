@@ -342,6 +342,10 @@ export default function Home() {
           />
         </div>
       )}
+      {/* Footer */}
+      <footer className="text-muted-foreground mt-16 pb-8 text-center text-sm">
+        &copy; {new Date().getFullYear()} &mdash; made with &hearts; by sandybridge
+      </footer>
     </div>
   );
 }

@@ -1,3 +1,4 @@
+pub mod mercator;
 mod tiler;
 pub mod streaming;
 

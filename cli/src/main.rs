@@ -32,6 +32,10 @@ struct Args {
     /// Force naive mode (full decode, faster for small images)
     #[arg(long, conflicts_with = "streaming")]
     naive: bool,
+
+    /// Map projection: flat (equirectangular) or mercator (Web Mercator)
+    #[arg(long, default_value = "flat")]
+    projection: String,
 }
 
 fn progress_callback(p: tileforge_core::TileProgress) {
@@ -52,11 +56,20 @@ fn main() {
         std::process::exit(1);
     });
 
+    let projection = match args.projection.as_str() {
+        "flat" => tileforge_core::Projection::Flat,
+        "mercator" => tileforge_core::Projection::Mercator,
+        other => {
+            eprintln!("Unknown projection '{other}'. Use 'flat' or 'mercator'.");
+            std::process::exit(1);
+        }
+    };
+
     let config = TileConfig {
         tile_size: args.tile_size,
         min_zoom: args.min_zoom,
         max_zoom: args.max_zoom,
-        ..Default::default()
+        projection,
     };
 
     let file = fs::File::create(&args.output).unwrap_or_else(|e| {

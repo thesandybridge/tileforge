@@ -186,12 +186,41 @@ impl Tiler {
             let max_dim = width.max(height) as u64;
             let scaled_w = ((width as u64 * canvas_size as u64) / max_dim).max(1) as u32;
             let scaled_h = ((height as u64 * canvas_size as u64) / max_dim).max(1) as u32;
-            let resized = img.resize_exact(scaled_w, scaled_h, FilterType::Lanczos3);
 
-            // Place on transparent canvas so tiles outside image are transparent
-            let mut canvas_buf = RgbaImage::new(canvas_size, canvas_size);
-            image::imageops::overlay(&mut canvas_buf, &resized.to_rgba8(), 0, 0);
-            let canvas_img = DynamicImage::ImageRgba8(canvas_buf);
+            let canvas_img = if self.config.projection == Projection::Mercator {
+                // Mercator: resize X uniformly, then remap Y per-row
+                let resized = img.resize_exact(scaled_w, height, FilterType::Lanczos3);
+                let src_rgba = resized.to_rgba8();
+                let mut canvas_buf = RgbaImage::new(canvas_size, canvas_size);
+
+                for cy in 0..canvas_size {
+                    let t = cy as f64 / canvas_size as f64;
+                    let src_y_f = crate::mercator::canvas_y_to_source_y(t) * (height as f64 - 1.0);
+
+                    // Bilinear interpolation between two nearest source rows
+                    let y0 = (src_y_f.floor() as u32).min(height - 1);
+                    let y1 = (y0 + 1).min(height - 1);
+                    let frac = src_y_f - y0 as f64;
+
+                    for cx in 0..scaled_w.min(canvas_size) {
+                        let p0 = src_rgba.get_pixel(cx, y0);
+                        let p1 = src_rgba.get_pixel(cx, y1);
+                        let r = (p0[0] as f64 * (1.0 - frac) + p1[0] as f64 * frac).round() as u8;
+                        let g = (p0[1] as f64 * (1.0 - frac) + p1[1] as f64 * frac).round() as u8;
+                        let b = (p0[2] as f64 * (1.0 - frac) + p1[2] as f64 * frac).round() as u8;
+                        let a = (p0[3] as f64 * (1.0 - frac) + p1[3] as f64 * frac).round() as u8;
+                        canvas_buf.put_pixel(cx, cy, image::Rgba([r, g, b, a]));
+                    }
+                }
+
+                DynamicImage::ImageRgba8(canvas_buf)
+            } else {
+                // Flat: standard resize + overlay
+                let resized = img.resize_exact(scaled_w, scaled_h, FilterType::Lanczos3);
+                let mut canvas_buf = RgbaImage::new(canvas_size, canvas_size);
+                image::imageops::overlay(&mut canvas_buf, &resized.to_rgba8(), 0, 0);
+                DynamicImage::ImageRgba8(canvas_buf)
+            };
 
             for x in 0..grid_size {
                 for y in 0..grid_size {
