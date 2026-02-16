@@ -2,13 +2,13 @@
 /* eslint-disable */
 export const memory: WebAssembly.Memory;
 export const __wbg_wasmtileconfig_free: (a: number, b: number) => void;
-export const wasmtileconfig_new: (a: number) => number;
-export const wasmtileconfig_setMinZoom: (a: number, b: number) => void;
-export const wasmtileconfig_setMaxZoom: (a: number, b: number) => void;
-export const wasmtileconfig_setProjection: (a: number, b: number) => void;
-export const processTiles: (a: number, b: number, c: number, d: any) => [number, number, number, number];
-export const calcTotalTiles: (a: number, b: number) => number;
 export const calcMaxZoom: (a: number, b: number, c: number) => number;
+export const processTiles: (a: number, b: number, c: number, d: any) => [number, number, number, number];
+export const wasmtileconfig_new: (a: number) => number;
+export const wasmtileconfig_setMaxZoom: (a: number, b: number) => void;
+export const wasmtileconfig_setMinZoom: (a: number, b: number) => void;
+export const wasmtileconfig_setProjection: (a: number, b: number) => void;
+export const calcTotalTiles: (a: number, b: number) => number;
 export const __wbindgen_exn_store: (a: number) => void;
 export const __externref_table_alloc: () => number;
 export const __wbindgen_externrefs: WebAssembly.Table;

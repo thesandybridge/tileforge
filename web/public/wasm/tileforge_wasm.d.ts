@@ -30,13 +30,13 @@ declare type InitInput = RequestInfo | URL | Response | BufferSource | WebAssemb
 declare interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly __wbg_wasmtileconfig_free: (a: number, b: number) => void;
-    readonly wasmtileconfig_new: (a: number) => number;
-    readonly wasmtileconfig_setMinZoom: (a: number, b: number) => void;
-    readonly wasmtileconfig_setMaxZoom: (a: number, b: number) => void;
-    readonly wasmtileconfig_setProjection: (a: number, b: number) => void;
-    readonly processTiles: (a: number, b: number, c: number, d: any) => [number, number, number, number];
-    readonly calcTotalTiles: (a: number, b: number) => number;
     readonly calcMaxZoom: (a: number, b: number, c: number) => number;
+    readonly processTiles: (a: number, b: number, c: number, d: any) => [number, number, number, number];
+    readonly wasmtileconfig_new: (a: number) => number;
+    readonly wasmtileconfig_setMaxZoom: (a: number, b: number) => void;
+    readonly wasmtileconfig_setMinZoom: (a: number, b: number) => void;
+    readonly wasmtileconfig_setProjection: (a: number, b: number) => void;
+    readonly calcTotalTiles: (a: number, b: number) => number;
     readonly __wbindgen_exn_store: (a: number) => void;
     readonly __externref_table_alloc: () => number;
     readonly __wbindgen_externrefs: WebAssembly.Table;
