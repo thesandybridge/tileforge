@@ -1,0 +1,13 @@
+[package]
+name = "tileforge-cli"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "tileforge"
+path = "src/main.rs"
+
+[dependencies]
+tileforge-core = { path = "../crates/core" }
+clap = { version = "4", features = ["derive"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
