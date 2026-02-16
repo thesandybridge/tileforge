@@ -6,6 +6,9 @@ on:
       - "crates/**"
     branches: [main]
 
+permissions:
+  contents: write
+
 jobs:
   build-wasm:
     runs-on: ubuntu-latest
