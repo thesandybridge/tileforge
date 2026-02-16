@@ -133,12 +133,13 @@ export default function Home() {
   return (
     <div className="py-24">
       {/* Hero */}
-      <div className="mx-auto max-w-2xl px-6 text-center">
+      <header className="mx-auto max-w-2xl px-6 text-center">
         <div className="inline-flex items-center gap-3">
           <svg
             viewBox="0 0 32 32"
             className="text-primary h-10 w-10 sm:h-12 sm:w-12"
-            aria-hidden="true"
+            role="img"
+            aria-label="Tileforge logo"
           >
             <rect x="1" y="1" width="13.5" height="13.5" rx="3" fill="currentColor" />
             <rect x="17.5" y="1" width="13.5" height="13.5" rx="3" fill="currentColor" opacity="0.7" />
@@ -152,10 +153,16 @@ export default function Home() {
         <p className="text-muted-foreground mt-4 text-lg">
           Slice any image into XYZ map tiles — entirely in your browser, powered by WebAssembly.
         </p>
-      </div>
+      </header>
+
+      <noscript>
+        <p className="mx-auto mt-10 max-w-md text-center text-sm text-yellow-500">
+          Tileforge requires JavaScript to run. Please enable JavaScript in your browser settings.
+        </p>
+      </noscript>
 
       {/* Main tool card */}
-      <div className="mx-auto mt-10 max-w-2xl px-6">
+      <main className="mx-auto mt-10 max-w-2xl px-6">
         {(status === "idle" || status === "loading") && (
           <p className="text-muted-foreground text-center text-sm">Loading WASM engine...</p>
         )}
@@ -328,7 +335,7 @@ export default function Home() {
             </CardContent>
           </Card>
         )}
-      </div>
+      </main>
 
       {/* Tile preview — full width */}
       {status === "done" && zipBlob && imageInfo && (
