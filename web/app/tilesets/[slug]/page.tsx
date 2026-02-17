@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { ArrowLeft, Map, Globe, Grid3X3, Copy, Check, Eye, EyeOff, Trash2, Pencil, Loader2 } from "lucide-react";
-import { API_URL, getTileSet, updateTileSet, deleteTileSet, type TileSet } from "@/lib/api";
+import { useTileset, useUpdateTileset, useDeleteTileset, useTilesetPreview } from "@/hooks/use-tilesets";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 
@@ -25,6 +25,7 @@ function formatBytes(bytes: number): string {
 }
 
 import type { Highlighter } from "shiki";
+import { useEffect } from "react";
 
 let highlighterPromise: Promise<Highlighter> | null = null;
 function getHighlighter() {
@@ -84,9 +85,11 @@ export default function TileSetDetailPage() {
   const params = useParams<{ slug: string }>();
   const router = useRouter();
   const { data: session } = useSession();
-  const [tileset, setTileset] = useState<TileSet | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+
+  const { data: tileset, isLoading, error } = useTileset(params.slug);
+  const updateTileset = useUpdateTileset(params.slug);
+  const deleteTileset = useDeleteTileset();
+  const preview = useTilesetPreview(params.slug);
 
   const isOwner = !!(session?.user?.id && tileset?.user_id === session.user.id);
   const backHref = isOwner || session?.user ? "/my-tilesets" : "/gallery";
@@ -94,55 +97,35 @@ export default function TileSetDetailPage() {
 
   const [editing, setEditing] = useState(false);
   const [editName, setEditName] = useState("");
-  const [previewBlob, setPreviewBlob] = useState<Blob | null>(null);
-  const [previewLoading, setPreviewLoading] = useState(false);
 
-  const handleRename = async () => {
-    if (!tileset || !session?.accessToken) return;
+  function handleRename() {
+    if (!tileset) return;
     const trimmed = editName.trim();
     if (!trimmed || trimmed === tileset.name) {
       setEditing(false);
       return;
     }
-    try {
-      const updated = await updateTileSet(tileset.slug, { name: trimmed }, session.accessToken);
-      setTileset(updated);
-      setEditing(false);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to rename");
-    }
-  };
+    updateTileset.mutate({ name: trimmed }, { onSuccess: () => setEditing(false) });
+  }
 
-  const handleToggleVisibility = async () => {
-    if (!tileset || !session?.accessToken) return;
-    try {
-      const updated = await updateTileSet(tileset.slug, { public: !tileset.public }, session.accessToken);
-      setTileset(updated);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to update visibility");
-    }
-  };
+  function handleToggleVisibility() {
+    if (!tileset) return;
+    updateTileset.mutate({ public: !tileset.public });
+  }
 
-  const handleDelete = async () => {
-    if (!tileset || !session?.accessToken) return;
+  function handleDelete() {
+    if (!tileset) return;
     if (!confirm("Delete this tileset? This cannot be undone.")) return;
-    try {
-      await deleteTileSet(tileset.slug, session.accessToken);
-      router.push("/my-tilesets");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to delete");
-    }
-  };
+    deleteTileset.mutate(tileset.slug, {
+      onSuccess: () => router.push("/my-tilesets"),
+    });
+  }
 
-  useEffect(() => {
-    if (!params.slug) return;
-    getTileSet(params.slug, session?.accessToken)
-      .then(setTileset)
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false));
-  }, [params.slug, session?.accessToken]);
+  function handleLoadPreview() {
+    preview.mutate();
+  }
 
-  if (loading) {
+  if (isLoading) {
     return (
       <div className="mx-auto max-w-3xl px-6 py-24">
         <p className="text-muted-foreground text-center text-sm">Loading tile set...</p>
@@ -150,10 +133,12 @@ export default function TileSetDetailPage() {
     );
   }
 
-  if (error || !tileset) {
+  const displayError = error?.message ?? updateTileset.error?.message ?? deleteTileset.error?.message ?? preview.error?.message;
+
+  if (displayError || !tileset) {
     return (
       <div className="mx-auto max-w-3xl px-6 py-16">
-        <p className="text-destructive text-center">{error ?? "Tile set not found"}</p>
+        <p className="text-destructive text-center">{displayError ?? "Tile set not found"}</p>
         <div className="mt-4 text-center">
           <Link
             href={backHref}
@@ -292,9 +277,9 @@ const map = new maplibregl.Map({
         {/* Preview */}
         <div className="mt-8">
           <h2 className="text-lg font-semibold">Preview</h2>
-          {previewBlob ? (
+          {preview.data ? (
             <TilePreview
-              zipBlob={previewBlob}
+              zipBlob={preview.data}
               imageWidth={tileset.tile_size * (1 << tileset.max_zoom)}
               imageHeight={tileset.tile_size * (1 << tileset.max_zoom)}
               maxZoom={tileset.max_zoom}
@@ -305,24 +290,10 @@ const map = new maplibregl.Map({
             <Button
               variant="secondary"
               className="mt-3"
-              disabled={previewLoading}
-              onClick={async () => {
-                setPreviewLoading(true);
-                try {
-                  const res = await fetch(
-                    `${API_URL}/api/tiles/${encodeURIComponent(tileset.slug)}/download`,
-                  );
-                  if (!res.ok) throw new Error("Download failed");
-                  const blob = await res.blob();
-                  setPreviewBlob(blob);
-                } catch (e) {
-                  setError(e instanceof Error ? e.message : "Failed to load preview");
-                } finally {
-                  setPreviewLoading(false);
-                }
-              }}
+              disabled={preview.isPending}
+              onClick={handleLoadPreview}
             >
-              {previewLoading ? (
+              {preview.isPending ? (
                 <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Loading...</>
               ) : (
                 <>Load Preview ({formatBytes(tileset.size_bytes)})</>
@@ -360,4 +331,3 @@ const map = new maplibregl.Map({
     </div>
   );
 }
-

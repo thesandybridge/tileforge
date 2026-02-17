@@ -10,6 +10,17 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   ...authConfig,
   callbacks: {
     async jwt({ token, trigger, account, profile }) {
+      // Re-read plan from DB when session.update() is called (e.g. after billing change)
+      if (trigger === "update" && token.userId) {
+        const result = await pool.query(
+          "SELECT plan FROM users WHERE id = $1",
+          [token.userId],
+        );
+        if (result.rows[0]) {
+          token.plan = result.rows[0].plan;
+        }
+      }
+
       if (trigger === "signIn" && account?.provider === "github" && profile) {
         const githubId = Number(profile.id);
         const username = (profile.login as string) ?? profile.name ?? "";

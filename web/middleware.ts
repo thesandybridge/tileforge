@@ -4,12 +4,13 @@ import authConfig from "@/auth.config";
 const { auth } = NextAuth(authConfig);
 import { NextResponse } from "next/server";
 
-const publicPaths = ["/", "/gallery", "/api/auth"];
+const publicPaths = ["/", "/gallery", "/api/auth", "/billing"];
 
 function isPublic(pathname: string): boolean {
   if (publicPaths.includes(pathname)) return true;
   if (pathname.startsWith("/tilesets/")) return true;
   if (pathname.startsWith("/api/auth/")) return true;
+  if (pathname.startsWith("/api/stripe/")) return true;
   return false;
 }
 

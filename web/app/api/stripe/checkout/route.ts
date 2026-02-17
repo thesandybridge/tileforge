@@ -1,0 +1,51 @@
+import { NextResponse } from "next/server";
+import Stripe from "stripe";
+import { auth } from "@/auth";
+import pool from "@/lib/db";
+
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
+
+export async function POST() {
+  const session = await auth();
+  if (!session?.user?.id) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const userId = session.user.id;
+
+  // Look up or create Stripe customer
+  const userRow = await pool.query(
+    "SELECT stripe_customer_id FROM users WHERE id = $1",
+    [userId],
+  );
+
+  let customerId = userRow.rows[0]?.stripe_customer_id as string | null;
+
+  if (!customerId) {
+    const customer = await stripe.customers.create({
+      metadata: { user_id: userId },
+      email: session.user.email ?? undefined,
+      name: session.user.username ?? undefined,
+    });
+    customerId = customer.id;
+    await pool.query(
+      "UPDATE users SET stripe_customer_id = $1 WHERE id = $2",
+      [customerId, userId],
+    );
+  }
+
+  const origin = process.env.NEXTAUTH_URL ?? "http://localhost:3000";
+
+  const checkoutSession = await stripe.checkout.sessions.create({
+    customer: customerId,
+    mode: "subscription",
+    line_items: [{ price: process.env.STRIPE_PRO_PRICE_ID!, quantity: 1 }],
+    success_url: `${origin}/billing?upgraded=true`,
+    cancel_url: `${origin}/billing`,
+    subscription_data: {
+      metadata: { user_id: userId },
+    },
+  });
+
+  return NextResponse.json({ url: checkoutSession.url });
+}
