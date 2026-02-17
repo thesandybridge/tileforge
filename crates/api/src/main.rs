@@ -434,7 +434,7 @@ async fn main() {
             tracing::info!("CORS origin: {origin}");
             CorsLayer::new()
                 .allow_origin(origin.parse::<HeaderValue>().expect("invalid CORS_ORIGIN"))
-                .allow_methods([Method::GET, Method::POST])
+                .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
                 .allow_headers([header::CONTENT_TYPE])
         }
         None => {
