@@ -16,6 +16,7 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tileforge_core::{streaming::should_use_streaming, Projection, TileConfig, Tiler, STREAMING_THRESHOLD};
 use tokio_stream::StreamExt;
+use axum::http::{HeaderValue, Method};
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use uuid::Uuid;
 
@@ -28,6 +29,7 @@ struct AppConfig {
     max_upload_bytes: usize,
     redis_url: Option<String>,
     storage_path: Option<PathBuf>,
+    cors_origin: Option<String>,
 }
 
 impl AppConfig {
@@ -43,6 +45,7 @@ impl AppConfig {
                 .unwrap_or(500 * 1024 * 1024), // 500 MB
             redis_url: std::env::var("REDIS_URL").ok(),
             storage_path: std::env::var("STORAGE_PATH").ok().map(PathBuf::from),
+            cors_origin: std::env::var("CORS_ORIGIN").ok(),
         }
     }
 }
@@ -426,6 +429,20 @@ async fn main() {
         storage_path: config.storage_path,
     };
 
+    let cors = match config.cors_origin {
+        Some(ref origin) => {
+            tracing::info!("CORS origin: {origin}");
+            CorsLayer::new()
+                .allow_origin(origin.parse::<HeaderValue>().expect("invalid CORS_ORIGIN"))
+                .allow_methods([Method::GET, Method::POST])
+                .allow_headers([header::CONTENT_TYPE])
+        }
+        None => {
+            tracing::info!("CORS_ORIGIN not set — allowing all origins");
+            CorsLayer::permissive()
+        }
+    };
+
     let app = Router::new()
         .route("/health", get(health))
         .route(
@@ -434,7 +451,7 @@ async fn main() {
         )
         .route("/api/tiles/{job_id}/progress", get(job_progress))
         .route("/api/tiles/{job_id}/download", get(job_download))
-        .layer(CorsLayer::permissive())
+        .layer(cors)
         .layer(TraceLayer::new_for_http())
         .with_state(state);
 

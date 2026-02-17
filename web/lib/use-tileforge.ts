@@ -3,13 +3,29 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { WorkerRequest, WorkerResponse } from "./worker-protocol";
 
-export type TileforgeStatus = "idle" | "loading" | "ready" | "processing" | "done" | "error";
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
+
+export type TileforgeStatus = "idle" | "loading" | "ready" | "waking" | "processing" | "done" | "error";
 
 export interface TileforgeProgress {
   tilesDone: number;
   tilesTotal: number;
   zoom: number;
   percent: number;
+}
+
+async function waitForHealth(signal?: AbortSignal): Promise<boolean> {
+  for (let i = 0; i < 5; i++) {
+    try {
+      const res = await fetch(`${API_URL}/health`, { signal });
+      if (res.ok) return true;
+    } catch {
+      // Service may be cold booting
+    }
+    if (signal?.aborted) return false;
+    await new Promise((r) => setTimeout(r, 2000));
+  }
+  return false;
 }
 
 export function useTileforge() {
@@ -113,11 +129,21 @@ export function useTileforge() {
       } = {},
     ) => {
       startTimeRef.current = performance.now();
-      setStatus("processing");
       setProgress(null);
       setZipBlob(null);
       setError(null);
       setDurationMs(null);
+
+      // Wake up server if it's sleeping (Railway Serverless)
+      setStatus("waking");
+      const healthy = await waitForHealth();
+      if (!healthy) {
+        setError("Server is unavailable. Try local WASM processing instead.");
+        setStatus("error");
+        return;
+      }
+
+      setStatus("processing");
 
       const params = new URLSearchParams();
       params.set("tile_size", String(opts.tileSize ?? 256));
@@ -126,7 +152,7 @@ export function useTileforge() {
       if (opts.projection) params.set("projection", opts.projection);
 
       try {
-        const res = await fetch(`/api/tiles?${params}`, {
+        const res = await fetch(`${API_URL}/api/tiles?${params}`, {
           method: "POST",
           headers: { "content-type": "application/octet-stream" },
           body: imageBytes,
@@ -146,7 +172,7 @@ export function useTileforge() {
           // Close any existing SSE connection
           sseRef.current?.close();
 
-          const sse = new EventSource(`/api/tiles/${job_id}/progress`);
+          const sse = new EventSource(`${API_URL}/api/tiles/${job_id}/progress`);
           sseRef.current = sse;
 
           sse.onmessage = async (e) => {
@@ -171,7 +197,7 @@ export function useTileforge() {
                 sse.close();
                 sseRef.current = null;
                 try {
-                  const dlRes = await fetch(data.download_url);
+                  const dlRes = await fetch(`${API_URL}${data.download_url}`);
                   if (!dlRes.ok) throw new Error(`Download failed (${dlRes.status})`);
                   const buf = await dlRes.arrayBuffer();
                   setZipBlob(new Blob([buf], { type: "application/zip" }));

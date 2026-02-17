@@ -197,7 +197,7 @@ crates/worker/
 
 ### Tasks
 
-- [ ] Provision Railway Redis
+- [x] Provision Railway Redis
 - [ ] Shared Railway volume mounted to both `api` and `worker`
 - [x] Scaffold `crates/worker` with BRPOP loop
 - [x] API: upload image to volume, enqueue job

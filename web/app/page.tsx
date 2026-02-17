@@ -134,8 +134,8 @@ export default function Home() {
     reset();
   }, [reset]);
 
-  const canProcess = hasFile && (useServer || status === "ready") && status !== "processing";
-  const showCard = useServer || status === "ready" || status === "done" || status === "error" || status === "processing";
+  const canProcess = hasFile && (useServer || status === "ready") && status !== "processing" && status !== "waking";
+  const showCard = useServer || status === "ready" || status === "done" || status === "error" || status === "processing" || status === "waking";
 
   return (
     <div className="py-24">
@@ -309,6 +309,14 @@ export default function Home() {
                 <p className="text-muted-foreground text-center text-sm">
                   {totalTiles} tiles &mdash; ~{Math.round(imageInfo.decodedMB)} MB peak memory
                 </p>
+              )}
+
+              {/* Waking server */}
+              {status === "waking" && (
+                <div className="flex flex-col items-center gap-2 py-2">
+                  <LoaderCircle className="text-primary h-6 w-6 animate-spin" />
+                  <p className="text-muted-foreground text-xs">Waking up server...</p>
+                </div>
               )}
 
               {/* Progress */}
