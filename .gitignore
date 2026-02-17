@@ -4,3 +4,4 @@ web/.next/
 node_modules/
 web/node_modules/
 docs/
+*.tsbuildinfo
