@@ -1,7 +1,8 @@
 use axum::{
     body::Bytes,
-    extract::{DefaultBodyLimit, Path, Query, State},
-    http::{header, StatusCode},
+    extract::{ConnectInfo, DefaultBodyLimit, Path, Query, State},
+    http::{header, HeaderValue, Method, Request, StatusCode},
+    middleware::{self, Next},
     response::{
         sse::{Event, KeepAlive},
         IntoResponse, Response, Sse,
@@ -12,11 +13,11 @@ use axum::{
 use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
 use std::io::Cursor;
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tileforge_core::{streaming::should_use_streaming, Projection, TileConfig, Tiler, STREAMING_THRESHOLD};
 use tokio_stream::StreamExt;
-use axum::http::{HeaderValue, Method};
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use uuid::Uuid;
 
@@ -145,6 +146,120 @@ struct ProgressData {
 
 // Stale job timeout: 5 minutes with no progress update
 const STALE_JOB_TIMEOUT_SECS: u64 = 300;
+
+// ---------------------------------------------------------------------------
+// Rate limiting
+// ---------------------------------------------------------------------------
+
+#[derive(Clone)]
+struct RateLimit {
+    redis: Option<redis::aio::MultiplexedConnection>,
+}
+
+#[derive(Serialize)]
+struct RateLimitBody {
+    error: String,
+    retry_after: u64,
+}
+
+fn extract_client_ip<B>(req: &Request<B>, peer: Option<SocketAddr>) -> String {
+    // Prefer CF-Connecting-IP (Cloudflare), then X-Forwarded-For (leftmost), then peer
+    if let Some(cf_ip) = req.headers().get("cf-connecting-ip") {
+        if let Ok(ip) = cf_ip.to_str() {
+            return ip.trim().to_string();
+        }
+    }
+    if let Some(xff) = req.headers().get("x-forwarded-for") {
+        if let Ok(val) = xff.to_str() {
+            if let Some(first) = val.split(',').next() {
+                return first.trim().to_string();
+            }
+        }
+    }
+    peer.map(|a| a.ip().to_string()).unwrap_or_else(|| "unknown".into())
+}
+
+impl RateLimit {
+    /// Check rate limit. Returns Ok(()) if allowed, or an error response if exceeded.
+    async fn check(&self, ip: &str, endpoint: &str, max_requests: u64, window_secs: u64) -> Result<(), Response> {
+        let mut conn = match self.redis {
+            Some(ref c) => c.clone(),
+            None => return Ok(()), // No Redis = no rate limiting
+        };
+
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let window = now / window_secs;
+        let key = format!("ratelimit:{ip}:{endpoint}:{window}");
+
+        let count: u64 = match conn.incr(&key, 1u64).await {
+            Ok(c) => c,
+            Err(_) => return Ok(()), // Redis error = fail open
+        };
+
+        // Set expiry on first increment
+        if count == 1 {
+            let _: redis::RedisResult<()> = conn.expire(&key, window_secs as i64).await;
+        }
+
+        if count > max_requests {
+            let retry_after = window_secs - (now % window_secs);
+            let body = RateLimitBody {
+                error: "Rate limit exceeded".into(),
+                retry_after,
+            };
+            return Err((
+                StatusCode::TOO_MANY_REQUESTS,
+                [(header::RETRY_AFTER, retry_after.to_string().parse::<HeaderValue>().unwrap())],
+                Json(body),
+            )
+                .into_response());
+        }
+
+        Ok(())
+    }
+}
+
+async fn rate_limit_tiles(
+    State(rl): State<RateLimit>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    req: Request<axum::body::Body>,
+    next: Next,
+) -> Response {
+    let ip = extract_client_ip(&req, Some(addr));
+    if let Err(resp) = rl.check(&ip, "post_tiles", 10, 60).await {
+        return resp;
+    }
+    next.run(req).await
+}
+
+async fn rate_limit_progress(
+    State(rl): State<RateLimit>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    req: Request<axum::body::Body>,
+    next: Next,
+) -> Response {
+    let ip = extract_client_ip(&req, Some(addr));
+    if let Err(resp) = rl.check(&ip, "progress", 60, 60).await {
+        return resp;
+    }
+    next.run(req).await
+}
+
+async fn rate_limit_download(
+    State(rl): State<RateLimit>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    req: Request<axum::body::Body>,
+    next: Next,
+) -> Response {
+    let ip = extract_client_ip(&req, Some(addr));
+    if let Err(resp) = rl.check(&ip, "download", 30, 60).await {
+        return resp;
+    }
+    next.run(req).await
+}
 
 // ---------------------------------------------------------------------------
 // Routes
@@ -425,9 +540,11 @@ async fn main() {
 
     let state = AppState {
         max_upload_bytes: config.max_upload_bytes,
-        redis,
+        redis: redis.clone(),
         storage_path: config.storage_path,
     };
+
+    let rate_limit = RateLimit { redis };
 
     let cors = match config.cors_origin {
         Some(ref origin) => {
@@ -447,10 +564,20 @@ async fn main() {
         .route("/health", get(health))
         .route(
             "/api/tiles",
-            post(process_tiles).layer(DefaultBodyLimit::max(config.max_upload_bytes)),
+            post(process_tiles)
+                .layer(DefaultBodyLimit::max(config.max_upload_bytes))
+                .layer(middleware::from_fn_with_state(rate_limit.clone(), rate_limit_tiles)),
         )
-        .route("/api/tiles/{job_id}/progress", get(job_progress))
-        .route("/api/tiles/{job_id}/download", get(job_download))
+        .route(
+            "/api/tiles/{job_id}/progress",
+            get(job_progress)
+                .layer(middleware::from_fn_with_state(rate_limit.clone(), rate_limit_progress)),
+        )
+        .route(
+            "/api/tiles/{job_id}/download",
+            get(job_download)
+                .layer(middleware::from_fn_with_state(rate_limit, rate_limit_download)),
+        )
         .layer(cors)
         .layer(TraceLayer::new_for_http())
         .with_state(state);
@@ -458,5 +585,7 @@ async fn main() {
     let addr = format!("0.0.0.0:{}", config.port);
     tracing::info!("listening on {addr}");
     let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
-    axum::serve(listener, app).await.unwrap();
+    axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
+        .await
+        .unwrap();
 }
