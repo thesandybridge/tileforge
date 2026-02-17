@@ -29,6 +29,7 @@ There's also a native CLI for batch processing and scripting.
 ## Features
 
 - **Browser-based** — drop an image, configure, download a ZIP of tiles. Zero server uploads.
+- **Server-side processing** — Pro users can offload processing to a native Rust API for larger images and higher zoom levels.
 - **Rust + WebAssembly** — native-speed image processing compiled to WASM via `wasm-pack`.
 - **Three processing strategies** — automatically selected based on image size:
   | Strategy | When | Memory |
@@ -37,7 +38,11 @@ There's also a native CLI for batch processing and scripting.
   | **Streaming PNG** | Large PNGs | Row-by-row decode, never holds full image |
   | **Strip extraction** | Large JPEG/WebP | Full decode, but no per-zoom resized copies |
 - **Flat and Mercator projections** — flat/equirectangular for fictional maps and artwork; Web Mercator (EPSG:3857) for real-world geographic maps from equirectangular sources.
-- **Interactive tile preview** — rendered with Leaflet directly from the in-memory ZIP, no file I/O.
+- **ZIP and PMTiles output** — download tiles as ZIP or as a single [PMTiles](https://protomaps.com/docs/pmtiles) archive for efficient web serving.
+- **Thumbnail generation** — worker auto-generates a 480px JPEG thumbnail for each tileset.
+- **Interactive tile preview** — rendered with Leaflet directly from the in-memory ZIP, no file I/O. Available on both the home page (after processing) and tileset detail pages.
+- **Tileset gallery** — browse public tilesets with thumbnail previews. Manage your own tilesets with rename, visibility toggle, and delete.
+- **GitHub OAuth** — sign in with GitHub. JWT-based auth shared between Next.js and the Rust API.
 - **Configurable** — tile size (128/256/512), min/max zoom, projection type.
 - **Pyramid builder** — lower zoom levels are built by merging 4 tiles into 1, cascading from max zoom down to zoom 0.
 - **CLI tool** — native binary for scripting and batch jobs.
@@ -51,30 +56,51 @@ There's also a native CLI for batch processing and scripting.
 tileforge/
 ├── Cargo.toml                   # Workspace root
 ├── crates/
-│   ├── core/src/
-│   │   ├── lib.rs               # Public API: TileConfig, Tiler, StreamingTiler, Projection
-│   │   ├── tiler.rs             # Naive tiler (full decode + resize per zoom)
-│   │   ├── streaming.rs         # Streaming tiler: row-by-row PNG, strip-based extraction, pyramid
-│   │   └── mercator.rs          # Web Mercator math (canvas ↔ source Y mapping)
-│   └── wasm/src/lib.rs          # wasm-bindgen wrapper
+│   ├── core/src/                # Tiling engine (Tiler, ZipTileWriter, PmTilesTileWriter)
+│   ├── api/src/main.rs          # HTTP API (axum) — tile processing, downloads, tileset CRUD
+│   ├── worker/src/main.rs       # Background worker — async jobs, thumbnail generation
+│   └── wasm/src/lib.rs          # WASM bindings for crates/core
 ├── cli/src/main.rs              # Native CLI binary
 └── web/                         # Next.js 16 + Tailwind v4 + shadcn/ui
     ├── app/
-    │   ├── layout.tsx           # Root layout, SEO metadata, JSON-LD
+    │   ├── layout.tsx           # Root layout, navbar, SEO metadata
     │   ├── page.tsx             # Main UI: drop zone, config, progress, download
-    │   ├── sitemap.ts           # Dynamic sitemap generation
-    │   └── robots.ts            # Robots.txt generation
+    │   ├── gallery/page.tsx     # Public tileset gallery with thumbnails
+    │   ├── my-tilesets/page.tsx # Authenticated user's tilesets
+    │   └── tilesets/[slug]/     # Tileset detail: metadata, Leaflet preview, code snippets
     ├── components/
-    │   └── tile-preview.tsx     # Leaflet-based in-memory tile viewer
+    │   ├── tile-preview.tsx     # Leaflet-based in-memory tile viewer
+    │   ├── navbar.tsx           # Site navigation with auth
+    │   └── user-menu.tsx        # GitHub OAuth sign in/out
     ├── lib/
-    │   ├── use-tileforge.ts     # React hook: worker lifecycle, progress, state machine
-    │   └── worker-protocol.ts   # TypeScript message types
+    │   ├── api.ts               # Tileset CRUD API client
+    │   └── use-tileforge.ts     # React hook: worker lifecycle, progress, state machine
     └── public/
         ├── tileforge.worker.js  # Standalone Web Worker (importScripts, no bundler)
         └── wasm/                # wasm-pack output (--target no-modules)
 ```
 
-### Why the Worker lives in `public/`
+### Services
+
+| Service  | Purpose                                          |
+|----------|--------------------------------------------------|
+| **web**  | Next.js 16 — UI, auth (Auth.js v5), SSR          |
+| **api**  | Rust (axum) — tile processing, downloads, CRUD    |
+| **worker** | Rust — async job consumer, thumbnail generation |
+| Redis    | Job queue (`tileforge:jobs`) + progress cache     |
+| Postgres | Users, tile sets                                  |
+| S3       | Tile storage (ZIP, PMTiles, thumbnails, uploads)  |
+
+### S3 Key Layout
+
+```
+uploads/{job_id}.bin              # Temporary upload (deleted after processing)
+tiles/{job_id}/tiles.zip          # ZIP output
+tiles/{job_id}/tiles.pmtiles      # PMTiles output
+tiles/{job_id}/thumbnail.jpg      # 480px JPEG thumbnail
+```
+
+### Why the WASM Worker lives in `public/`
 
 Turbopack cannot bundle WASM imports inside Web Workers. The worker and WASM glue are plain scripts in `public/`, loaded via `importScripts()`. The React hook creates the worker with `new Worker("/tileforge.worker.js")`.
 
@@ -117,6 +143,80 @@ npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000).
+
+#### Run the Rust API (for server-side processing)
+
+```bash
+cargo run --release --package tileforge-api
+```
+
+> **Important:** Always use `--release` — image processing is 10-100x slower in debug mode.
+
+#### Run the worker (for async job processing)
+
+```bash
+cargo run --release --package tileforge-worker
+```
+
+Requires Redis and S3 to be configured. See environment variables below.
+
+### Environment Variables
+
+#### Rust API (`crates/api`)
+
+| Variable          | Required | Default                | Description                       |
+|-------------------|----------|------------------------|-----------------------------------|
+| `PORT`            | No       | `8080`                 | HTTP listen port                  |
+| `MAX_UPLOAD_BYTES`| No       | `524288000` (500 MB)   | Max image upload size             |
+| `REDIS_URL`       | No       | —                      | Redis URL (enables async jobs)    |
+| `DATABASE_URL`    | No       | —                      | Postgres URL (enables tileset CRUD) |
+| `CORS_ORIGIN`     | No       | `*` (permissive)       | Allowed CORS origin               |
+| `JWT_SECRET`      | No       | —                      | Shared HS256 secret for JWT auth  |
+| `S3_ENDPOINT`     | No       | —                      | S3-compatible endpoint URL        |
+| `S3_BUCKET`       | No       | —                      | S3 bucket name                    |
+| `S3_ACCESS_KEY`   | No       | —                      | S3 access key                     |
+| `S3_SECRET_KEY`   | No       | —                      | S3 secret key                     |
+| `S3_REGION`       | No       | `us-east-1`            | S3 region                         |
+
+#### Worker (`crates/worker`)
+
+| Variable       | Required | Default                  | Description                  |
+|----------------|----------|--------------------------|------------------------------|
+| `REDIS_URL`    | No       | `redis://127.0.0.1:6379` | Redis URL                    |
+| `DATABASE_URL` | No       | —                        | Postgres (for tileset rows)  |
+| `S3_ENDPOINT`  | Yes      | —                        | S3-compatible endpoint URL   |
+| `S3_BUCKET`    | Yes      | —                        | S3 bucket name               |
+| `S3_ACCESS_KEY`| Yes      | —                        | S3 access key                |
+| `S3_SECRET_KEY`| Yes      | —                        | S3 secret key                |
+| `S3_REGION`    | No       | `us-east-1`              | S3 region                    |
+
+#### Next.js (`web/`)
+
+| Variable                | Required | Default                | Description                        |
+|-------------------------|----------|------------------------|------------------------------------|
+| `NEXT_PUBLIC_API_URL`   | No       | `http://localhost:8080` | Rust API URL (client-side)        |
+| `AUTH_SECRET`           | No       | —                      | NextAuth session encryption secret |
+| `AUTH_GITHUB_ID`        | No       | —                      | GitHub OAuth app client ID         |
+| `AUTH_GITHUB_SECRET`    | No       | —                      | GitHub OAuth app client secret     |
+| `JWT_SECRET`            | No       | —                      | Shared HS256 secret for API JWTs   |
+| `DATABASE_URL`          | No       | —                      | Postgres (for Auth.js user store)  |
+
+### API Endpoints
+
+| Method | Path                                | Auth     | Description                      |
+|--------|-------------------------------------|----------|----------------------------------|
+| GET    | `/health`                           | No       | Health check                     |
+| POST   | `/api/tiles`                        | Optional | Process image into tiles         |
+| GET    | `/api/tiles/{id}/progress`          | No       | SSE progress stream              |
+| GET    | `/api/tiles/{id}/download`          | No       | Download tiles as ZIP            |
+| GET    | `/api/tiles/{id}/download/pmtiles`  | No       | Download tiles as PMTiles        |
+| GET    | `/api/tiles/{id}/thumbnail`         | No       | Tileset thumbnail (JPEG)         |
+| GET    | `/api/tilesets`                     | Optional | List tilesets                    |
+| POST   | `/api/tilesets`                     | Required | Create tileset                   |
+| GET    | `/api/tilesets/{slug}`              | Optional | Get tileset details              |
+| PATCH  | `/api/tilesets/{slug}`              | Required | Update tileset                   |
+| DELETE | `/api/tilesets/{slug}`              | Required | Delete tileset + S3 cleanup      |
+| GET    | `/api/user`                         | Required | Current user info                |
 
 ---
 
@@ -235,13 +335,19 @@ A GitHub Actions workflow (`.github/workflows/wasm-build.yml`) automatically reb
 
 | Component | Technology |
 |---|---|
-| Core library | Rust (`image`, `png`, `zip`, `thiserror`) |
+| Core library | Rust (`image`, `png`, `zip`, `pmtiles`, `thiserror`) |
+| HTTP API | Rust + axum, tower-http |
+| Worker | Rust + redis, rust-s3, sqlx |
 | WASM bridge | `wasm-bindgen`, `js-sys`, `wasm-pack` |
 | CLI | Rust + `clap` |
 | Web framework | Next.js 16 (App Router, Turbopack) |
+| Auth | Auth.js v5 (GitHub OAuth), HS256 JWT |
 | Styling | Tailwind CSS v4 + shadcn/ui |
 | Map preview | Leaflet + react-leaflet |
 | ZIP (browser) | fflate |
+| Database | PostgreSQL + sqlx migrations |
+| Queue | Redis (BRPOP job queue) |
+| Storage | S3-compatible (Railway bucket / MinIO) |
 | CI | GitHub Actions |
 
 ---

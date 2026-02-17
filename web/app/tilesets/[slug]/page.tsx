@@ -1,12 +1,21 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
+import { useSession } from "next-auth/react";
 import Link from "next/link";
-import { ArrowLeft, Map, Globe, Grid3X3, Copy, Check } from "lucide-react";
-import { getTileSet, type TileSet } from "@/lib/api";
+import dynamic from "next/dynamic";
+import { ArrowLeft, Map, Globe, Grid3X3, Copy, Check, Eye, EyeOff, Trash2, Pencil, Loader2 } from "lucide-react";
+import { API_URL, getTileSet, updateTileSet, deleteTileSet, type TileSet } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+
+const TilePreview = dynamic(() => import("@/components/tile-preview"), {
+  ssr: false,
+  loading: () => (
+    <p className="text-muted-foreground mt-4 text-sm">Loading map preview...</p>
+  ),
+});
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -15,8 +24,27 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }
 
-function CodeBlock({ code, label }: { code: string; label: string }) {
+import type { Highlighter } from "shiki";
+
+let highlighterPromise: Promise<Highlighter> | null = null;
+function getHighlighter() {
+  if (!highlighterPromise) {
+    highlighterPromise = import("shiki").then((mod) =>
+      mod.createHighlighter({ themes: ["gruvbox-dark-medium"], langs: ["javascript", "typescript"] }),
+    );
+  }
+  return highlighterPromise;
+}
+
+function CodeBlock({ code, label, lang = "typescript" }: { code: string; label: string; lang?: string }) {
   const [copied, setCopied] = useState(false);
+  const [html, setHtml] = useState<string | null>(null);
+
+  useEffect(() => {
+    getHighlighter().then((highlighter) => {
+      setHtml(highlighter.codeToHtml(code, { lang, theme: "gruvbox-dark-medium" }));
+    });
+  }, [code, lang]);
 
   const onCopy = () => {
     navigator.clipboard.writeText(code);
@@ -38,57 +66,109 @@ function CodeBlock({ code, label }: { code: string; label: string }) {
           {copied ? "Copied" : "Copy"}
         </button>
       </div>
-      <pre className="bg-muted overflow-x-auto rounded-lg p-4 text-xs leading-relaxed">
-        <code>{code}</code>
-      </pre>
+      {html ? (
+        <div
+          className="overflow-x-auto rounded-lg text-xs [&_pre]:p-4 [&_pre]:leading-relaxed"
+          dangerouslySetInnerHTML={{ __html: html }}
+        />
+      ) : (
+        <pre className="bg-muted overflow-x-auto rounded-lg p-4 text-xs leading-relaxed">
+          <code>{code}</code>
+        </pre>
+      )}
     </div>
   );
 }
 
 export default function TileSetDetailPage() {
   const params = useParams<{ slug: string }>();
+  const router = useRouter();
+  const { data: session } = useSession();
   const [tileset, setTileset] = useState<TileSet | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const isOwner = !!(session?.user?.id && tileset?.user_id === session.user.id);
+  const backHref = isOwner || session?.user ? "/my-tilesets" : "/gallery";
+  const backLabel = isOwner || session?.user ? "My Tilesets" : "Gallery";
+
+  const [editing, setEditing] = useState(false);
+  const [editName, setEditName] = useState("");
+  const [previewBlob, setPreviewBlob] = useState<Blob | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+
+  const handleRename = async () => {
+    if (!tileset || !session?.accessToken) return;
+    const trimmed = editName.trim();
+    if (!trimmed || trimmed === tileset.name) {
+      setEditing(false);
+      return;
+    }
+    try {
+      const updated = await updateTileSet(tileset.slug, { name: trimmed }, session.accessToken);
+      setTileset(updated);
+      setEditing(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to rename");
+    }
+  };
+
+  const handleToggleVisibility = async () => {
+    if (!tileset || !session?.accessToken) return;
+    try {
+      const updated = await updateTileSet(tileset.slug, { public: !tileset.public }, session.accessToken);
+      setTileset(updated);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to update visibility");
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!tileset || !session?.accessToken) return;
+    if (!confirm("Delete this tileset? This cannot be undone.")) return;
+    try {
+      await deleteTileSet(tileset.slug, session.accessToken);
+      router.push("/my-tilesets");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to delete");
+    }
+  };
+
   useEffect(() => {
     if (!params.slug) return;
-    getTileSet(params.slug)
+    getTileSet(params.slug, session?.accessToken)
       .then(setTileset)
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
-  }, [params.slug]);
+  }, [params.slug, session?.accessToken]);
 
   if (loading) {
     return (
-      <div className="py-24">
-        <div className="mx-auto max-w-3xl px-6">
-          <p className="text-muted-foreground text-center text-sm">Loading tile set...</p>
-        </div>
+      <div className="mx-auto max-w-3xl px-6 py-24">
+        <p className="text-muted-foreground text-center text-sm">Loading tile set...</p>
       </div>
     );
   }
 
   if (error || !tileset) {
     return (
-      <div className="py-24">
-        <div className="mx-auto max-w-3xl px-6">
+      <div className="mx-auto max-w-3xl px-6 py-16">
+        <p className="text-destructive text-center">{error ?? "Tile set not found"}</p>
+        <div className="mt-4 text-center">
           <Link
-            href="/gallery"
-            className="text-muted-foreground hover:text-foreground mb-6 inline-flex items-center gap-1 text-sm transition-colors"
+            href={backHref}
+            className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 text-sm transition-colors"
           >
             <ArrowLeft className="h-4 w-4" />
-            Back to Gallery
+            {backLabel}
           </Link>
-          <p className="text-destructive mt-8 text-center">{error ?? "Tile set not found"}</p>
         </div>
       </div>
     );
   }
 
-  // PMTiles URL pattern — will resolve once CDN is configured
-  const pmtilesPath = `${tileset.storage_path}/tiles.pmtiles`;
-  const tileUrl = `https://tiles.tileforge.example.com/${pmtilesPath}`;
+  const origin = typeof window !== "undefined" ? window.location.origin : "";
+  const tileUrl = `${origin}/api/tiles/${tileset.slug}/download/pmtiles`;
 
   const leafletSnippet = `import "pmtiles";
 import * as protomapsL from "protomaps-leaflet";
@@ -120,20 +200,38 @@ const map = new maplibregl.Map({
 });`;
 
   return (
-    <div className="py-24">
-      <div className="mx-auto max-w-3xl px-6">
-        <Link
-          href="/gallery"
-          className="text-muted-foreground hover:text-foreground mb-6 inline-flex items-center gap-1 text-sm transition-colors"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          Back to Gallery
-        </Link>
-
-        <div className="mt-4 flex items-start gap-3">
+    <div className="mx-auto max-w-3xl px-6 py-10">
+        <div className="flex items-start gap-3">
           <Map className="text-primary mt-1 h-6 w-6 shrink-0" />
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight">{tileset.name}</h1>
+          <div className="min-w-0 flex-1">
+            {editing ? (
+              <div className="flex items-center gap-2">
+                <input
+                  autoFocus
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleRename();
+                    if (e.key === "Escape") setEditing(false);
+                  }}
+                  className="bg-transparent text-3xl font-bold tracking-tight outline-none border-b border-primary w-full"
+                />
+                <Button size="sm" onClick={handleRename}>Save</Button>
+                <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>Cancel</Button>
+              </div>
+            ) : (
+              <div className="group flex items-center gap-2">
+                <h1 className="text-3xl font-bold tracking-tight">{tileset.name}</h1>
+                {isOwner && (
+                  <button
+                    onClick={() => { setEditName(tileset.name); setEditing(true); }}
+                    className="text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 transition-opacity"
+                  >
+                    <Pencil className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
+            )}
             <p className="text-muted-foreground mt-1 text-sm">
               {tileset.slug}
             </p>
@@ -191,6 +289,48 @@ const map = new maplibregl.Map({
           </CardContent>
         </Card>
 
+        {/* Preview */}
+        <div className="mt-8">
+          <h2 className="text-lg font-semibold">Preview</h2>
+          {previewBlob ? (
+            <TilePreview
+              zipBlob={previewBlob}
+              imageWidth={tileset.tile_size * (1 << tileset.max_zoom)}
+              imageHeight={tileset.tile_size * (1 << tileset.max_zoom)}
+              maxZoom={tileset.max_zoom}
+              tileSize={tileset.tile_size}
+              projection={tileset.projection as "flat" | "mercator"}
+            />
+          ) : (
+            <Button
+              variant="secondary"
+              className="mt-3"
+              disabled={previewLoading}
+              onClick={async () => {
+                setPreviewLoading(true);
+                try {
+                  const res = await fetch(
+                    `${API_URL}/api/tiles/${encodeURIComponent(tileset.slug)}/download`,
+                  );
+                  if (!res.ok) throw new Error("Download failed");
+                  const blob = await res.blob();
+                  setPreviewBlob(blob);
+                } catch (e) {
+                  setError(e instanceof Error ? e.message : "Failed to load preview");
+                } finally {
+                  setPreviewLoading(false);
+                }
+              }}
+            >
+              {previewLoading ? (
+                <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Loading...</>
+              ) : (
+                <>Load Preview ({formatBytes(tileset.size_bytes)})</>
+              )}
+            </Button>
+          )}
+        </div>
+
         {/* Code snippets */}
         <div className="mt-8 space-y-6">
           <h2 className="text-lg font-semibold">Use this tile set</h2>
@@ -202,15 +342,22 @@ const map = new maplibregl.Map({
 
         {/* Actions */}
         <div className="mt-8 flex gap-3">
-          <Button variant="secondary" asChild>
-            <Link href="/gallery">Back to Gallery</Link>
-          </Button>
+          {isOwner && (
+            <>
+              <Button variant="secondary" onClick={handleToggleVisibility}>
+                {tileset.public ? (
+                  <><EyeOff className="mr-2 h-4 w-4" /> Make Private</>
+                ) : (
+                  <><Eye className="mr-2 h-4 w-4" /> Publish</>
+                )}
+              </Button>
+              <Button variant="destructive" onClick={handleDelete}>
+                <Trash2 className="mr-2 h-4 w-4" /> Delete
+              </Button>
+            </>
+          )}
         </div>
-      </div>
-
-      <footer className="text-muted-foreground mt-16 pb-8 text-center text-sm">
-        &copy; {new Date().getFullYear()} &mdash; made with &hearts; by sandybridge
-      </footer>
     </div>
   );
 }
+

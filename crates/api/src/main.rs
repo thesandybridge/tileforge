@@ -121,10 +121,17 @@ impl IntoResponse for ApiError {
 // JWT auth
 // ---------------------------------------------------------------------------
 
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+enum Plan {
+    Free,
+    Pro,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 struct UserClaims {
     sub: String,
-    plan: String,
+    plan: Plan,
     iat: Option<u64>,
     exp: Option<u64>,
 }
@@ -397,10 +404,12 @@ async fn process_tiles(
     let min_zoom = params.min_zoom;
     let max_zoom = params.max_zoom;
 
-    // Check if the image is large enough to require async processing
+    // Authenticated users (pro/server mode) always use async path;
+    // anonymous users only go async for large images.
+    let is_pro = claims.0.as_ref().is_some_and(|c| c.plan == Plan::Pro);
     let is_large = should_use_streaming(&body, STREAMING_THRESHOLD);
 
-    if is_large {
+    if is_pro || is_large {
         // Async path: enqueue to Redis, upload to S3
         let (mut redis, bucket) = match (&state.redis, &state.bucket) {
             (Some(r), Some(b)) => (r.clone(), b.clone()),
@@ -603,6 +612,32 @@ async fn job_download(
                 header::CONTENT_DISPOSITION,
                 "attachment; filename=\"tiles.zip\"",
             ),
+        ],
+        resp.to_vec(),
+    )
+        .into_response())
+}
+
+async fn job_thumbnail(
+    State(state): State<AppState>,
+    Path(job_id): Path<String>,
+) -> Result<Response, ApiError> {
+    let bucket = state
+        .bucket
+        .as_ref()
+        .ok_or_else(|| ApiError::ServiceUnavailable("S3 not configured".into()))?;
+
+    let s3_key = format!("tiles/{job_id}/thumbnail.jpg");
+    let resp = bucket
+        .get_object(&s3_key)
+        .await
+        .map_err(|_| ApiError::NotFound)?;
+
+    Ok((
+        StatusCode::OK,
+        [
+            (header::CONTENT_TYPE, HeaderValue::from_static("image/jpeg")),
+            (header::CACHE_CONTROL, HeaderValue::from_static("public, max-age=86400")),
         ],
         resp.to_vec(),
     )
@@ -861,6 +896,7 @@ async fn delete_tileset(
         let storage_path = &row.storage_path;
         let _ = bucket.delete_object(&format!("{storage_path}/tiles.zip")).await;
         let _ = bucket.delete_object(&format!("{storage_path}/tiles.pmtiles")).await;
+        let _ = bucket.delete_object(&format!("{storage_path}/thumbnail.jpg")).await;
         tracing::info!(slug = %slug, "deleted S3 objects for tileset");
     }
 
@@ -874,7 +910,7 @@ async fn delete_tileset(
 #[derive(Serialize)]
 struct UserResponse {
     id: String,
-    plan: String,
+    plan: Plan,
 }
 
 async fn get_current_user(Claims(user): Claims) -> Json<UserResponse> {
@@ -952,6 +988,7 @@ async fn main() {
     // Initialize S3 bucket if configured
     let bucket = s3::bucket_from_env();
     tracing::info!("S3: {}", if bucket.is_some() { "configured" } else { "not configured" });
+    tracing::info!("JWT: {}", if config.jwt_secret.is_some() { "configured" } else { "not configured (auth disabled)" });
 
     let state = AppState {
         max_upload_bytes: config.max_upload_bytes,
@@ -993,6 +1030,11 @@ async fn main() {
         .route(
             "/api/tiles/{job_id}/download",
             get(job_download)
+                .layer(middleware::from_fn_with_state(rate_limit.clone(), rate_limit_download)),
+        )
+        .route(
+            "/api/tiles/{job_id}/thumbnail",
+            get(job_thumbnail)
                 .layer(middleware::from_fn_with_state(rate_limit.clone(), rate_limit_download)),
         )
         .route(

@@ -1,10 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useSession } from "next-auth/react";
 import Link from "next/link";
-import { Map, Globe, Grid3X3, ImageIcon } from "lucide-react";
-import { API_URL, listTileSets, type TileSet } from "@/lib/api";
+import { Map, Globe, Grid3X3, Trash2, ImageIcon } from "lucide-react";
+import { API_URL, listTileSets, deleteTileSet, type TileSet } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -24,33 +26,47 @@ function timeAgo(dateStr: string): string {
   return new Date(dateStr).toLocaleDateString();
 }
 
-export default function GalleryPage() {
+export default function MyTilesetsPage() {
+  const { data: session } = useSession();
   const [tilesets, setTilesets] = useState<TileSet[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    listTileSets()
+    if (!session?.accessToken) return;
+    setLoading(true);
+    listTileSets(undefined, session.accessToken)
       .then(setTilesets)
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
-  }, []);
+  }, [session?.accessToken]);
+
+  const handleDelete = async (slug: string) => {
+    if (!session?.accessToken) return;
+    if (!confirm("Delete this tileset?")) return;
+    try {
+      await deleteTileSet(slug, session.accessToken);
+      setTilesets((prev) => prev.filter((ts) => ts.slug !== slug));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to delete");
+    }
+  };
 
   return (
     <div className="py-10">
       <header className="mx-auto max-w-4xl px-6">
         <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">
-          Public Tile Sets
+          My Tilesets
         </h1>
         <p className="text-muted-foreground mt-2">
-          Browse tile sets shared by the community.
+          Tilesets you&apos;ve created.
         </p>
       </header>
 
       <main className="mx-auto mt-10 max-w-4xl px-6">
         {loading && (
           <p className="text-muted-foreground text-center text-sm">
-            Loading tile sets...
+            Loading your tilesets...
           </p>
         )}
 
@@ -61,9 +77,9 @@ export default function GalleryPage() {
         {!loading && !error && tilesets.length === 0 && (
           <div className="text-muted-foreground py-16 text-center">
             <Map className="mx-auto mb-4 h-12 w-12 opacity-50" />
-            <p>No public tile sets yet.</p>
+            <p>No tilesets yet.</p>
             <p className="mt-1 text-sm">
-              Processed tile sets marked as public will appear here.
+              Process an image with server mode to create a tileset.
             </p>
           </div>
         )}
@@ -71,8 +87,8 @@ export default function GalleryPage() {
         {tilesets.length > 0 && (
           <div className="grid gap-4 sm:grid-cols-2">
             {tilesets.map((ts) => (
-              <Link key={ts.id} href={`/tilesets/${encodeURIComponent(ts.slug)}`}>
-                <Card className="border-border/50 hover:border-primary/30 overflow-hidden transition-colors">
+              <Card key={ts.id} className="border-border/50 group relative overflow-hidden">
+                <Link href={`/tilesets/${encodeURIComponent(ts.slug)}`}>
                   <div className="bg-muted/50 relative aspect-video">
                     <img
                       src={`${API_URL}/api/tiles/${encodeURIComponent(ts.slug)}/thumbnail`}
@@ -91,6 +107,11 @@ export default function GalleryPage() {
                     <CardTitle className="flex items-center gap-2">
                       <Map className="text-primary h-4 w-4" />
                       {ts.name}
+                      {ts.public && (
+                        <span className="bg-primary/10 text-primary rounded px-1.5 py-0.5 text-xs font-normal">
+                          public
+                        </span>
+                      )}
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
@@ -112,8 +133,19 @@ export default function GalleryPage() {
                       </p>
                     </div>
                   </CardContent>
-                </Card>
-              </Link>
+                </Link>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-muted-foreground hover:text-destructive absolute right-3 top-3 opacity-0 transition-opacity group-hover:opacity-100"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    handleDelete(ts.slug);
+                  }}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </Card>
             ))}
           </div>
         )}

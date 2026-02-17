@@ -6,6 +6,7 @@ import Link from "next/link";
 import dynamic from "next/dynamic";
 import { LoaderCircle, Upload } from "lucide-react";
 import { useTileforge } from "@/lib/use-tileforge";
+import { PLAN_PRO } from "@/lib/plans";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Card, CardContent } from "@/components/ui/card";
@@ -16,7 +17,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { UserMenu } from "@/components/user-menu";
 
 const TilePreview = dynamic(() => import("@/components/tile-preview"), {
   ssr: false,
@@ -151,10 +151,7 @@ export default function Home() {
   const showCard = useServer || status === "ready" || status === "done" || status === "error" || status === "processing" || status === "waking";
 
   return (
-    <div className="py-24">
-      <div className="absolute right-6 top-6">
-        <UserMenu />
-      </div>
+    <div className="py-16">
       {/* Hero */}
       <header className="mx-auto max-w-2xl px-6 text-center">
         <div className="inline-flex items-center gap-3">
@@ -251,21 +248,23 @@ export default function Home() {
               )}
 
               {/* Config */}
-              <div className="grid grid-cols-4 gap-4">
-                <div className="space-y-2">
-                  <label className="text-muted-foreground text-xs font-medium uppercase tracking-wider">
-                    Mode
-                  </label>
-                  <Select value={useServer ? "server" : "local"} onValueChange={(v) => setUseServer(v === "server")}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="local">Local WASM</SelectItem>
-                      <SelectItem value="server">Server</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+              <div className={`grid gap-4 ${session?.user?.plan === PLAN_PRO ? "grid-cols-4" : "grid-cols-3"}`}>
+                {session?.user?.plan === PLAN_PRO && (
+                  <div className="space-y-2">
+                    <label className="text-muted-foreground text-xs font-medium uppercase tracking-wider">
+                      Mode
+                    </label>
+                    <Select value={useServer ? "server" : "local"} onValueChange={(v) => setUseServer(v === "server")}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="local">Local WASM</SelectItem>
+                        <SelectItem value="server">Server</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
 
                 <div className="space-y-2">
                   <label className="text-muted-foreground text-xs font-medium uppercase tracking-wider">

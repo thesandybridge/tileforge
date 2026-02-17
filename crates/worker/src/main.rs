@@ -200,6 +200,28 @@ async fn process_job(
         .map_err(|e| format!("S3 download failed: {e}"))?;
     let image_bytes = resp.to_vec();
 
+    // Generate thumbnail (best-effort, don't fail the job)
+    match image::load_from_memory(&image_bytes) {
+        Ok(img) => {
+            let thumb = img.thumbnail(480, 480);
+            let mut jpeg_buf = Vec::new();
+            let mut cursor = Cursor::new(&mut jpeg_buf);
+            if let Ok(()) = thumb.write_to(&mut cursor, image::ImageFormat::Jpeg) {
+                match bucket
+                    .put_object(
+                        &format!("tiles/{}/thumbnail.jpg", job.job_id),
+                        &jpeg_buf,
+                    )
+                    .await
+                {
+                    Ok(_) => tracing::info!(job_id = %job.job_id, "thumbnail uploaded"),
+                    Err(e) => tracing::warn!(job_id = %job.job_id, "thumbnail upload failed: {e}"),
+                }
+            }
+        }
+        Err(e) => tracing::warn!(job_id = %job.job_id, "thumbnail decode failed: {e}"),
+    }
+
     let tile_size = job.tile_size.unwrap_or(256);
     let projection = match job.projection.as_deref() {
         Some("mercator") => Projection::Mercator,

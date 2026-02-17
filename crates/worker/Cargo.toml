@@ -14,4 +14,5 @@ sqlx = { version = "0.8", features = ["runtime-tokio", "tls-rustls", "postgres",
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 rust-s3 = { version = "=0.37.1", default-features = false, features = ["tokio-rustls-tls"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
 tempfile = "3"

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import { ThemeProvider } from "@/components/theme-provider";
 import { SessionProvider } from "@/components/session-provider";
+import { Navbar } from "@/components/navbar";
 import "./globals.css";
 
 const inter = Inter({ subsets: ["latin"] });
@@ -108,6 +109,7 @@ export default function RootLayout({
       <body className={`${inter.className} min-h-screen antialiased`}>
         <SessionProvider>
           <ThemeProvider attribute="class" defaultTheme="dark" enableSystem>
+            <Navbar />
             {children}
           </ThemeProvider>
         </SessionProvider>

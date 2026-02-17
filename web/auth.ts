@@ -2,6 +2,7 @@ import NextAuth from "next-auth";
 import { SignJWT } from "jose";
 import pool from "@/lib/db";
 import authConfig from "@/auth.config";
+import { PLAN_FREE } from "@/lib/plans";
 
 const jwtSecret = new TextEncoder().encode(process.env.JWT_SECRET);
 
@@ -40,7 +41,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       if (token.userId && jwtSecret.length > 0) {
         token.apiToken = await new SignJWT({
           sub: token.userId as string,
-          plan: (token.plan as string) ?? "free",
+          plan: (token.plan as string) ?? PLAN_FREE,
         })
           .setProtectedHeader({ alg: "HS256" })
           .setIssuedAt()
@@ -53,7 +54,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     async session({ session, token }) {
       if (token.userId) {
         session.user.id = token.userId as string;
-        session.user.plan = (token.plan as string) ?? "free";
+        session.user.plan = (token.plan as string) ?? PLAN_FREE;
         session.user.username = (token.username as string) ?? "";
         session.user.image = (token.avatarUrl as string) ?? null;
       }
