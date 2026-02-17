@@ -12,6 +12,8 @@ tower-http = { version = "0.6", features = ["cors", "trace"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 redis = { version = "0.27", features = ["aio", "tokio-comp"] }
-uuid = { version = "1", features = ["v4"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+sqlx = { version = "0.8", features = ["runtime-tokio", "tls-rustls", "postgres", "uuid", "migrate", "chrono"] }
+chrono = { version = "0.4", features = ["serde"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

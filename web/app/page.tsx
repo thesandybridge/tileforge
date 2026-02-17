@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
+import Link from "next/link";
 import dynamic from "next/dynamic";
 import { LoaderCircle, Upload } from "lucide-react";
 import { useTileforge } from "@/lib/use-tileforge";
@@ -389,6 +390,10 @@ export default function Home() {
       )}
       {/* Footer */}
       <footer className="text-muted-foreground mt-16 pb-8 text-center text-sm">
+        <Link href="/gallery" className="hover:text-foreground underline underline-offset-4 transition-colors">
+          Gallery
+        </Link>
+        <span className="mx-2">&middot;</span>
         &copy; {new Date().getFullYear()} &mdash; made with &hearts; by sandybridge
       </footer>
     </div>

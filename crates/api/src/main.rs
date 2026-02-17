@@ -12,6 +12,7 @@ use axum::{
 };
 use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
+use sqlx::PgPool;
 use std::io::Cursor;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -31,6 +32,7 @@ struct AppConfig {
     redis_url: Option<String>,
     storage_path: Option<PathBuf>,
     cors_origin: Option<String>,
+    database_url: Option<String>,
 }
 
 impl AppConfig {
@@ -47,6 +49,7 @@ impl AppConfig {
             redis_url: std::env::var("REDIS_URL").ok(),
             storage_path: std::env::var("STORAGE_PATH").ok().map(PathBuf::from),
             cors_origin: std::env::var("CORS_ORIGIN").ok(),
+            database_url: std::env::var("DATABASE_URL").ok(),
         }
     }
 }
@@ -60,6 +63,7 @@ struct AppState {
     max_upload_bytes: usize,
     redis: Option<redis::aio::MultiplexedConnection>,
     storage_path: Option<PathBuf>,
+    db: Option<PgPool>,
 }
 
 // ---------------------------------------------------------------------------
@@ -74,6 +78,8 @@ enum ApiError {
     Processing(String),
     NotFound,
     ServiceUnavailable(String),
+    Db(String),
+    Conflict(String),
 }
 
 #[derive(Serialize)]
@@ -96,6 +102,8 @@ impl IntoResponse for ApiError {
             ApiError::Processing(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg),
             ApiError::NotFound => (StatusCode::NOT_FOUND, "not found".into()),
             ApiError::ServiceUnavailable(msg) => (StatusCode::SERVICE_UNAVAILABLE, msg),
+            ApiError::Db(msg) => (StatusCode::INTERNAL_SERVER_ERROR, format!("database error: {msg}")),
+            ApiError::Conflict(msg) => (StatusCode::CONFLICT, msg),
         };
         (status, Json(ErrorBody { error: message })).into_response()
     }
@@ -495,6 +503,192 @@ async fn job_download(
 }
 
 // ---------------------------------------------------------------------------
+// Tile set CRUD
+// ---------------------------------------------------------------------------
+
+fn require_db(state: &AppState) -> Result<PgPool, ApiError> {
+    state
+        .db
+        .clone()
+        .ok_or_else(|| ApiError::ServiceUnavailable("database not configured".into()))
+}
+
+#[derive(Deserialize)]
+struct CreateTileSet {
+    name: String,
+    slug: String,
+    projection: Option<String>,
+    tile_size: Option<i32>,
+    min_zoom: Option<i32>,
+    max_zoom: i32,
+    tile_count: i32,
+    size_bytes: i64,
+    storage_path: String,
+    public: Option<bool>,
+    user_id: Uuid, // Will come from JWT in Phase 5
+}
+
+#[derive(Deserialize)]
+struct UpdateTileSet {
+    name: Option<String>,
+    public: Option<bool>,
+}
+
+#[derive(Serialize, sqlx::FromRow)]
+struct TileSetRow {
+    id: Uuid,
+    user_id: Uuid,
+    name: String,
+    slug: String,
+    projection: String,
+    tile_size: i32,
+    min_zoom: i32,
+    max_zoom: i32,
+    tile_count: i32,
+    size_bytes: i64,
+    storage_path: String,
+    public: bool,
+    created_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Deserialize)]
+struct ListTileSetsQuery {
+    user_id: Option<Uuid>,
+}
+
+async fn create_tileset(
+    State(state): State<AppState>,
+    Json(body): Json<CreateTileSet>,
+) -> Result<Response, ApiError> {
+    let db = require_db(&state)?;
+
+    let projection = body.projection.as_deref().unwrap_or("flat");
+    let tile_size = body.tile_size.unwrap_or(256);
+    let min_zoom = body.min_zoom.unwrap_or(0);
+    let public = body.public.unwrap_or(false);
+
+    let row = sqlx::query_as::<_, TileSetRow>(
+        "INSERT INTO tile_sets (user_id, name, slug, projection, tile_size, min_zoom, max_zoom, tile_count, size_bytes, storage_path, public)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+         RETURNING id, user_id, name, slug, projection, tile_size, min_zoom, max_zoom, tile_count, size_bytes, storage_path, public, created_at",
+    )
+    .bind(body.user_id)
+    .bind(&body.name)
+    .bind(&body.slug)
+    .bind(projection)
+    .bind(tile_size)
+    .bind(min_zoom)
+    .bind(body.max_zoom)
+    .bind(body.tile_count)
+    .bind(body.size_bytes)
+    .bind(&body.storage_path)
+    .bind(public)
+    .fetch_one(&db)
+    .await
+    .map_err(|e| {
+        if let sqlx::Error::Database(ref db_err) = e {
+            if db_err.constraint() == Some("tile_sets_user_id_slug_key") {
+                return ApiError::Conflict("a tile set with this slug already exists".into());
+            }
+        }
+        ApiError::Db(e.to_string())
+    })?;
+
+    Ok((StatusCode::CREATED, Json(row)).into_response())
+}
+
+async fn list_tilesets(
+    State(state): State<AppState>,
+    Query(params): Query<ListTileSetsQuery>,
+) -> Result<Json<Vec<TileSetRow>>, ApiError> {
+    let db = require_db(&state)?;
+
+    let rows = if let Some(user_id) = params.user_id {
+        sqlx::query_as::<_, TileSetRow>(
+            "SELECT id, user_id, name, slug, projection, tile_size, min_zoom, max_zoom, tile_count, size_bytes, storage_path, public, created_at
+             FROM tile_sets WHERE user_id = $1 ORDER BY created_at DESC",
+        )
+        .bind(user_id)
+        .fetch_all(&db)
+        .await
+        .map_err(|e| ApiError::Db(e.to_string()))?
+    } else {
+        sqlx::query_as::<_, TileSetRow>(
+            "SELECT id, user_id, name, slug, projection, tile_size, min_zoom, max_zoom, tile_count, size_bytes, storage_path, public, created_at
+             FROM tile_sets WHERE public = true ORDER BY created_at DESC",
+        )
+        .fetch_all(&db)
+        .await
+        .map_err(|e| ApiError::Db(e.to_string()))?
+    };
+
+    Ok(Json(rows))
+}
+
+async fn get_tileset(
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+) -> Result<Json<TileSetRow>, ApiError> {
+    let db = require_db(&state)?;
+
+    let row = sqlx::query_as::<_, TileSetRow>(
+        "SELECT id, user_id, name, slug, projection, tile_size, min_zoom, max_zoom, tile_count, size_bytes, storage_path, public, created_at
+         FROM tile_sets WHERE slug = $1",
+    )
+    .bind(&slug)
+    .fetch_optional(&db)
+    .await
+    .map_err(|e| ApiError::Db(e.to_string()))?
+    .ok_or(ApiError::NotFound)?;
+
+    Ok(Json(row))
+}
+
+async fn update_tileset(
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+    Json(body): Json<UpdateTileSet>,
+) -> Result<Json<TileSetRow>, ApiError> {
+    let db = require_db(&state)?;
+
+    let row = sqlx::query_as::<_, TileSetRow>(
+        "UPDATE tile_sets
+         SET name = COALESCE($1, name),
+             public = COALESCE($2, public)
+         WHERE slug = $3
+         RETURNING id, user_id, name, slug, projection, tile_size, min_zoom, max_zoom, tile_count, size_bytes, storage_path, public, created_at",
+    )
+    .bind(&body.name)
+    .bind(body.public)
+    .bind(&slug)
+    .fetch_optional(&db)
+    .await
+    .map_err(|e| ApiError::Db(e.to_string()))?
+    .ok_or(ApiError::NotFound)?;
+
+    Ok(Json(row))
+}
+
+async fn delete_tileset(
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    let db = require_db(&state)?;
+
+    let result = sqlx::query("DELETE FROM tile_sets WHERE slug = $1")
+        .bind(&slug)
+        .execute(&db)
+        .await
+        .map_err(|e| ApiError::Db(e.to_string()))?;
+
+    if result.rows_affected() == 0 {
+        return Err(ApiError::NotFound);
+    }
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
@@ -532,6 +726,33 @@ async fn main() {
         None
     };
 
+    // Connect to Postgres if configured
+    let db = if let Some(ref url) = config.database_url {
+        match sqlx::postgres::PgPoolOptions::new()
+            .max_connections(10)
+            .connect(url)
+            .await
+        {
+            Ok(pool) => {
+                tracing::info!("connected to Postgres");
+                if let Err(e) = sqlx::migrate!().run(&pool).await {
+                    tracing::error!("failed to run migrations: {e}");
+                    None
+                } else {
+                    tracing::info!("migrations applied");
+                    Some(pool)
+                }
+            }
+            Err(e) => {
+                tracing::warn!("failed to connect to Postgres: {e} — DB features disabled");
+                None
+            }
+        }
+    } else {
+        tracing::info!("DATABASE_URL not set — DB features disabled");
+        None
+    };
+
     // Ensure storage directories exist
     if let Some(ref path) = config.storage_path {
         tokio::fs::create_dir_all(path.join("uploads")).await.ok();
@@ -542,6 +763,7 @@ async fn main() {
         max_upload_bytes: config.max_upload_bytes,
         redis: redis.clone(),
         storage_path: config.storage_path,
+        db,
     };
 
     let rate_limit = RateLimit { redis };
@@ -551,7 +773,7 @@ async fn main() {
             tracing::info!("CORS origin: {origin}");
             CorsLayer::new()
                 .allow_origin(origin.parse::<HeaderValue>().expect("invalid CORS_ORIGIN"))
-                .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
+                .allow_methods([Method::GET, Method::POST, Method::PATCH, Method::DELETE, Method::OPTIONS])
                 .allow_headers([header::CONTENT_TYPE])
         }
         None => {
@@ -577,6 +799,11 @@ async fn main() {
             "/api/tiles/{job_id}/download",
             get(job_download)
                 .layer(middleware::from_fn_with_state(rate_limit, rate_limit_download)),
+        )
+        .route("/api/tilesets", post(create_tileset).get(list_tilesets))
+        .route(
+            "/api/tilesets/{slug}",
+            get(get_tileset).patch(update_tileset).delete(delete_tileset),
         )
         .layer(cors)
         .layer(TraceLayer::new_for_http())
