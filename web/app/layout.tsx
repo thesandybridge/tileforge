@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import { ThemeProvider } from "@/components/theme-provider";
+import { SessionProvider } from "@/components/session-provider";
 import "./globals.css";
 
 const inter = Inter({ subsets: ["latin"] });
@@ -105,9 +106,11 @@ export default function RootLayout({
         />
       </head>
       <body className={`${inter.className} min-h-screen antialiased`}>
-        <ThemeProvider attribute="class" defaultTheme="dark" enableSystem>
-          {children}
-        </ThemeProvider>
+        <SessionProvider>
+          <ThemeProvider attribute="class" defaultTheme="dark" enableSystem>
+            {children}
+          </ThemeProvider>
+        </SessionProvider>
       </body>
     </html>
   );

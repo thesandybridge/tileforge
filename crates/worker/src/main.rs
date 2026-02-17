@@ -2,6 +2,7 @@ mod s3;
 
 use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
+use sqlx::PgPool;
 use std::cell::Cell;
 use std::io::Cursor;
 use std::sync::{Arc, Mutex};
@@ -26,6 +27,7 @@ struct Job {
     min_zoom: Option<u32>,
     max_zoom: Option<u32>,
     projection: Option<String>,
+    user_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -52,6 +54,7 @@ struct ProgressUpdate {
 
 struct WorkerConfig {
     redis_url: String,
+    database_url: Option<String>,
 }
 
 impl WorkerConfig {
@@ -59,6 +62,7 @@ impl WorkerConfig {
         Self {
             redis_url: std::env::var("REDIS_URL")
                 .unwrap_or_else(|_| "redis://127.0.0.1:6379".into()),
+            database_url: std::env::var("DATABASE_URL").ok(),
         }
     }
 }
@@ -78,6 +82,27 @@ async fn main() {
 
     let config = WorkerConfig::from_env();
     let bucket = s3::bucket_from_env().expect("S3 env vars required (S3_ENDPOINT, S3_BUCKET, S3_ACCESS_KEY, S3_SECRET_KEY)");
+
+    // Connect to Postgres if configured (for tile_set row inserts)
+    let db = if let Some(ref url) = config.database_url {
+        match sqlx::postgres::PgPoolOptions::new()
+            .max_connections(3)
+            .connect(url)
+            .await
+        {
+            Ok(pool) => {
+                tracing::info!("connected to Postgres");
+                Some(pool)
+            }
+            Err(e) => {
+                tracing::warn!("failed to connect to Postgres: {e} — tile_set inserts disabled");
+                None
+            }
+        }
+    } else {
+        tracing::info!("DATABASE_URL not set — tile_set inserts disabled");
+        None
+    };
 
     tracing::info!("worker starting, redis={}", config.redis_url);
 
@@ -118,7 +143,7 @@ async fn main() {
 
         tracing::info!(job_id = %job.job_id, "processing job");
 
-        if let Err(e) = process_job(&job, &bucket, &mut conn).await {
+        if let Err(e) = process_job(&job, &bucket, &mut conn, db.as_ref()).await {
             tracing::error!(job_id = %job.job_id, "job failed: {e}");
             let progress = ProgressUpdate {
                 status: "failed".into(),
@@ -149,6 +174,7 @@ async fn process_job(
     job: &Job,
     bucket: &s3::Bucket,
     conn: &mut redis::aio::MultiplexedConnection,
+    db: Option<&PgPool>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let progress_key = format!("tileforge:progress:{}", job.job_id);
 
@@ -331,6 +357,51 @@ async fn process_job(
     };
     conn.set_ex::<_, _, ()>(&progress_key, serde_json::to_string(&final_progress)?, 3600u64)
         .await?;
+
+    // Insert tile_set row if we have a user_id and DB connection
+    if let (Some(user_id_str), Some(pool)) = (&job.user_id, db) {
+        if let Ok(user_id) = uuid::Uuid::parse_str(user_id_str) {
+            let tile_size_i32 = tile_size as i32;
+            let min_zoom_i32 = job.min_zoom.unwrap_or(0) as i32;
+            let max_zoom_i32 = job.max_zoom.unwrap_or(5) as i32;
+            let short_id = &job.job_id[..8.min(job.job_id.len())];
+            let name = format!("Tileset {short_id}");
+            let slug = &job.job_id;
+            let projection = job.projection.as_deref().unwrap_or("flat");
+            let storage_path = format!("tiles/{}", job.job_id);
+            let total_size = (zip_bytes.len() + pmtiles_bytes.len()) as i64;
+
+            // Calculate tile count from zoom levels
+            let mut tile_count: i32 = 0;
+            for z in min_zoom_i32..=max_zoom_i32 {
+                let grid = 1i32 << z;
+                tile_count += grid * grid;
+            }
+
+            let result = sqlx::query(
+                "INSERT INTO tile_sets (user_id, name, slug, projection, tile_size, min_zoom, max_zoom, tile_count, size_bytes, storage_path, public)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, false)
+                 ON CONFLICT (user_id, slug) DO NOTHING",
+            )
+            .bind(user_id)
+            .bind(&name)
+            .bind(slug)
+            .bind(projection)
+            .bind(tile_size_i32)
+            .bind(min_zoom_i32)
+            .bind(max_zoom_i32)
+            .bind(tile_count)
+            .bind(total_size)
+            .bind(&storage_path)
+            .execute(pool)
+            .await;
+
+            match result {
+                Ok(_) => tracing::info!(job_id = %job.job_id, "tile_set row inserted"),
+                Err(e) => tracing::warn!(job_id = %job.job_id, "failed to insert tile_set row: {e}"),
+            }
+        }
+    }
 
     // Cleanup: delete upload from S3
     bucket

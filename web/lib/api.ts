@@ -27,7 +27,6 @@ export interface CreateTileSetInput {
   size_bytes: number;
   storage_path: string;
   public?: boolean;
-  user_id: string;
 }
 
 export interface UpdateTileSetInput {
@@ -45,6 +44,12 @@ class ApiError extends Error {
   }
 }
 
+function authHeaders(token?: string): Record<string, string> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  return headers;
+}
+
 async function handleResponse<T>(res: Response): Promise<T> {
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: "Unknown error" }));
@@ -53,42 +58,61 @@ async function handleResponse<T>(res: Response): Promise<T> {
   return res.json();
 }
 
-export async function listTileSets(userId?: string): Promise<TileSet[]> {
+export async function listTileSets(userId?: string, token?: string): Promise<TileSet[]> {
   const params = new URLSearchParams();
   if (userId) params.set("user_id", userId);
-  const res = await fetch(`${API_URL}/api/tilesets?${params}`);
+  const headers: Record<string, string> = {};
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  const res = await fetch(`${API_URL}/api/tilesets?${params}`, { headers });
   return handleResponse<TileSet[]>(res);
 }
 
-export async function getTileSet(slug: string): Promise<TileSet> {
-  const res = await fetch(`${API_URL}/api/tilesets/${encodeURIComponent(slug)}`);
+export async function getTileSet(slug: string, token?: string): Promise<TileSet> {
+  const headers: Record<string, string> = {};
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  const res = await fetch(`${API_URL}/api/tilesets/${encodeURIComponent(slug)}`, { headers });
   return handleResponse<TileSet>(res);
 }
 
-export async function createTileSet(input: CreateTileSetInput): Promise<TileSet> {
+export async function createTileSet(input: CreateTileSetInput, token?: string): Promise<TileSet> {
   const res = await fetch(`${API_URL}/api/tilesets`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: authHeaders(token),
     body: JSON.stringify(input),
   });
   return handleResponse<TileSet>(res);
 }
 
-export async function updateTileSet(slug: string, input: UpdateTileSetInput): Promise<TileSet> {
+export async function updateTileSet(slug: string, input: UpdateTileSetInput, token?: string): Promise<TileSet> {
   const res = await fetch(`${API_URL}/api/tilesets/${encodeURIComponent(slug)}`, {
     method: "PATCH",
-    headers: { "Content-Type": "application/json" },
+    headers: authHeaders(token),
     body: JSON.stringify(input),
   });
   return handleResponse<TileSet>(res);
 }
 
-export async function deleteTileSet(slug: string): Promise<void> {
+export async function deleteTileSet(slug: string, token?: string): Promise<void> {
+  const headers: Record<string, string> = {};
+  if (token) headers["Authorization"] = `Bearer ${token}`;
   const res = await fetch(`${API_URL}/api/tilesets/${encodeURIComponent(slug)}`, {
     method: "DELETE",
+    headers,
   });
   if (!res.ok && res.status !== 204) {
     const body = await res.json().catch(() => ({ error: "Unknown error" }));
     throw new ApiError(res.status, body.error ?? `HTTP ${res.status}`);
   }
+}
+
+export interface CurrentUser {
+  id: string;
+  plan: string;
+}
+
+export async function getCurrentUser(token: string): Promise<CurrentUser> {
+  const res = await fetch(`${API_URL}/api/user`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return handleResponse<CurrentUser>(res);
 }

@@ -2,7 +2,7 @@ mod s3;
 
 use axum::{
     body::Bytes,
-    extract::{ConnectInfo, DefaultBodyLimit, Path, Query, State},
+    extract::{ConnectInfo, DefaultBodyLimit, FromRequestParts, Path, Query, State},
     http::{header, HeaderValue, Method, Request, StatusCode},
     middleware::{self, Next},
     response::{
@@ -12,6 +12,7 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
+use jsonwebtoken::{decode, DecodingKey, Validation, Algorithm};
 use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
@@ -33,6 +34,7 @@ struct AppConfig {
     redis_url: Option<String>,
     cors_origin: Option<String>,
     database_url: Option<String>,
+    jwt_secret: Option<String>,
 }
 
 impl AppConfig {
@@ -49,6 +51,7 @@ impl AppConfig {
             redis_url: std::env::var("REDIS_URL").ok(),
             cors_origin: std::env::var("CORS_ORIGIN").ok(),
             database_url: std::env::var("DATABASE_URL").ok(),
+            jwt_secret: std::env::var("JWT_SECRET").ok(),
         }
     }
 }
@@ -63,6 +66,7 @@ struct AppState {
     redis: Option<redis::aio::MultiplexedConnection>,
     bucket: Option<Arc<s3::Bucket>>,
     db: Option<PgPool>,
+    jwt_secret: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -76,6 +80,9 @@ enum ApiError {
     InvalidField(String),
     Processing(String),
     NotFound,
+    Unauthorized,
+    #[allow(dead_code)]
+    Forbidden,
     ServiceUnavailable(String),
     Db(String),
     Conflict(String),
@@ -100,11 +107,86 @@ impl IntoResponse for ApiError {
             ApiError::InvalidField(msg) => (StatusCode::BAD_REQUEST, msg),
             ApiError::Processing(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg),
             ApiError::NotFound => (StatusCode::NOT_FOUND, "not found".into()),
+            ApiError::Unauthorized => (StatusCode::UNAUTHORIZED, "authentication required".into()),
+            ApiError::Forbidden => (StatusCode::FORBIDDEN, "forbidden".into()),
             ApiError::ServiceUnavailable(msg) => (StatusCode::SERVICE_UNAVAILABLE, msg),
             ApiError::Db(msg) => (StatusCode::INTERNAL_SERVER_ERROR, format!("database error: {msg}")),
             ApiError::Conflict(msg) => (StatusCode::CONFLICT, msg),
         };
         (status, Json(ErrorBody { error: message })).into_response()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// JWT auth
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct UserClaims {
+    sub: String,
+    plan: String,
+    iat: Option<u64>,
+    exp: Option<u64>,
+}
+
+/// Middleware: extract Bearer token, validate JWT, inject UserClaims into extensions.
+/// No-op if no token or JWT_SECRET is not configured.
+async fn optional_auth(
+    State(state): State<AppState>,
+    mut req: Request<axum::body::Body>,
+    next: Next,
+) -> Response {
+    if let Some(ref secret) = state.jwt_secret {
+        if let Some(auth_header) = req.headers().get(header::AUTHORIZATION) {
+            if let Ok(val) = auth_header.to_str() {
+                if let Some(token) = val.strip_prefix("Bearer ") {
+                    let key = DecodingKey::from_secret(secret.as_bytes());
+                    let mut validation = Validation::new(Algorithm::HS256);
+                    validation.set_required_spec_claims(&["sub", "exp"]);
+                    if let Ok(data) = decode::<UserClaims>(token, &key, &validation) {
+                        req.extensions_mut().insert(data.claims);
+                    }
+                }
+            }
+        }
+    }
+    next.run(req).await
+}
+
+/// Extractor: requires authenticated user (401 if absent).
+struct Claims(UserClaims);
+
+impl<S: Send + Sync> FromRequestParts<S> for Claims {
+    type Rejection = ApiError;
+
+    fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        _state: &S,
+    ) -> impl std::future::Future<Output = Result<Self, Self::Rejection>> + Send {
+        async move {
+            parts
+                .extensions
+                .get::<UserClaims>()
+                .cloned()
+                .map(Claims)
+                .ok_or(ApiError::Unauthorized)
+        }
+    }
+}
+
+/// Extractor: optionally authenticated user (None if absent).
+struct OptionalClaims(Option<UserClaims>);
+
+impl<S: Send + Sync> FromRequestParts<S> for OptionalClaims {
+    type Rejection = ApiError;
+
+    fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        _state: &S,
+    ) -> impl std::future::Future<Output = Result<Self, Self::Rejection>> + Send {
+        async move {
+            Ok(OptionalClaims(parts.extensions.get::<UserClaims>().cloned()))
+        }
     }
 }
 
@@ -131,6 +213,8 @@ struct JobPayload {
     min_zoom: Option<u32>,
     max_zoom: Option<u32>,
     projection: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    user_id: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -279,6 +363,7 @@ async fn health() -> &'static str {
 
 async fn process_tiles(
     State(state): State<AppState>,
+    claims: OptionalClaims,
     Query(params): Query<TileParams>,
     body: Bytes,
 ) -> Result<Response, ApiError> {
@@ -359,6 +444,7 @@ async fn process_tiles(
             min_zoom,
             max_zoom,
             projection: projection_str.to_string(),
+            user_id: claims.0.as_ref().map(|c| c.sub.clone()),
         };
         let _: redis::RedisResult<()> = redis
             .lpush("tileforge:jobs", serde_json::to_string(&job).unwrap())
@@ -575,7 +661,6 @@ struct CreateTileSet {
     size_bytes: i64,
     storage_path: String,
     public: Option<bool>,
-    user_id: Uuid, // Will come from JWT in Phase 5
 }
 
 #[derive(Deserialize)]
@@ -608,9 +693,11 @@ struct ListTileSetsQuery {
 
 async fn create_tileset(
     State(state): State<AppState>,
+    Claims(user): Claims,
     Json(body): Json<CreateTileSet>,
 ) -> Result<Response, ApiError> {
     let db = require_db(&state)?;
+    let user_id = Uuid::parse_str(&user.sub).map_err(|_| ApiError::Unauthorized)?;
 
     let projection = body.projection.as_deref().unwrap_or("flat");
     let tile_size = body.tile_size.unwrap_or(256);
@@ -622,7 +709,7 @@ async fn create_tileset(
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
          RETURNING id, user_id, name, slug, projection, tile_size, min_zoom, max_zoom, tile_count, size_bytes, storage_path, public, created_at",
     )
-    .bind(body.user_id)
+    .bind(user_id)
     .bind(&body.name)
     .bind(&body.slug)
     .bind(projection)
@@ -649,11 +736,17 @@ async fn create_tileset(
 
 async fn list_tilesets(
     State(state): State<AppState>,
+    claims: OptionalClaims,
     Query(params): Query<ListTileSetsQuery>,
 ) -> Result<Json<Vec<TileSetRow>>, ApiError> {
     let db = require_db(&state)?;
 
-    let rows = if let Some(user_id) = params.user_id {
+    // If authenticated and no explicit user_id filter, show the caller's tilesets
+    let user_id = params
+        .user_id
+        .or_else(|| claims.0.as_ref().and_then(|c| Uuid::parse_str(&c.sub).ok()));
+
+    let rows = if let Some(user_id) = user_id {
         sqlx::query_as::<_, TileSetRow>(
             "SELECT id, user_id, name, slug, projection, tile_size, min_zoom, max_zoom, tile_count, size_bytes, storage_path, public, created_at
              FROM tile_sets WHERE user_id = $1 ORDER BY created_at DESC",
@@ -677,6 +770,7 @@ async fn list_tilesets(
 
 async fn get_tileset(
     State(state): State<AppState>,
+    claims: OptionalClaims,
     Path(slug): Path<String>,
 ) -> Result<Json<TileSetRow>, ApiError> {
     let db = require_db(&state)?;
@@ -691,26 +785,42 @@ async fn get_tileset(
     .map_err(|e| ApiError::Db(e.to_string()))?
     .ok_or(ApiError::NotFound)?;
 
+    // Private tilesets are only visible to their owner
+    if !row.public {
+        let is_owner = claims
+            .0
+            .as_ref()
+            .and_then(|c| Uuid::parse_str(&c.sub).ok())
+            .map(|uid| uid == row.user_id)
+            .unwrap_or(false);
+        if !is_owner {
+            return Err(ApiError::NotFound);
+        }
+    }
+
     Ok(Json(row))
 }
 
 async fn update_tileset(
     State(state): State<AppState>,
+    Claims(user): Claims,
     Path(slug): Path<String>,
     Json(body): Json<UpdateTileSet>,
 ) -> Result<Json<TileSetRow>, ApiError> {
     let db = require_db(&state)?;
+    let user_id = Uuid::parse_str(&user.sub).map_err(|_| ApiError::Unauthorized)?;
 
     let row = sqlx::query_as::<_, TileSetRow>(
         "UPDATE tile_sets
          SET name = COALESCE($1, name),
              public = COALESCE($2, public)
-         WHERE slug = $3
+         WHERE slug = $3 AND user_id = $4
          RETURNING id, user_id, name, slug, projection, tile_size, min_zoom, max_zoom, tile_count, size_bytes, storage_path, public, created_at",
     )
     .bind(&body.name)
     .bind(body.public)
     .bind(&slug)
+    .bind(user_id)
     .fetch_optional(&db)
     .await
     .map_err(|e| ApiError::Db(e.to_string()))?
@@ -721,23 +831,27 @@ async fn update_tileset(
 
 async fn delete_tileset(
     State(state): State<AppState>,
+    Claims(user): Claims,
     Path(slug): Path<String>,
 ) -> Result<StatusCode, ApiError> {
     let db = require_db(&state)?;
+    let user_id = Uuid::parse_str(&user.sub).map_err(|_| ApiError::Unauthorized)?;
 
     // Fetch the tileset first so we can get its storage_path for S3 cleanup
     let row = sqlx::query_as::<_, TileSetRow>(
         "SELECT id, user_id, name, slug, projection, tile_size, min_zoom, max_zoom, tile_count, size_bytes, storage_path, public, created_at
-         FROM tile_sets WHERE slug = $1",
+         FROM tile_sets WHERE slug = $1 AND user_id = $2",
     )
     .bind(&slug)
+    .bind(user_id)
     .fetch_optional(&db)
     .await
     .map_err(|e| ApiError::Db(e.to_string()))?
     .ok_or(ApiError::NotFound)?;
 
-    sqlx::query("DELETE FROM tile_sets WHERE slug = $1")
+    sqlx::query("DELETE FROM tile_sets WHERE slug = $1 AND user_id = $2")
         .bind(&slug)
+        .bind(user_id)
         .execute(&db)
         .await
         .map_err(|e| ApiError::Db(e.to_string()))?;
@@ -751,6 +865,23 @@ async fn delete_tileset(
     }
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+// ---------------------------------------------------------------------------
+// Current user
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize)]
+struct UserResponse {
+    id: String,
+    plan: String,
+}
+
+async fn get_current_user(Claims(user): Claims) -> Json<UserResponse> {
+    Json(UserResponse {
+        id: user.sub,
+        plan: user.plan,
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -827,6 +958,7 @@ async fn main() {
         redis: redis.clone(),
         bucket: bucket.map(Arc::from),
         db,
+        jwt_secret: config.jwt_secret,
     };
 
     let rate_limit = RateLimit { redis };
@@ -837,7 +969,7 @@ async fn main() {
             CorsLayer::new()
                 .allow_origin(origin.parse::<HeaderValue>().expect("invalid CORS_ORIGIN"))
                 .allow_methods([Method::GET, Method::POST, Method::PATCH, Method::DELETE, Method::OPTIONS])
-                .allow_headers([header::CONTENT_TYPE])
+                .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION])
         }
         None => {
             tracing::info!("CORS_ORIGIN not set — allowing all origins");
@@ -868,11 +1000,13 @@ async fn main() {
             get(job_download_pmtiles)
                 .layer(middleware::from_fn_with_state(rate_limit, rate_limit_download)),
         )
+        .route("/api/user", get(get_current_user))
         .route("/api/tilesets", post(create_tileset).get(list_tilesets))
         .route(
             "/api/tilesets/{slug}",
             get(get_tileset).patch(update_tileset).delete(delete_tileset),
         )
+        .layer(middleware::from_fn_with_state(state.clone(), optional_auth))
         .layer(cors)
         .layer(TraceLayer::new_for_http())
         .with_state(state);

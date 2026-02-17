@@ -1,0 +1,34 @@
+import NextAuth from "next-auth";
+import authConfig from "@/auth.config";
+
+const { auth } = NextAuth(authConfig);
+import { NextResponse } from "next/server";
+
+const publicPaths = ["/", "/gallery", "/api/auth"];
+
+function isPublic(pathname: string): boolean {
+  if (publicPaths.includes(pathname)) return true;
+  if (pathname.startsWith("/tilesets/")) return true;
+  if (pathname.startsWith("/api/auth/")) return true;
+  return false;
+}
+
+export default auth((req) => {
+  const { pathname } = req.nextUrl;
+
+  // Allow public routes, static assets, and images
+  if (isPublic(pathname)) return NextResponse.next();
+
+  // Require auth for protected routes (e.g. /my-tilesets)
+  if (!req.auth) {
+    const signInUrl = new URL("/api/auth/signin", req.url);
+    signInUrl.searchParams.set("callbackUrl", req.url);
+    return NextResponse.redirect(signInUrl);
+  }
+
+  return NextResponse.next();
+});
+
+export const config = {
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|icon.svg|wasm/|tileforge\\.worker\\.js).*)"],
+};

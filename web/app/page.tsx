@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
+import { useSession } from "next-auth/react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { LoaderCircle, Upload } from "lucide-react";
@@ -15,6 +16,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { UserMenu } from "@/components/user-menu";
 
 const TilePreview = dynamic(() => import("@/components/tile-preview"), {
   ssr: false,
@@ -61,6 +63,7 @@ function calcTotalTiles(minZoom: number, maxZoom: number): number {
 
 export default function Home() {
   const { status, progress, zipBlob, pmtilesUrl, error, durationMs, process, processServer, reset } = useTileforge();
+  const { data: session } = useSession();
   const [useServer, setUseServer] = useState(false);
   const [fileName, setFileName] = useState<string | null>(null);
   const [imageInfo, setImageInfo] = useState<ImageInfo | null>(null);
@@ -107,13 +110,12 @@ export default function Home() {
   const onProcess = useCallback(() => {
     if (!fileRef.current) return;
     const copy = fileRef.current.slice(0);
-    const opts = { tileSize: ts, maxZoom: mz, projection };
     if (useServer) {
-      processServer(copy, opts);
+      processServer(copy, { tileSize: ts, maxZoom: mz, projection, token: session?.accessToken });
     } else {
-      process(copy, opts);
+      process(copy, { tileSize: ts, maxZoom: mz, projection });
     }
-  }, [process, processServer, ts, mz, projection, useServer]);
+  }, [process, processServer, ts, mz, projection, useServer, session?.accessToken]);
 
   const onDownload = useCallback(() => {
     if (!zipBlob) return;
@@ -150,6 +152,9 @@ export default function Home() {
 
   return (
     <div className="py-24">
+      <div className="absolute right-6 top-6">
+        <UserMenu />
+      </div>
       {/* Hero */}
       <header className="mx-auto max-w-2xl px-6 text-center">
         <div className="inline-flex items-center gap-3">

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Map, ArrowLeft, Globe, Grid3X3 } from "lucide-react";
 import { listTileSets, type TileSet } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { UserMenu } from "@/components/user-menu";
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -38,6 +39,9 @@ export default function GalleryPage() {
 
   return (
     <div className="py-24">
+      <div className="absolute right-6 top-6">
+        <UserMenu />
+      </div>
       <header className="mx-auto max-w-4xl px-6">
         <Link
           href="/"

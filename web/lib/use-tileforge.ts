@@ -128,6 +128,7 @@ export function useTileforge() {
         minZoom?: number;
         maxZoom?: number;
         projection?: "flat" | "mercator";
+        token?: string;
       } = {},
     ) => {
       startTimeRef.current = performance.now();
@@ -155,9 +156,11 @@ export function useTileforge() {
       if (opts.projection) params.set("projection", opts.projection);
 
       try {
+        const headers: Record<string, string> = { "content-type": "application/octet-stream" };
+        if (opts.token) headers["authorization"] = `Bearer ${opts.token}`;
         const res = await fetch(`${API_URL}/api/tiles?${params}`, {
           method: "POST",
-          headers: { "content-type": "application/octet-stream" },
+          headers,
           body: imageBytes,
         });
 
