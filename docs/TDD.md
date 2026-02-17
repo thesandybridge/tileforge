@@ -199,13 +199,14 @@ crates/worker/
 
 - [ ] Provision Railway Redis
 - [ ] Shared Railway volume mounted to both `api` and `worker`
-- [ ] Scaffold `crates/worker` with BRPOP loop
-- [ ] API: upload image to volume, enqueue job
-- [ ] API: SSE progress endpoint reads from Redis
-- [ ] API: download endpoint serves ZIP from volume
-- [ ] Worker: consume job, process, write output, update progress
-- [ ] Async threshold logic: use decoded dimension estimate (`w * h * 4`), not raw file size — a 50MB JPEG can decode to a much larger bitmap than a 50MB PNG. Reuse the same `STREAMING_THRESHOLD` (256MB decoded) logic from `crates/core`
-- [ ] Job TTL / cleanup for expired results
+- [x] Scaffold `crates/worker` with BRPOP loop
+- [x] API: upload image to volume, enqueue job
+- [x] API: SSE progress endpoint reads from Redis
+- [x] API: download endpoint serves ZIP from volume
+- [x] Worker: consume job, process, write output, update progress
+- [x] Async threshold logic: use decoded dimension estimate (`w * h * 4`), not raw file size — a 50MB JPEG can decode to a much larger bitmap than a 50MB PNG. Reuse the same `STREAMING_THRESHOLD` (256MB decoded) logic from `crates/core`
+- [x] Job TTL / cleanup for expired results
+- [x] Stale job detection: `last_updated` timestamp, API returns failed if >5min stale
 - [ ] Integration test: submit large job, poll progress, download result
 
 ---
@@ -506,6 +507,7 @@ restartPolicyMaxRetries = 5
 | 3 | CDN | **Cloudflare on day one.** Already on CF for DNS, tiles are immutable, cache headers mean near-zero origin traffic after warmup. |
 | 4 | JWT strategy | **Auth.js configured for signed JWTs (JWS, HS256)** with shared `JWT_SECRET`. NOT the default JWE. Both Next.js and Rust `jsonwebtoken` crate verify the same token. |
 | 5 | Async threshold | **Dimension-based**, not file size. Reuse `STREAMING_THRESHOLD` logic (`w * h * 4 > 256MB`). A small JPEG can decode to a huge bitmap. |
+| 6 | Stale job detection | **Timestamp-based.** `last_updated` in progress JSON; SSE endpoint returns `failed` if no progress update for 5 minutes. Simple MVP approach — no need for `BRPOPLPUSH` recovery queue yet. |
 
 ## Open Questions
 

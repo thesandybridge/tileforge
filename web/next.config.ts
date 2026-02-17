@@ -14,6 +14,14 @@ const nextConfig: NextConfig = {
         destination: `${API_URL}/api/tiles`,
       },
       {
+        source: "/api/tiles/:job_id/progress",
+        destination: `${API_URL}/api/tiles/:job_id/progress`,
+      },
+      {
+        source: "/api/tiles/:job_id/download",
+        destination: `${API_URL}/api/tiles/:job_id/download`,
+      },
+      {
         source: "/api/health",
         destination: `${API_URL}/health`,
       },

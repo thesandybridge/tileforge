@@ -64,6 +64,8 @@ export function useTileforge() {
     return () => {
       worker.terminate();
       workerRef.current = null;
+      sseRef.current?.close();
+      sseRef.current = null;
     };
   }, []);
 
@@ -98,6 +100,8 @@ export function useTileforge() {
     [],
   );
 
+  const sseRef = useRef<EventSource | null>(null);
+
   const processServer = useCallback(
     async (
       imageBytes: ArrayBuffer,
@@ -128,13 +132,81 @@ export function useTileforge() {
           body: imageBytes,
         });
 
-        if (!res.ok) {
+        if (!res.ok && res.status !== 202) {
           const body = await res.json().catch(() => ({ error: "Server error" }));
           setError(body.error ?? `Server error (${res.status})`);
           setStatus("error");
           return;
         }
 
+        if (res.status === 202) {
+          // Async path: open SSE for progress
+          const { job_id } = (await res.json()) as { job_id: string };
+
+          // Close any existing SSE connection
+          sseRef.current?.close();
+
+          const sse = new EventSource(`/api/tiles/${job_id}/progress`);
+          sseRef.current = sse;
+
+          sse.onmessage = async (e) => {
+            try {
+              const data = JSON.parse(e.data) as {
+                status: string;
+                zoom?: number;
+                tiles_done?: number;
+                tiles_total?: number;
+                download_url?: string;
+                error?: string;
+              };
+
+              if (data.status === "processing" && data.tiles_done != null && data.tiles_total != null) {
+                setProgress({
+                  tilesDone: data.tiles_done,
+                  tilesTotal: data.tiles_total,
+                  zoom: data.zoom ?? 0,
+                  percent: data.tiles_total > 0 ? (data.tiles_done / data.tiles_total) * 100 : 0,
+                });
+              } else if (data.status === "complete" && data.download_url) {
+                sse.close();
+                sseRef.current = null;
+                try {
+                  const dlRes = await fetch(data.download_url);
+                  if (!dlRes.ok) throw new Error(`Download failed (${dlRes.status})`);
+                  const buf = await dlRes.arrayBuffer();
+                  setZipBlob(new Blob([buf], { type: "application/zip" }));
+                  setDurationMs(performance.now() - startTimeRef.current);
+                  setStatus("done");
+                  setProgress(null);
+                } catch (dlErr) {
+                  setError(dlErr instanceof Error ? dlErr.message : "Download failed");
+                  setStatus("error");
+                  setProgress(null);
+                }
+              } else if (data.status === "failed") {
+                sse.close();
+                sseRef.current = null;
+                setError(data.error ?? "Processing failed");
+                setStatus("error");
+                setProgress(null);
+              }
+            } catch {
+              // Ignore parse errors
+            }
+          };
+
+          sse.onerror = () => {
+            sse.close();
+            sseRef.current = null;
+            setError("Lost connection to server");
+            setStatus("error");
+            setProgress(null);
+          };
+
+          return;
+        }
+
+        // Sync path (200): direct ZIP response
         const buf = await res.arrayBuffer();
         setZipBlob(new Blob([buf], { type: "application/zip" }));
         setDurationMs(performance.now() - startTimeRef.current);

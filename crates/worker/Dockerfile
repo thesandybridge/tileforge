@@ -18,22 +18,21 @@ RUN mkdir -p crates/core/src && echo "" > crates/core/src/lib.rs \
     && mkdir -p cli/src && echo "fn main() {}" > cli/src/main.rs
 
 # Build deps only (cached unless Cargo.toml changes)
-RUN cargo build --release --package tileforge-api 2>/dev/null || true
+RUN cargo build --release --package tileforge-worker 2>/dev/null || true
 
-# Copy real source for core + api only
+# Copy real source for core + worker only
 COPY crates/core/ crates/core/
-COPY crates/api/ crates/api/
+COPY crates/worker/ crates/worker/
 
 # Touch to invalidate cached build artifacts for our crates
-RUN touch crates/core/src/lib.rs crates/api/src/main.rs
+RUN touch crates/core/src/lib.rs crates/worker/src/main.rs
 
-RUN cargo build --release --package tileforge-api
+RUN cargo build --release --package tileforge-worker
 
 # Runtime stage
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/*
-COPY --from=builder /app/target/release/tileforge-api /usr/local/bin/tileforge-api
+COPY --from=builder /app/target/release/tileforge-worker /usr/local/bin/tileforge-worker
 
-EXPOSE 8080
-CMD ["tileforge-api"]
+CMD ["tileforge-worker"]
