@@ -2,9 +2,12 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useSession } from "next-auth/react";
 import { Map, Globe, Grid3X3, ImageIcon } from "lucide-react";
 import { API_URL, listTileSets, type TileSet } from "@/lib/api";
+import { PLAN_PRO } from "@/lib/plans";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { UpgradeBanner } from "@/components/upgrade-banner";
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -25,9 +28,11 @@ function timeAgo(dateStr: string): string {
 }
 
 export default function GalleryPage() {
+  const { data: session } = useSession();
   const [tilesets, setTilesets] = useState<TileSet[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const isFree = session?.user && session.user.plan !== PLAN_PRO;
 
   useEffect(() => {
     listTileSets()
@@ -65,6 +70,12 @@ export default function GalleryPage() {
             <p className="mt-1 text-sm">
               Processed tile sets marked as public will appear here.
             </p>
+          </div>
+        )}
+
+        {isFree && !loading && tilesets.length > 0 && (
+          <div className="mb-6">
+            <UpgradeBanner message="Want to create your own? Upgrade to Pro for server-side processing." />
           </div>
         )}
 

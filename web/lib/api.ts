@@ -108,6 +108,8 @@ export async function deleteTileSet(slug: string, token?: string): Promise<void>
 export interface CurrentUser {
   id: string;
   plan: string;
+  storage_used: number;
+  storage_quota: number;
 }
 
 export async function getCurrentUser(token: string): Promise<CurrentUser> {

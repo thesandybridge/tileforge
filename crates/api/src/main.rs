@@ -24,6 +24,9 @@ use tileforge_core::{streaming::should_use_streaming, Projection, TileConfig, Ti
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use uuid::Uuid;
 
+/// 5 GB storage quota for Pro users.
+const QUOTA_PRO_BYTES: i64 = 5 * 1024 * 1024 * 1024;
+
 // ---------------------------------------------------------------------------
 // Config
 // ---------------------------------------------------------------------------
@@ -86,6 +89,7 @@ enum ApiError {
     ServiceUnavailable(String),
     Db(String),
     Conflict(String),
+    QuotaExceeded,
 }
 
 #[derive(Serialize)]
@@ -112,6 +116,10 @@ impl IntoResponse for ApiError {
             ApiError::ServiceUnavailable(msg) => (StatusCode::SERVICE_UNAVAILABLE, msg),
             ApiError::Db(msg) => (StatusCode::INTERNAL_SERVER_ERROR, format!("database error: {msg}")),
             ApiError::Conflict(msg) => (StatusCode::CONFLICT, msg),
+            ApiError::QuotaExceeded => (
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "storage quota exceeded (5 GB limit)".into(),
+            ),
         };
         (status, Json(ErrorBody { error: message })).into_response()
     }
@@ -409,6 +417,18 @@ async fn process_tiles(
     let is_pro = claims.0.as_ref().is_some_and(|c| c.plan == Plan::Pro);
     let is_large = should_use_streaming(&body, STREAMING_THRESHOLD);
 
+    // Quota check for Pro users before enqueue
+    if is_pro {
+        if let Some(ref db) = state.db {
+            let user_id = Uuid::parse_str(&claims.0.as_ref().unwrap().sub)
+                .map_err(|_| ApiError::Unauthorized)?;
+            let used = get_storage_used(db, user_id).await?;
+            if used >= QUOTA_PRO_BYTES {
+                return Err(ApiError::QuotaExceeded);
+            }
+        }
+    }
+
     if is_pro || is_large {
         // Async path: enqueue to Redis, upload to S3
         let (mut redis, bucket) = match (&state.redis, &state.bucket) {
@@ -677,6 +697,16 @@ async fn job_download_pmtiles(
 // Tile set CRUD
 // ---------------------------------------------------------------------------
 
+async fn get_storage_used(db: &PgPool, user_id: Uuid) -> Result<i64, ApiError> {
+    let row: (Option<i64>,) =
+        sqlx::query_as("SELECT COALESCE(SUM(size_bytes), 0)::bigint FROM tile_sets WHERE user_id = $1")
+            .bind(user_id)
+            .fetch_one(db)
+            .await
+            .map_err(|e| ApiError::Db(e.to_string()))?;
+    Ok(row.0.unwrap_or(0))
+}
+
 fn require_db(state: &AppState) -> Result<PgPool, ApiError> {
     state
         .db
@@ -911,13 +941,32 @@ async fn delete_tileset(
 struct UserResponse {
     id: String,
     plan: Plan,
+    storage_used: i64,
+    storage_quota: i64,
 }
 
-async fn get_current_user(Claims(user): Claims) -> Json<UserResponse> {
-    Json(UserResponse {
+async fn get_current_user(
+    State(state): State<AppState>,
+    Claims(user): Claims,
+) -> Result<Json<UserResponse>, ApiError> {
+    let (storage_used, storage_quota) = if user.plan == Plan::Pro {
+        if let Some(ref db) = state.db {
+            let uid = Uuid::parse_str(&user.sub).map_err(|_| ApiError::Unauthorized)?;
+            let used = get_storage_used(db, uid).await?;
+            (used, QUOTA_PRO_BYTES)
+        } else {
+            (0, QUOTA_PRO_BYTES)
+        }
+    } else {
+        (0, 0)
+    };
+
+    Ok(Json(UserResponse {
         id: user.sub,
         plan: user.plan,
-    })
+        storage_used,
+        storage_quota,
+    }))
 }
 
 // ---------------------------------------------------------------------------

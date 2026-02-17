@@ -53,6 +53,7 @@ export function useDeleteTileset() {
         old?.filter((ts) => ts.slug !== slug),
       );
       queryClient.invalidateQueries({ queryKey: ["tileset", slug] });
+      queryClient.invalidateQueries({ queryKey: ["user"] });
     },
   });
 }
