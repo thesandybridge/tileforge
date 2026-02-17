@@ -343,7 +343,9 @@ export default function Home() {
                   ) : (
                     <div className="flex flex-col items-center gap-2 py-2">
                       <LoaderCircle className="text-primary h-6 w-6 animate-spin" />
-                      <p className="text-muted-foreground text-xs">Processing on server...</p>
+                      <p className="text-muted-foreground text-xs">
+                        {useServer ? "Processing on server..." : "Processing..."}
+                      </p>
                     </div>
                   )}
                 </div>

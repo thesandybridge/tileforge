@@ -197,6 +197,8 @@ export function useTileforge() {
                   zoom: data.zoom ?? 0,
                   percent: data.tiles_total > 0 ? (data.tiles_done / data.tiles_total) * 100 : 0,
                 });
+              } else if (data.status === "generating_pmtiles") {
+                setProgress(null);
               } else if (data.status === "complete" && data.download_url) {
                 sse.close();
                 sseRef.current = null;

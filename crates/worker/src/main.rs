@@ -272,6 +272,24 @@ async fn process_job(
         "ZIP uploaded to S3"
     );
 
+    // Set generating_pmtiles status so clients know what's happening
+    let pmtiles_status = ProgressUpdate {
+        status: "generating_pmtiles".into(),
+        last_updated: unix_now(),
+        zoom: None,
+        tiles_done: None,
+        tiles_total: None,
+        download_url: None,
+        pmtiles_url: None,
+        error: None,
+    };
+    conn.set_ex::<_, _, ()>(
+        &progress_key,
+        serde_json::to_string(&pmtiles_status)?,
+        3600u64,
+    )
+    .await?;
+
     // PMTiles pass
     // TODO(perf): TeeWriter to avoid double processing
     let min_zoom = pmtiles_config.min_zoom.unwrap_or(0);

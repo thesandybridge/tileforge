@@ -20,7 +20,6 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tileforge_core::{streaming::should_use_streaming, Projection, TileConfig, Tiler, ZipTileWriter, STREAMING_THRESHOLD};
-use tokio_stream::StreamExt;
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use uuid::Uuid;
 
@@ -421,24 +420,32 @@ async fn job_progress(
         .ok_or_else(|| ApiError::ServiceUnavailable("Redis not configured".into()))?
         .clone();
 
-    let stream = tokio_stream::wrappers::IntervalStream::new(tokio::time::interval(
-        std::time::Duration::from_millis(500),
-    ))
-    .take(1200) // 10 minute safety timeout (1200 * 500ms)
-    .then(move |_| {
-        let mut conn = redis.clone();
+    let (tx, rx) = tokio::sync::mpsc::channel::<Result<Event, axum::Error>>(2);
+
+    tokio::spawn(async move {
+        let mut conn = redis;
         let key = format!("tileforge:progress:{job_id}");
-        async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_millis(500));
+
+        for _ in 0..1200u32 {
+            interval.tick().await;
+
             let val: redis::RedisResult<Option<String>> = conn.get(&key).await;
-            match val {
+
+            let (event, is_terminal) = match val {
                 Ok(Some(json)) => {
+                    let mut terminal = false;
                     if let Ok(progress) = serde_json::from_str::<ProgressData>(&json) {
-                        // Check for stale jobs (worker crashed)
-                        let now = SystemTime::now()
-                            .duration_since(UNIX_EPOCH)
-                            .unwrap()
-                            .as_secs();
-                        if progress.status == "processing" || progress.status == "queued" {
+                        if progress.status == "complete" || progress.status == "failed" {
+                            terminal = true;
+                        } else if progress.status == "processing"
+                            || progress.status == "queued"
+                        {
+                            // Check for stale jobs (worker crashed)
+                            let now = SystemTime::now()
+                                .duration_since(UNIX_EPOCH)
+                                .unwrap()
+                                .as_secs();
                             if progress.last_updated > 0
                                 && now - progress.last_updated > STALE_JOB_TIMEOUT_SECS
                             {
@@ -446,22 +453,40 @@ async fn job_progress(
                                     "status": "failed",
                                     "error": "job timed out (worker may have crashed)",
                                 });
-                                return Ok(Event::default().data(stale.to_string()));
+                                let event = Ok(Event::default().data(stale.to_string()));
+                                if tx.send(event).await.is_err() {
+                                    return;
+                                }
+                                break;
                             }
                         }
                     }
-                    Ok(Event::default().data(json))
+                    (Ok(Event::default().data(json)), terminal)
                 }
-                Ok(None) => Ok(Event::default().data(
-                    serde_json::json!({"status": "unknown"}).to_string(),
-                )),
-                Err(e) => Ok(Event::default().data(
-                    serde_json::json!({"status": "error", "error": e.to_string()}).to_string(),
-                )),
+                Ok(None) => (
+                    Ok(Event::default()
+                        .data(serde_json::json!({"status": "unknown"}).to_string())),
+                    false,
+                ),
+                Err(e) => (
+                    Ok(Event::default().data(
+                        serde_json::json!({"status": "error", "error": e.to_string()})
+                            .to_string(),
+                    )),
+                    true,
+                ),
+            };
+
+            if tx.send(event).await.is_err() {
+                break; // client disconnected
+            }
+            if is_terminal {
+                break;
             }
         }
     });
 
+    let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
     Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
 }
 
