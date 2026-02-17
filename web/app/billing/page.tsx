@@ -1,12 +1,13 @@
 "use client";
 
+import { Suspense } from "react";
 import { useSession } from "next-auth/react";
 import { PLAN_PRO } from "@/lib/plans";
 import { useCheckout, usePortalSession, usePlanRefresh } from "@/hooks/use-billing";
 import { Button } from "@/components/ui/button";
 import { CreditCard, ExternalLink, Check, Loader2 } from "lucide-react";
 
-export default function BillingPage() {
+function BillingContent() {
   const { data: session } = useSession();
   const { upgraded, refreshing } = usePlanRefresh();
   const checkout = useCheckout();
@@ -76,5 +77,13 @@ export default function BillingPage() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function BillingPage() {
+  return (
+    <Suspense>
+      <BillingContent />
+    </Suspense>
   );
 }
