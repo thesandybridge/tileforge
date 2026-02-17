@@ -1,10 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useSession } from "next-auth/react";
 import Link from "next/link";
 import { Map, Globe, Grid3X3, Trash2, ImageIcon } from "lucide-react";
-import { API_URL, listTileSets, deleteTileSet, type TileSet } from "@/lib/api";
+import { API_URL } from "@/lib/api";
+import { useTilesets, useDeleteTileset } from "@/hooks/use-tilesets";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 
@@ -27,30 +26,13 @@ function timeAgo(dateStr: string): string {
 }
 
 export default function MyTilesetsPage() {
-  const { data: session } = useSession();
-  const [tilesets, setTilesets] = useState<TileSet[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { data: tilesets, isLoading, error } = useTilesets();
+  const deleteTileset = useDeleteTileset();
 
-  useEffect(() => {
-    if (!session?.accessToken) return;
-    setLoading(true);
-    listTileSets(undefined, session.accessToken)
-      .then(setTilesets)
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false));
-  }, [session?.accessToken]);
-
-  const handleDelete = async (slug: string) => {
-    if (!session?.accessToken) return;
+  function handleDelete(slug: string) {
     if (!confirm("Delete this tileset?")) return;
-    try {
-      await deleteTileSet(slug, session.accessToken);
-      setTilesets((prev) => prev.filter((ts) => ts.slug !== slug));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to delete");
-    }
-  };
+    deleteTileset.mutate(slug);
+  }
 
   return (
     <div className="py-10">
@@ -64,17 +46,17 @@ export default function MyTilesetsPage() {
       </header>
 
       <main className="mx-auto mt-10 max-w-4xl px-6">
-        {loading && (
+        {isLoading && (
           <p className="text-muted-foreground text-center text-sm">
             Loading your tilesets...
           </p>
         )}
 
         {error && (
-          <p className="text-destructive text-center text-sm">{error}</p>
+          <p className="text-destructive text-center text-sm">{error.message}</p>
         )}
 
-        {!loading && !error && tilesets.length === 0 && (
+        {!isLoading && !error && (!tilesets || tilesets.length === 0) && (
           <div className="text-muted-foreground py-16 text-center">
             <Map className="mx-auto mb-4 h-12 w-12 opacity-50" />
             <p>No tilesets yet.</p>
@@ -84,7 +66,7 @@ export default function MyTilesetsPage() {
           </div>
         )}
 
-        {tilesets.length > 0 && (
+        {tilesets && tilesets.length > 0 && (
           <div className="grid gap-4 sm:grid-cols-2">
             {tilesets.map((ts) => (
               <Card key={ts.id} className="border-border/50 group relative overflow-hidden">

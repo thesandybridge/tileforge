@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useReducer, useRef } from "react";
 import type { WorkerRequest, WorkerResponse } from "./worker-protocol";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
@@ -12,6 +12,70 @@ export interface TileforgeProgress {
   tilesTotal: number;
   zoom: number;
   percent: number;
+}
+
+interface TileforgeState {
+  status: TileforgeStatus;
+  progress: TileforgeProgress | null;
+  zipBlob: Blob | null;
+  pmtilesUrl: string | null;
+  error: string | null;
+  durationMs: number | null;
+}
+
+type TileforgeAction =
+  | { type: "loading" }
+  | { type: "ready" }
+  | { type: "waking" }
+  | { type: "processing" }
+  | { type: "progress"; progress: TileforgeProgress }
+  | { type: "clear_progress" }
+  | { type: "complete"; zipBlob: Blob; durationMs: number; pmtilesUrl?: string }
+  | { type: "error"; message: string }
+  | { type: "set_pmtiles_url"; url: string }
+  | { type: "reset"; workerReady: boolean };
+
+const initialState: TileforgeState = {
+  status: "idle",
+  progress: null,
+  zipBlob: null,
+  pmtilesUrl: null,
+  error: null,
+  durationMs: null,
+};
+
+function reducer(state: TileforgeState, action: TileforgeAction): TileforgeState {
+  switch (action.type) {
+    case "loading":
+      return { ...initialState, status: "loading" };
+    case "ready":
+      return { ...state, status: "ready" };
+    case "waking":
+      return { ...initialState, status: "waking" };
+    case "processing":
+      return { ...initialState, status: "processing" };
+    case "progress":
+      return { ...state, progress: action.progress };
+    case "clear_progress":
+      return { ...state, progress: null };
+    case "complete":
+      return {
+        ...state,
+        status: "done",
+        zipBlob: action.zipBlob,
+        durationMs: action.durationMs,
+        pmtilesUrl: action.pmtilesUrl ?? state.pmtilesUrl,
+        progress: null,
+      };
+    case "error":
+      return { ...initialState, status: "error", error: action.message };
+    case "set_pmtiles_url":
+      return { ...state, pmtilesUrl: action.url };
+    case "reset":
+      return { ...initialState, status: action.workerReady ? "ready" : "idle" };
+    default:
+      return state;
+  }
 }
 
 async function waitForHealth(signal?: AbortSignal): Promise<boolean> {
@@ -31,12 +95,8 @@ async function waitForHealth(signal?: AbortSignal): Promise<boolean> {
 export function useTileforge() {
   const workerRef = useRef<Worker | null>(null);
   const startTimeRef = useRef<number>(0);
-  const [status, setStatus] = useState<TileforgeStatus>("idle");
-  const [progress, setProgress] = useState<TileforgeProgress | null>(null);
-  const [zipBlob, setZipBlob] = useState<Blob | null>(null);
-  const [pmtilesUrl, setPmtilesUrl] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [durationMs, setDurationMs] = useState<number | null>(null);
+  const sseRef = useRef<EventSource | null>(null);
+  const [state, dispatch] = useReducer(reducer, initialState);
 
   useEffect(() => {
     const worker = new Worker("/tileforge.worker.js");
@@ -46,35 +106,35 @@ export function useTileforge() {
       const msg = e.data;
       switch (msg.type) {
         case "ready":
-          setStatus("ready");
+          dispatch({ type: "ready" });
           break;
         case "progress":
-          setProgress({
-            tilesDone: msg.tilesDone,
-            tilesTotal: msg.tilesTotal,
-            zoom: msg.zoom,
-            percent: (msg.tilesDone / msg.tilesTotal) * 100,
+          dispatch({
+            type: "progress",
+            progress: {
+              tilesDone: msg.tilesDone,
+              tilesTotal: msg.tilesTotal,
+              zoom: msg.zoom,
+              percent: (msg.tilesDone / msg.tilesTotal) * 100,
+            },
           });
           break;
         case "complete": {
-          const blob = new Blob([msg.zipBytes], {
-            type: "application/zip",
+          const blob = new Blob([msg.zipBytes], { type: "application/zip" });
+          dispatch({
+            type: "complete",
+            zipBlob: blob,
+            durationMs: performance.now() - startTimeRef.current,
           });
-          setZipBlob(blob);
-          setDurationMs(performance.now() - startTimeRef.current);
-          setStatus("done");
-          setProgress(null);
           break;
         }
         case "error":
-          setError(msg.message);
-          setStatus("error");
-          setProgress(null);
+          dispatch({ type: "error", message: msg.message });
           break;
       }
     };
 
-    setStatus("loading");
+    dispatch({ type: "loading" });
     const init: WorkerRequest = { type: "init" };
     worker.postMessage(init);
 
@@ -98,12 +158,7 @@ export function useTileforge() {
     ) => {
       if (!workerRef.current) return;
       startTimeRef.current = performance.now();
-      setStatus("processing");
-      setProgress(null);
-      setZipBlob(null);
-      setPmtilesUrl(null);
-      setError(null);
-      setDurationMs(null);
+      dispatch({ type: "processing" });
 
       const msg: WorkerRequest = {
         type: "process",
@@ -118,8 +173,6 @@ export function useTileforge() {
     [],
   );
 
-  const sseRef = useRef<EventSource | null>(null);
-
   const processServer = useCallback(
     async (
       imageBytes: ArrayBuffer,
@@ -132,22 +185,16 @@ export function useTileforge() {
       } = {},
     ) => {
       startTimeRef.current = performance.now();
-      setProgress(null);
-      setZipBlob(null);
-      setPmtilesUrl(null);
-      setError(null);
-      setDurationMs(null);
 
       // Wake up server if it's sleeping (Railway Serverless)
-      setStatus("waking");
+      dispatch({ type: "waking" });
       const healthy = await waitForHealth();
       if (!healthy) {
-        setError("Server is unavailable. Try local WASM processing instead.");
-        setStatus("error");
+        dispatch({ type: "error", message: "Server is unavailable. Try local WASM processing instead." });
         return;
       }
 
-      setStatus("processing");
+      dispatch({ type: "processing" });
 
       const params = new URLSearchParams();
       params.set("tile_size", String(opts.tileSize ?? 256));
@@ -166,8 +213,7 @@ export function useTileforge() {
 
         if (!res.ok && res.status !== 202) {
           const body = await res.json().catch(() => ({ error: "Server error" }));
-          setError(body.error ?? `Server error (${res.status})`);
-          setStatus("error");
+          dispatch({ type: "error", message: body.error ?? `Server error (${res.status})` });
           return;
         }
 
@@ -194,39 +240,40 @@ export function useTileforge() {
               };
 
               if (data.status === "processing" && data.tiles_done != null && data.tiles_total != null) {
-                setProgress({
-                  tilesDone: data.tiles_done,
-                  tilesTotal: data.tiles_total,
-                  zoom: data.zoom ?? 0,
-                  percent: data.tiles_total > 0 ? (data.tiles_done / data.tiles_total) * 100 : 0,
+                dispatch({
+                  type: "progress",
+                  progress: {
+                    tilesDone: data.tiles_done,
+                    tilesTotal: data.tiles_total,
+                    zoom: data.zoom ?? 0,
+                    percent: data.tiles_total > 0 ? (data.tiles_done / data.tiles_total) * 100 : 0,
+                  },
                 });
               } else if (data.status === "generating_pmtiles") {
-                setProgress(null);
+                dispatch({ type: "clear_progress" });
               } else if (data.status === "complete" && data.download_url) {
                 sse.close();
                 sseRef.current = null;
                 if (data.pmtiles_url) {
-                  setPmtilesUrl(`${API_URL}${data.pmtiles_url}`);
+                  dispatch({ type: "set_pmtiles_url", url: `${API_URL}${data.pmtiles_url}` });
                 }
                 try {
                   const dlRes = await fetch(`${API_URL}${data.download_url}`);
                   if (!dlRes.ok) throw new Error(`Download failed (${dlRes.status})`);
                   const buf = await dlRes.arrayBuffer();
-                  setZipBlob(new Blob([buf], { type: "application/zip" }));
-                  setDurationMs(performance.now() - startTimeRef.current);
-                  setStatus("done");
-                  setProgress(null);
+                  dispatch({
+                    type: "complete",
+                    zipBlob: new Blob([buf], { type: "application/zip" }),
+                    durationMs: performance.now() - startTimeRef.current,
+                    pmtilesUrl: data.pmtiles_url ? `${API_URL}${data.pmtiles_url}` : undefined,
+                  });
                 } catch (dlErr) {
-                  setError(dlErr instanceof Error ? dlErr.message : "Download failed");
-                  setStatus("error");
-                  setProgress(null);
+                  dispatch({ type: "error", message: dlErr instanceof Error ? dlErr.message : "Download failed" });
                 }
               } else if (data.status === "failed") {
                 sse.close();
                 sseRef.current = null;
-                setError(data.error ?? "Processing failed");
-                setStatus("error");
-                setProgress(null);
+                dispatch({ type: "error", message: data.error ?? "Processing failed" });
               }
             } catch {
               // Ignore parse errors
@@ -236,9 +283,7 @@ export function useTileforge() {
           sse.onerror = () => {
             sse.close();
             sseRef.current = null;
-            setError("Lost connection to server");
-            setStatus("error");
-            setProgress(null);
+            dispatch({ type: "error", message: "Lost connection to server" });
           };
 
           return;
@@ -246,24 +291,21 @@ export function useTileforge() {
 
         // Sync path (200): direct ZIP response
         const buf = await res.arrayBuffer();
-        setZipBlob(new Blob([buf], { type: "application/zip" }));
-        setDurationMs(performance.now() - startTimeRef.current);
-        setStatus("done");
+        dispatch({
+          type: "complete",
+          zipBlob: new Blob([buf], { type: "application/zip" }),
+          durationMs: performance.now() - startTimeRef.current,
+        });
       } catch {
-        setError("Failed to connect to server");
-        setStatus("error");
+        dispatch({ type: "error", message: "Failed to connect to server" });
       }
     },
     [],
   );
 
   const reset = useCallback(() => {
-    setStatus(workerRef.current ? "ready" : "idle");
-    setProgress(null);
-    setZipBlob(null);
-    setPmtilesUrl(null);
-    setError(null);
+    dispatch({ type: "reset", workerReady: !!workerRef.current });
   }, []);
 
-  return { status, progress, zipBlob, pmtilesUrl, error, durationMs, process, processServer, reset };
+  return { ...state, process, processServer, reset };
 }

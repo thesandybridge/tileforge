@@ -1,7 +1,7 @@
 "use client";
 
 import { useSession, signIn, signOut } from "next-auth/react";
-import { LogIn, LogOut, Map, User } from "lucide-react";
+import { CreditCard, LogIn, LogOut, Map, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -57,6 +57,12 @@ export function UserMenu() {
           <Link href="/my-tilesets" className="cursor-pointer">
             <Map className="mr-2 h-4 w-4" />
             My Tilesets
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild>
+          <Link href="/billing" className="cursor-pointer">
+            <CreditCard className="mr-2 h-4 w-4" />
+            Billing
           </Link>
         </DropdownMenuItem>
         <DropdownMenuSeparator />

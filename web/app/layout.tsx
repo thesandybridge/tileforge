@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import { ThemeProvider } from "@/components/theme-provider";
 import { SessionProvider } from "@/components/session-provider";
+import { QueryProvider } from "@/components/query-provider";
 import { Navbar } from "@/components/navbar";
 import "./globals.css";
 
@@ -108,10 +109,12 @@ export default function RootLayout({
       </head>
       <body className={`${inter.className} min-h-screen antialiased`}>
         <SessionProvider>
-          <ThemeProvider attribute="class" defaultTheme="dark" enableSystem>
-            <Navbar />
-            {children}
-          </ThemeProvider>
+          <QueryProvider>
+            <ThemeProvider attribute="class" defaultTheme="dark" enableSystem>
+              <Navbar />
+              {children}
+            </ThemeProvider>
+          </QueryProvider>
         </SessionProvider>
       </body>
     </html>
