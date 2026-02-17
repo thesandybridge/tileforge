@@ -2,7 +2,7 @@
 
 import { useCallback, useRef, useState } from "react";
 import dynamic from "next/dynamic";
-import { Upload } from "lucide-react";
+import { LoaderCircle, Upload } from "lucide-react";
 import { useTileforge } from "@/lib/use-tileforge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -59,7 +59,8 @@ function calcTotalTiles(minZoom: number, maxZoom: number): number {
 }
 
 export default function Home() {
-  const { status, progress, zipBlob, error, durationMs, process, reset } = useTileforge();
+  const { status, progress, zipBlob, error, durationMs, process, processServer, reset } = useTileforge();
+  const [useServer, setUseServer] = useState(false);
   const [fileName, setFileName] = useState<string | null>(null);
   const [imageInfo, setImageInfo] = useState<ImageInfo | null>(null);
   const [tileSize, setTileSize] = useState("256");
@@ -105,8 +106,13 @@ export default function Home() {
   const onProcess = useCallback(() => {
     if (!fileRef.current) return;
     const copy = fileRef.current.slice(0);
-    process(copy, { tileSize: ts, maxZoom: mz, projection });
-  }, [process, ts, mz, projection]);
+    const opts = { tileSize: ts, maxZoom: mz, projection };
+    if (useServer) {
+      processServer(copy, opts);
+    } else {
+      process(copy, opts);
+    }
+  }, [process, processServer, ts, mz, projection, useServer]);
 
   const onDownload = useCallback(() => {
     if (!zipBlob) return;
@@ -128,7 +134,8 @@ export default function Home() {
     reset();
   }, [reset]);
 
-  const showCard = status === "ready" || status === "done" || status === "error" || status === "processing";
+  const canProcess = hasFile && (useServer || status === "ready") && status !== "processing";
+  const showCard = useServer || status === "ready" || status === "done" || status === "error" || status === "processing";
 
   return (
     <div className="py-24">
@@ -163,7 +170,7 @@ export default function Home() {
 
       {/* Main tool card */}
       <main className="mx-auto mt-10 max-w-2xl px-6">
-        {(status === "idle" || status === "loading") && (
+        {!useServer && (status === "idle" || status === "loading") && (
           <p className="text-muted-foreground text-center text-sm">Loading WASM engine...</p>
         )}
 
@@ -228,7 +235,22 @@ export default function Home() {
               )}
 
               {/* Config */}
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-4 gap-4">
+                <div className="space-y-2">
+                  <label className="text-muted-foreground text-xs font-medium uppercase tracking-wider">
+                    Mode
+                  </label>
+                  <Select value={useServer ? "server" : "local"} onValueChange={(v) => setUseServer(v === "server")}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="local">Local WASM</SelectItem>
+                      <SelectItem value="server">Server</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
                 <div className="space-y-2">
                   <label className="text-muted-foreground text-xs font-medium uppercase tracking-wider">
                     Tile size
@@ -254,13 +276,13 @@ export default function Home() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {Array.from({ length: 9 }, (_, i) => (
+                      {Array.from({ length: useServer ? 13 : 9 }, (_, i) => (
                         <SelectItem
                           key={i}
                           value={String(i)}
-                          disabled={imageInfo ? i > calculatedMaxZoom : false}
+                          disabled={!useServer && imageInfo ? i > calculatedMaxZoom : false}
                         >
-                          {i}{imageInfo && i === calculatedMaxZoom ? " (max)" : ""}
+                          {i}{!useServer && imageInfo && i === calculatedMaxZoom ? " (max)" : ""}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -292,12 +314,19 @@ export default function Home() {
               {/* Progress */}
               {status === "processing" && (
                 <div className="space-y-2">
-                  <Progress value={progress?.percent ?? 0} />
-                  <p className="text-muted-foreground text-center text-xs">
-                    {progress
-                      ? `Zoom ${progress.zoom} — ${progress.tilesDone}/${progress.tilesTotal} tiles (${Math.round(progress.percent)}%)`
-                      : "Starting..."}
-                  </p>
+                  {progress ? (
+                    <>
+                      <Progress value={progress.percent} />
+                      <p className="text-muted-foreground text-center text-xs">
+                        Zoom {progress.zoom} — {progress.tilesDone}/{progress.tilesTotal} tiles ({Math.round(progress.percent)}%)
+                      </p>
+                    </>
+                  ) : (
+                    <div className="flex flex-col items-center gap-2 py-2">
+                      <LoaderCircle className="text-primary h-6 w-6 animate-spin" />
+                      <p className="text-muted-foreground text-xs">Processing on server...</p>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -306,7 +335,7 @@ export default function Home() {
                 <Button
                   size="lg"
                   onClick={onProcess}
-                  disabled={!hasFile || status !== "ready"}
+                  disabled={!canProcess}
                 >
                   Process
                 </Button>

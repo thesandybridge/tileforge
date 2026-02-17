@@ -98,6 +98,55 @@ export function useTileforge() {
     [],
   );
 
+  const processServer = useCallback(
+    async (
+      imageBytes: ArrayBuffer,
+      opts: {
+        tileSize?: number;
+        minZoom?: number;
+        maxZoom?: number;
+        projection?: "flat" | "mercator";
+      } = {},
+    ) => {
+      startTimeRef.current = performance.now();
+      setStatus("processing");
+      setProgress(null);
+      setZipBlob(null);
+      setError(null);
+      setDurationMs(null);
+
+      const params = new URLSearchParams();
+      params.set("tile_size", String(opts.tileSize ?? 256));
+      if (opts.minZoom != null) params.set("min_zoom", String(opts.minZoom));
+      if (opts.maxZoom != null) params.set("max_zoom", String(opts.maxZoom));
+      if (opts.projection) params.set("projection", opts.projection);
+
+      try {
+        const res = await fetch(`/api/tiles?${params}`, {
+          method: "POST",
+          headers: { "content-type": "application/octet-stream" },
+          body: imageBytes,
+        });
+
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({ error: "Server error" }));
+          setError(body.error ?? `Server error (${res.status})`);
+          setStatus("error");
+          return;
+        }
+
+        const buf = await res.arrayBuffer();
+        setZipBlob(new Blob([buf], { type: "application/zip" }));
+        setDurationMs(performance.now() - startTimeRef.current);
+        setStatus("done");
+      } catch {
+        setError("Failed to connect to server");
+        setStatus("error");
+      }
+    },
+    [],
+  );
+
   const reset = useCallback(() => {
     setStatus(workerRef.current ? "ready" : "idle");
     setProgress(null);
@@ -105,5 +154,5 @@ export function useTileforge() {
     setError(null);
   }, []);
 
-  return { status, progress, zipBlob, error, durationMs, process, reset };
+  return { status, progress, zipBlob, error, durationMs, process, processServer, reset };
 }
