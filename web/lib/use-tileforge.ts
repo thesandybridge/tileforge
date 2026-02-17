@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useReducer, useRef } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import type { WorkerRequest, WorkerResponse } from "./worker-protocol";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
@@ -93,6 +94,7 @@ async function waitForHealth(signal?: AbortSignal): Promise<boolean> {
 }
 
 export function useTileforge() {
+  const queryClient = useQueryClient();
   const workerRef = useRef<Worker | null>(null);
   const startTimeRef = useRef<number>(0);
   const sseRef = useRef<EventSource | null>(null);
@@ -267,6 +269,8 @@ export function useTileforge() {
                     durationMs: performance.now() - startTimeRef.current,
                     pmtilesUrl: data.pmtiles_url ? `${API_URL}${data.pmtiles_url}` : undefined,
                   });
+                  queryClient.invalidateQueries({ queryKey: ["user"] });
+                  queryClient.invalidateQueries({ queryKey: ["tilesets"] });
                 } catch (dlErr) {
                   dispatch({ type: "error", message: dlErr instanceof Error ? dlErr.message : "Download failed" });
                 }

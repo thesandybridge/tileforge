@@ -6,10 +6,13 @@ import { PLAN_PRO } from "@/lib/plans";
 import { useCheckout, usePortalSession, usePlanRefresh } from "@/hooks/use-billing";
 import { Button } from "@/components/ui/button";
 import { CreditCard, ExternalLink, Check, Loader2 } from "lucide-react";
+import { useCurrentUser } from "@/hooks/use-user";
+import { StorageUsage } from "@/components/storage-usage";
 
 function BillingContent() {
   const { data: session } = useSession();
   const { upgraded, refreshing } = usePlanRefresh();
+  const { data: user } = useCurrentUser();
   const checkout = useCheckout();
   const portal = usePortalSession();
 
@@ -60,6 +63,11 @@ function BillingContent() {
             <p className="text-muted-foreground mb-4 text-sm">
               You have access to server-side processing and persistent tilesets.
             </p>
+            {user && user.storage_quota > 0 && (
+              <div className="mb-4">
+                <StorageUsage used={user.storage_used} quota={user.storage_quota} />
+              </div>
+            )}
             <Button onClick={handleManage} disabled={loading} variant="outline">
               <ExternalLink className="mr-2 h-4 w-4" />
               {portal.isPending ? "Loading..." : "Manage Subscription"}
