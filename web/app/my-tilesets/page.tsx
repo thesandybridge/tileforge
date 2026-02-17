@@ -193,8 +193,8 @@ export default function MyTilesetsPage() {
       </main>
 
       <footer className="text-muted-foreground mt-16 pb-8 text-center text-sm">
-        &copy; {new Date().getFullYear()} &mdash; made with &hearts; by
-        sandybridge
+        &copy; {new Date().getFullYear()} &mdash; made with &hearts; by{" "}
+        <a href="https://sandybridge.io" className="hover:text-foreground underline underline-offset-4 transition-colors">sandybridge</a>
       </footer>
     </div>
   );

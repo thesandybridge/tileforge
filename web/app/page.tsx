@@ -415,7 +415,7 @@ export default function Home() {
           Gallery
         </Link>
         <span className="mx-2">&middot;</span>
-        &copy; {new Date().getFullYear()} &mdash; made with &hearts; by sandybridge
+        &copy; {new Date().getFullYear()} &mdash; made with &hearts; by <a href="https://sandybridge.io" className="hover:text-foreground underline underline-offset-4 transition-colors">sandybridge</a>
       </footer>
     </div>
   );
