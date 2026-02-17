@@ -34,6 +34,7 @@ export function useTileforge() {
   const [status, setStatus] = useState<TileforgeStatus>("idle");
   const [progress, setProgress] = useState<TileforgeProgress | null>(null);
   const [zipBlob, setZipBlob] = useState<Blob | null>(null);
+  const [pmtilesUrl, setPmtilesUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [durationMs, setDurationMs] = useState<number | null>(null);
 
@@ -100,6 +101,7 @@ export function useTileforge() {
       setStatus("processing");
       setProgress(null);
       setZipBlob(null);
+      setPmtilesUrl(null);
       setError(null);
       setDurationMs(null);
 
@@ -131,6 +133,7 @@ export function useTileforge() {
       startTimeRef.current = performance.now();
       setProgress(null);
       setZipBlob(null);
+      setPmtilesUrl(null);
       setError(null);
       setDurationMs(null);
 
@@ -183,6 +186,7 @@ export function useTileforge() {
                 tiles_done?: number;
                 tiles_total?: number;
                 download_url?: string;
+                pmtiles_url?: string;
                 error?: string;
               };
 
@@ -196,6 +200,9 @@ export function useTileforge() {
               } else if (data.status === "complete" && data.download_url) {
                 sse.close();
                 sseRef.current = null;
+                if (data.pmtiles_url) {
+                  setPmtilesUrl(`${API_URL}${data.pmtiles_url}`);
+                }
                 try {
                   const dlRes = await fetch(`${API_URL}${data.download_url}`);
                   if (!dlRes.ok) throw new Error(`Download failed (${dlRes.status})`);
@@ -249,8 +256,9 @@ export function useTileforge() {
     setStatus(workerRef.current ? "ready" : "idle");
     setProgress(null);
     setZipBlob(null);
+    setPmtilesUrl(null);
     setError(null);
   }, []);
 
-  return { status, progress, zipBlob, error, durationMs, process, processServer, reset };
+  return { status, progress, zipBlob, pmtilesUrl, error, durationMs, process, processServer, reset };
 }

@@ -78,33 +78,35 @@ export default function GalleryPage() {
         {tilesets.length > 0 && (
           <div className="grid gap-4 sm:grid-cols-2">
             {tilesets.map((ts) => (
-              <Card key={ts.id} className="border-border/50">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Map className="text-primary h-4 w-4" />
-                    {ts.name}
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="text-muted-foreground space-y-1 text-sm">
-                    <div className="flex items-center gap-2">
-                      <Globe className="h-3.5 w-3.5" />
-                      <span>{ts.projection}</span>
-                      <span className="text-muted-foreground/40">|</span>
-                      <Grid3X3 className="h-3.5 w-3.5" />
-                      <span>{ts.tile_size}px</span>
+              <Link key={ts.id} href={`/tilesets/${encodeURIComponent(ts.slug)}`}>
+                <Card className="border-border/50 hover:border-primary/30 transition-colors">
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Map className="text-primary h-4 w-4" />
+                      {ts.name}
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-muted-foreground space-y-1 text-sm">
+                      <div className="flex items-center gap-2">
+                        <Globe className="h-3.5 w-3.5" />
+                        <span>{ts.projection}</span>
+                        <span className="text-muted-foreground/40">|</span>
+                        <Grid3X3 className="h-3.5 w-3.5" />
+                        <span>{ts.tile_size}px</span>
+                      </div>
+                      <p>
+                        Zoom {ts.min_zoom}&ndash;{ts.max_zoom} &middot;{" "}
+                        {ts.tile_count.toLocaleString()} tiles &middot;{" "}
+                        {formatBytes(ts.size_bytes)}
+                      </p>
+                      <p className="text-muted-foreground/60 text-xs">
+                        {timeAgo(ts.created_at)}
+                      </p>
                     </div>
-                    <p>
-                      Zoom {ts.min_zoom}&ndash;{ts.max_zoom} &middot;{" "}
-                      {ts.tile_count.toLocaleString()} tiles &middot;{" "}
-                      {formatBytes(ts.size_bytes)}
-                    </p>
-                    <p className="text-muted-foreground/60 text-xs">
-                      {timeAgo(ts.created_at)}
-                    </p>
-                  </div>
-                </CardContent>
-              </Card>
+                  </CardContent>
+                </Card>
+              </Link>
             ))}
           </div>
         )}

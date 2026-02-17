@@ -1,4 +1,4 @@
-use tileforge_core::{Projection, TileConfig, Tiler};
+use tileforge_core::{Projection, TileConfig, Tiler, ZipTileWriter};
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
@@ -68,11 +68,12 @@ pub fn process_tiles(
     };
 
     let tiler = Tiler::new(core_config);
-    let mut buf = std::io::Cursor::new(Vec::new());
+    let buf = std::io::Cursor::new(Vec::new());
+    let mut zip_writer = ZipTileWriter::new(buf);
 
     let js_this = JsValue::NULL;
     tiler
-        .process_bytes(image_bytes, &mut buf, |p| {
+        .process_bytes(image_bytes, &mut zip_writer, |p| {
             let _ = on_progress.call3(
                 &js_this,
                 &JsValue::from(p.tiles_done),
@@ -82,5 +83,5 @@ pub fn process_tiles(
         })
         .map_err(|e| JsError::new(&e.to_string()))?;
 
-    Ok(buf.into_inner())
+    Ok(zip_writer.into_inner().unwrap().into_inner())
 }

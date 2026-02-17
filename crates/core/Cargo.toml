@@ -7,4 +7,5 @@ edition = "2021"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 png = "0.18"
 zip = { version = "2", default-features = false, features = ["deflate"] }
+pmtiles = { version = "=0.19.2", default-features = false, features = ["write"] }
 thiserror = "2"

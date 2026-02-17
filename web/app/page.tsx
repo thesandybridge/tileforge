@@ -60,7 +60,7 @@ function calcTotalTiles(minZoom: number, maxZoom: number): number {
 }
 
 export default function Home() {
-  const { status, progress, zipBlob, error, durationMs, process, processServer, reset } = useTileforge();
+  const { status, progress, zipBlob, pmtilesUrl, error, durationMs, process, processServer, reset } = useTileforge();
   const [useServer, setUseServer] = useState(false);
   const [fileName, setFileName] = useState<string | null>(null);
   const [imageInfo, setImageInfo] = useState<ImageInfo | null>(null);
@@ -126,6 +126,16 @@ export default function Home() {
     a.click();
     URL.revokeObjectURL(url);
   }, [zipBlob, fileName]);
+
+  const onDownloadPmtiles = useCallback(() => {
+    if (!pmtilesUrl) return;
+    const a = document.createElement("a");
+    a.href = pmtilesUrl;
+    a.download = fileName
+      ? fileName.replace(/\.[^.]+$/, "_tiles.pmtiles")
+      : "tiles.pmtiles";
+    a.click();
+  }, [pmtilesUrl, fileName]);
 
   const onReset = useCallback(() => {
     fileRef.current = null;
@@ -351,6 +361,11 @@ export default function Home() {
                 {status === "done" && zipBlob && (
                   <Button size="lg" variant="secondary" onClick={onDownload}>
                     Download ZIP ({(zipBlob.size / (1024 * 1024)).toFixed(1)} MB)
+                  </Button>
+                )}
+                {status === "done" && pmtilesUrl && (
+                  <Button size="lg" variant="secondary" onClick={onDownloadPmtiles}>
+                    Download PMTiles
                   </Button>
                 )}
                 {(status === "done" || status === "error") && (

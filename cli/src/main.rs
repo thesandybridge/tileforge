@@ -1,7 +1,7 @@
 use clap::Parser;
 use std::fs;
 use std::path::PathBuf;
-use tileforge_core::{StreamingTiler, TileConfig, Tiler};
+use tileforge_core::{StreamingTiler, TileConfig, Tiler, ZipTileWriter};
 
 #[derive(Parser)]
 #[command(name = "tileforge", about = "Slice images into XYZ tile sets")]
@@ -76,6 +76,7 @@ fn main() {
         eprintln!("Failed to create {}: {e}", args.output.display());
         std::process::exit(1);
     });
+    let mut zip_writer = ZipTileWriter::new(file);
 
     let output = if args.streaming {
         let is_png = tileforge_core::streaming::read_png_dimensions(&bytes).is_some();
@@ -83,7 +84,7 @@ fn main() {
         if is_png {
             eprintln!("Mode: streaming (PNG row-by-row)");
             tiler
-                .process_png(std::io::BufReader::new(std::io::Cursor::new(&bytes)), file, progress_callback)
+                .process_png(std::io::BufReader::new(std::io::Cursor::new(&bytes)), &mut zip_writer, progress_callback)
                 .unwrap_or_else(|e| {
                     eprintln!("\nFailed to process image: {e}");
                     std::process::exit(1);
@@ -95,7 +96,7 @@ fn main() {
                 std::process::exit(1);
             });
             tiler
-                .process_image(&img, file, progress_callback)
+                .process_image(&img, &mut zip_writer, progress_callback)
                 .unwrap_or_else(|e| {
                     eprintln!("\nFailed to process image: {e}");
                     std::process::exit(1);
@@ -105,7 +106,7 @@ fn main() {
         eprintln!("Mode: naive");
         let tiler = Tiler::new(config);
         tiler
-            .process_bytes_naive(&bytes, file, progress_callback)
+            .process_bytes_naive(&bytes, &mut zip_writer, progress_callback)
             .unwrap_or_else(|e| {
                 eprintln!("\nFailed to process image: {e}");
                 std::process::exit(1);
@@ -118,7 +119,7 @@ fn main() {
         eprintln!("Mode: auto ({})", if is_streaming { "streaming" } else { "naive" });
         let tiler = Tiler::new(config);
         tiler
-            .process_bytes(&bytes, file, progress_callback)
+            .process_bytes(&bytes, &mut zip_writer, progress_callback)
             .unwrap_or_else(|e| {
                 eprintln!("\nFailed to process image: {e}");
                 std::process::exit(1);

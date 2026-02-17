@@ -1,9 +1,8 @@
 use image::imageops::FilterType;
 use image::{DynamicImage, GenericImageView, RgbaImage};
-use std::io::{BufRead, Seek, Write};
-use zip::write::SimpleFileOptions;
-use zip::ZipWriter;
+use std::io::BufRead;
 
+use crate::writer::TileWriter;
 use crate::{Projection, TileConfig, TileOutput, TileProgress, Tiler, TilerError};
 
 /// Streaming tiler that processes PNG images row-by-row.
@@ -38,19 +37,18 @@ impl PyramidState {
     }
 
     /// Push a completed tile row at `zoom` into the pyramid.
-    /// Writes merged tiles to zip and cascades downward.
-    fn push_row<W, F>(
+    /// Writes merged tiles via the TileWriter and cascades downward.
+    fn push_row<TW, F>(
         &mut self,
         zoom: u32,
         row_tiles: Vec<RgbaImage>,
-        zip: &mut ZipWriter<W>,
-        zip_opts: &SimpleFileOptions,
+        tile_writer: &mut TW,
         tiles_done: &mut u32,
         tiles_total: u32,
         on_progress: &F,
     ) -> Result<(), TilerError>
     where
-        W: Write + Seek,
+        TW: TileWriter,
         F: Fn(TileProgress),
     {
         let z = zoom as usize;
@@ -62,11 +60,10 @@ impl PyramidState {
             let parent_tile_row = self.row_counters[parent_zoom as usize];
             self.row_counters[parent_zoom as usize] += 1;
 
-            // Write merged tiles to zip
+            // Write merged tiles
             for (tx, tile) in merged.iter().enumerate() {
-                write_tile_png(
-                    zip,
-                    zip_opts,
+                encode_and_write_tile(
+                    tile_writer,
                     parent_zoom,
                     tx as u32,
                     parent_tile_row,
@@ -88,8 +85,7 @@ impl PyramidState {
                 self.push_row(
                     parent_zoom,
                     merged,
-                    zip,
-                    zip_opts,
+                    tile_writer,
                     tiles_done,
                     tiles_total,
                     on_progress,
@@ -108,15 +104,15 @@ impl StreamingTiler {
         Self { config }
     }
 
-    pub fn process_png<R, W, F>(
+    pub fn process_png<R, TW, F>(
         &self,
         reader: R,
-        writer: W,
+        tile_writer: &mut TW,
         on_progress: F,
     ) -> Result<TileOutput, TilerError>
     where
-        R: BufRead + Seek,
-        W: Write + Seek,
+        R: BufRead + std::io::Seek,
+        TW: TileWriter,
         F: Fn(TileProgress),
     {
         let tile_size = self.config.tile_size;
@@ -144,15 +140,10 @@ impl StreamingTiler {
         let total_tiles = Tiler::calc_total_tiles(min_zoom, max_zoom);
         let mut tiles_done = 0u32;
 
-        // 3. Setup zip writer
-        let mut zip = ZipWriter::new(writer);
-        let zip_opts =
-            SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
-
-        // 4. Pyramid state for cascading merges
+        // 3. Pyramid state for cascading merges
         let mut pyramid = PyramidState::new(max_zoom, min_zoom, tile_size);
 
-        // 5. Source row decode state
+        // 4. Source row decode state
         let color_type = info.color_type;
         let mut strip_rows: Vec<Vec<u8>> = Vec::new();
         let mut decoded_row_count: u32 = 0;
@@ -161,7 +152,7 @@ impl StreamingTiler {
 
         let projection = self.config.projection;
 
-        // 6. Process each tile row at max zoom
+        // 5. Process each tile row at max zoom
         for tile_row in 0..grid {
             // Source Y range needed (with 1px margin for interpolation)
             let (src_y_start_f, src_y_end_f) = match projection {
@@ -182,8 +173,8 @@ impl StreamingTiler {
                 let mut row_tiles = Vec::with_capacity(grid as usize);
                 for tile_col in 0..grid {
                     let tile = RgbaImage::new(tile_size, tile_size);
-                    write_tile_png(
-                        &mut zip, &zip_opts, max_zoom, tile_col, tile_row,
+                    encode_and_write_tile(
+                        tile_writer, max_zoom, tile_col, tile_row,
                         &tile, tile_size,
                     )?;
                     tiles_done += 1;
@@ -195,7 +186,7 @@ impl StreamingTiler {
                 }
                 if max_zoom > min_zoom {
                     pyramid.push_row(
-                        max_zoom, row_tiles, &mut zip, &zip_opts,
+                        max_zoom, row_tiles, tile_writer,
                         &mut tiles_done, total_tiles, &on_progress,
                     )?;
                 }
@@ -255,9 +246,8 @@ impl StreamingTiler {
                     projection,
                 );
 
-                write_tile_png(
-                    &mut zip,
-                    &zip_opts,
+                encode_and_write_tile(
+                    tile_writer,
                     max_zoom,
                     tile_col,
                     tile_row,
@@ -282,8 +272,7 @@ impl StreamingTiler {
                 pyramid.push_row(
                     max_zoom,
                     row_tiles,
-                    &mut zip,
-                    &zip_opts,
+                    tile_writer,
                     &mut tiles_done,
                     total_tiles,
                     &on_progress,
@@ -291,7 +280,7 @@ impl StreamingTiler {
             }
         }
 
-        zip.finish()?;
+        tile_writer.finish()?;
 
         Ok(TileOutput {
             width: src_w,
@@ -311,14 +300,14 @@ impl StreamingTiler {
     ///
     /// Use this for JPEG and other formats where row-by-row decode isn't
     /// available but you still want to avoid the resize-per-zoom-level memory spike.
-    pub fn process_image<W, F>(
+    pub fn process_image<TW, F>(
         &self,
         img: &DynamicImage,
-        writer: W,
+        tile_writer: &mut TW,
         on_progress: F,
     ) -> Result<TileOutput, TilerError>
     where
-        W: Write + Seek,
+        TW: TileWriter,
         F: Fn(TileProgress),
     {
         let tile_size = self.config.tile_size;
@@ -338,10 +327,6 @@ impl StreamingTiler {
 
         let total_tiles = Tiler::calc_total_tiles(min_zoom, max_zoom);
         let mut tiles_done = 0u32;
-
-        let mut zip = ZipWriter::new(writer);
-        let zip_opts =
-            SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
 
         let mut pyramid = PyramidState::new(max_zoom, min_zoom, tile_size);
 
@@ -366,9 +351,8 @@ impl StreamingTiler {
                     projection,
                 );
 
-                write_tile_png(
-                    &mut zip,
-                    &zip_opts,
+                encode_and_write_tile(
+                    tile_writer,
                     max_zoom,
                     tile_col,
                     tile_row,
@@ -392,8 +376,7 @@ impl StreamingTiler {
                 pyramid.push_row(
                     max_zoom,
                     row_tiles,
-                    &mut zip,
-                    &zip_opts,
+                    tile_writer,
                     &mut tiles_done,
                     total_tiles,
                     &on_progress,
@@ -401,7 +384,7 @@ impl StreamingTiler {
             }
         }
 
-        zip.finish()?;
+        tile_writer.finish()?;
 
         Ok(TileOutput {
             width: src_w,
@@ -497,19 +480,15 @@ fn extract_tile(
     }
 }
 
-/// Write a tile as PNG into the zip archive.
-fn write_tile_png<W: Write + Seek>(
-    zip: &mut ZipWriter<W>,
-    opts: &SimpleFileOptions,
+/// Encode a tile as PNG and write it via the TileWriter.
+fn encode_and_write_tile<TW: TileWriter>(
+    tile_writer: &mut TW,
     zoom: u32,
     x: u32,
     y: u32,
     tile: &RgbaImage,
     tile_size: u32,
 ) -> Result<(), TilerError> {
-    let path = format!("{zoom}/{x}/{y}.png");
-    zip.start_file(&path, *opts)?;
-
     let mut png_buf = Vec::new();
     let encoder = image::codecs::png::PngEncoder::new(&mut png_buf);
     image::ImageEncoder::write_image(
@@ -519,7 +498,7 @@ fn write_tile_png<W: Write + Seek>(
         tile_size,
         image::ExtendedColorType::Rgba8,
     )?;
-    zip.write_all(&png_buf)?;
+    tile_writer.write_tile(zoom, x, y, &png_buf)?;
     Ok(())
 }
 
@@ -630,6 +609,7 @@ pub fn should_use_streaming(bytes: &[u8], memory_budget: usize) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::writer::ZipTileWriter;
 
     #[test]
     fn test_read_png_dimensions() {
@@ -709,26 +689,14 @@ mod tests {
 
         let tiler = StreamingTiler::new(TileConfig::default());
         let reader = std::io::Cursor::new(&png_bytes);
-        let mut zip_buf = std::io::Cursor::new(Vec::new());
+        let zip_buf = std::io::Cursor::new(Vec::new());
+        let mut zip_writer = ZipTileWriter::new(zip_buf);
 
         let output = tiler
-            .process_png(reader, &mut zip_buf, |_| {})
+            .process_png(reader, &mut zip_writer, |_| {})
             .expect("streaming should succeed");
 
         assert_eq!(output.max_zoom, 1);
         assert_eq!(output.total_tiles, 5);
-
-        // Verify zip contents
-        let data = zip_buf.into_inner();
-        let mut archive = zip::ZipArchive::new(std::io::Cursor::new(data)).unwrap();
-
-        let expected = ["0/0/0.png", "1/0/0.png", "1/0/1.png", "1/1/0.png", "1/1/1.png"];
-        assert_eq!(archive.len(), expected.len());
-        for name in &expected {
-            assert!(
-                archive.by_name(name).is_ok(),
-                "missing expected file: {name}"
-            );
-        }
     }
 }

@@ -1,3 +1,5 @@
+mod s3;
+
 use axum::{
     body::Bytes,
     extract::{ConnectInfo, DefaultBodyLimit, Path, Query, State},
@@ -15,9 +17,9 @@ use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use std::io::Cursor;
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tileforge_core::{streaming::should_use_streaming, Projection, TileConfig, Tiler, STREAMING_THRESHOLD};
+use tileforge_core::{streaming::should_use_streaming, Projection, TileConfig, Tiler, ZipTileWriter, STREAMING_THRESHOLD};
 use tokio_stream::StreamExt;
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use uuid::Uuid;
@@ -30,7 +32,6 @@ struct AppConfig {
     port: u16,
     max_upload_bytes: usize,
     redis_url: Option<String>,
-    storage_path: Option<PathBuf>,
     cors_origin: Option<String>,
     database_url: Option<String>,
 }
@@ -47,7 +48,6 @@ impl AppConfig {
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(500 * 1024 * 1024), // 500 MB
             redis_url: std::env::var("REDIS_URL").ok(),
-            storage_path: std::env::var("STORAGE_PATH").ok().map(PathBuf::from),
             cors_origin: std::env::var("CORS_ORIGIN").ok(),
             database_url: std::env::var("DATABASE_URL").ok(),
         }
@@ -62,7 +62,7 @@ impl AppConfig {
 struct AppState {
     max_upload_bytes: usize,
     redis: Option<redis::aio::MultiplexedConnection>,
-    storage_path: Option<PathBuf>,
+    bucket: Option<Arc<s3::Bucket>>,
     db: Option<PgPool>,
 }
 
@@ -149,6 +149,7 @@ struct ProgressData {
     tiles_done: Option<u32>,
     tiles_total: Option<u32>,
     download_url: Option<String>,
+    pmtiles_url: Option<String>,
     error: Option<String>,
 }
 
@@ -316,27 +317,24 @@ async fn process_tiles(
     let is_large = should_use_streaming(&body, STREAMING_THRESHOLD);
 
     if is_large {
-        // Async path: enqueue to Redis
-        let (mut redis, storage_path) = match (&state.redis, &state.storage_path) {
-            (Some(r), Some(s)) => (r.clone(), s.clone()),
+        // Async path: enqueue to Redis, upload to S3
+        let (mut redis, bucket) = match (&state.redis, &state.bucket) {
+            (Some(r), Some(b)) => (r.clone(), b.clone()),
             _ => {
                 return Err(ApiError::ServiceUnavailable(
-                    "async processing not configured (REDIS_URL and STORAGE_PATH required)".into(),
+                    "async processing not configured (REDIS_URL and S3 env vars required)".into(),
                 ));
             }
         };
 
         let job_id = Uuid::new_v4().to_string();
 
-        // Write image bytes to disk
-        let uploads_dir = storage_path.join("uploads");
-        tokio::fs::create_dir_all(&uploads_dir)
+        // Upload image bytes to S3
+        let s3_key = format!("uploads/{job_id}.bin");
+        bucket
+            .put_object(&s3_key, &body)
             .await
-            .map_err(|e| ApiError::Processing(format!("failed to create uploads dir: {e}")))?;
-        let input_path = uploads_dir.join(format!("{job_id}.bin"));
-        tokio::fs::write(&input_path, &body)
-            .await
-            .map_err(|e| ApiError::Processing(format!("failed to write upload: {e}")))?;
+            .map_err(|e| ApiError::Processing(format!("S3 upload failed: {e}")))?;
 
         // Set initial progress in Redis
         let now = SystemTime::now()
@@ -383,11 +381,12 @@ async fn process_tiles(
             projection,
         };
         let tiler = Tiler::new(config);
-        let mut buf = Cursor::new(Vec::new());
+        let buf = Cursor::new(Vec::new());
+        let mut zip_writer = ZipTileWriter::new(buf);
         tiler
-            .process_bytes(&image_bytes, &mut buf, |_| {})
+            .process_bytes(&image_bytes, &mut zip_writer, |_| {})
             .map_err(|e| ApiError::Processing(e.to_string()))?;
-        Ok::<_, ApiError>(buf.into_inner())
+        Ok::<_, ApiError>(zip_writer.into_inner().unwrap().into_inner())
     })
     .await
     .map_err(|e| ApiError::Processing(format!("task join error: {e}")))?;
@@ -474,17 +473,14 @@ async fn job_download(
     State(state): State<AppState>,
     Path(job_id): Path<String>,
 ) -> Result<Response, ApiError> {
-    let storage_path = state
-        .storage_path
+    let bucket = state
+        .bucket
         .as_ref()
-        .ok_or_else(|| ApiError::ServiceUnavailable("storage not configured".into()))?;
+        .ok_or_else(|| ApiError::ServiceUnavailable("S3 not configured".into()))?;
 
-    let zip_path = storage_path
-        .join("tiles")
-        .join(&job_id)
-        .join("tiles.zip");
-
-    let zip_bytes = tokio::fs::read(&zip_path)
+    let s3_key = format!("tiles/{job_id}/tiles.zip");
+    let resp = bucket
+        .get_object(&s3_key)
         .await
         .map_err(|_| ApiError::NotFound)?;
 
@@ -497,7 +493,36 @@ async fn job_download(
                 "attachment; filename=\"tiles.zip\"",
             ),
         ],
-        zip_bytes,
+        resp.to_vec(),
+    )
+        .into_response())
+}
+
+async fn job_download_pmtiles(
+    State(state): State<AppState>,
+    Path(job_id): Path<String>,
+) -> Result<Response, ApiError> {
+    let bucket = state
+        .bucket
+        .as_ref()
+        .ok_or_else(|| ApiError::ServiceUnavailable("S3 not configured".into()))?;
+
+    let s3_key = format!("tiles/{job_id}/tiles.pmtiles");
+    let resp = bucket
+        .get_object(&s3_key)
+        .await
+        .map_err(|_| ApiError::NotFound)?;
+
+    Ok((
+        StatusCode::OK,
+        [
+            (header::CONTENT_TYPE, "application/octet-stream"),
+            (
+                header::CONTENT_DISPOSITION,
+                "attachment; filename=\"tiles.pmtiles\"",
+            ),
+        ],
+        resp.to_vec(),
     )
         .into_response())
 }
@@ -675,14 +700,29 @@ async fn delete_tileset(
 ) -> Result<StatusCode, ApiError> {
     let db = require_db(&state)?;
 
-    let result = sqlx::query("DELETE FROM tile_sets WHERE slug = $1")
+    // Fetch the tileset first so we can get its storage_path for S3 cleanup
+    let row = sqlx::query_as::<_, TileSetRow>(
+        "SELECT id, user_id, name, slug, projection, tile_size, min_zoom, max_zoom, tile_count, size_bytes, storage_path, public, created_at
+         FROM tile_sets WHERE slug = $1",
+    )
+    .bind(&slug)
+    .fetch_optional(&db)
+    .await
+    .map_err(|e| ApiError::Db(e.to_string()))?
+    .ok_or(ApiError::NotFound)?;
+
+    sqlx::query("DELETE FROM tile_sets WHERE slug = $1")
         .bind(&slug)
         .execute(&db)
         .await
         .map_err(|e| ApiError::Db(e.to_string()))?;
 
-    if result.rows_affected() == 0 {
-        return Err(ApiError::NotFound);
+    // Clean up S3 objects if bucket is configured
+    if let Some(ref bucket) = state.bucket {
+        let storage_path = &row.storage_path;
+        let _ = bucket.delete_object(&format!("{storage_path}/tiles.zip")).await;
+        let _ = bucket.delete_object(&format!("{storage_path}/tiles.pmtiles")).await;
+        tracing::info!(slug = %slug, "deleted S3 objects for tileset");
     }
 
     Ok(StatusCode::NO_CONTENT)
@@ -753,16 +793,14 @@ async fn main() {
         None
     };
 
-    // Ensure storage directories exist
-    if let Some(ref path) = config.storage_path {
-        tokio::fs::create_dir_all(path.join("uploads")).await.ok();
-        tokio::fs::create_dir_all(path.join("tiles")).await.ok();
-    }
+    // Initialize S3 bucket if configured
+    let bucket = s3::bucket_from_env();
+    tracing::info!("S3: {}", if bucket.is_some() { "configured" } else { "not configured" });
 
     let state = AppState {
         max_upload_bytes: config.max_upload_bytes,
         redis: redis.clone(),
-        storage_path: config.storage_path,
+        bucket: bucket.map(Arc::from),
         db,
     };
 
@@ -798,6 +836,11 @@ async fn main() {
         .route(
             "/api/tiles/{job_id}/download",
             get(job_download)
+                .layer(middleware::from_fn_with_state(rate_limit.clone(), rate_limit_download)),
+        )
+        .route(
+            "/api/tiles/{job_id}/download/pmtiles",
+            get(job_download_pmtiles)
                 .layer(middleware::from_fn_with_state(rate_limit, rate_limit_download)),
         )
         .route("/api/tilesets", post(create_tileset).get(list_tilesets))

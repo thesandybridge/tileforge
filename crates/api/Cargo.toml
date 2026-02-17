@@ -17,3 +17,4 @@ sqlx = { version = "0.8", features = ["runtime-tokio", "tls-rustls", "postgres",
 chrono = { version = "0.4", features = ["serde"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+rust-s3 = { version = "=0.37.1", default-features = false, features = ["tokio-rustls-tls"] }

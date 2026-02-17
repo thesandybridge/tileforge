@@ -1,11 +1,12 @@
+mod s3;
+
 use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
-use std::io::Cursor;
-use std::path::PathBuf;
 use std::cell::Cell;
+use std::io::Cursor;
 use std::sync::{Arc, Mutex};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
-use tileforge_core::{Projection, TileConfig, TileProgress, Tiler};
+use tileforge_core::{PmTilesTileWriter, Projection, TileConfig, TileProgress, Tiler, ZipTileWriter};
 
 fn unix_now() -> u64 {
     SystemTime::now()
@@ -40,6 +41,8 @@ struct ProgressUpdate {
     #[serde(skip_serializing_if = "Option::is_none")]
     download_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pmtiles_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<String>,
 }
 
@@ -49,7 +52,6 @@ struct ProgressUpdate {
 
 struct WorkerConfig {
     redis_url: String,
-    storage_path: PathBuf,
 }
 
 impl WorkerConfig {
@@ -57,9 +59,6 @@ impl WorkerConfig {
         Self {
             redis_url: std::env::var("REDIS_URL")
                 .unwrap_or_else(|_| "redis://127.0.0.1:6379".into()),
-            storage_path: PathBuf::from(
-                std::env::var("STORAGE_PATH").unwrap_or_else(|_| "/tmp/tileforge".into()),
-            ),
         }
     }
 }
@@ -78,11 +77,9 @@ async fn main() {
         .init();
 
     let config = WorkerConfig::from_env();
-    tracing::info!(
-        "worker starting, redis={}, storage={}",
-        config.redis_url,
-        config.storage_path.display()
-    );
+    let bucket = s3::bucket_from_env().expect("S3 env vars required (S3_ENDPOINT, S3_BUCKET, S3_ACCESS_KEY, S3_SECRET_KEY)");
+
+    tracing::info!("worker starting, redis={}", config.redis_url);
 
     let client = redis::Client::open(config.redis_url.as_str())
         .expect("invalid REDIS_URL");
@@ -90,12 +87,6 @@ async fn main() {
         .get_multiplexed_async_connection()
         .await
         .expect("failed to connect to Redis");
-
-    // Ensure storage directories exist
-    let uploads_dir = config.storage_path.join("uploads");
-    let tiles_dir = config.storage_path.join("tiles");
-    tokio::fs::create_dir_all(&uploads_dir).await.ok();
-    tokio::fs::create_dir_all(&tiles_dir).await.ok();
 
     tracing::info!("listening for jobs on tileforge:jobs");
 
@@ -127,7 +118,7 @@ async fn main() {
 
         tracing::info!(job_id = %job.job_id, "processing job");
 
-        if let Err(e) = process_job(&job, &config.storage_path, &mut conn).await {
+        if let Err(e) = process_job(&job, &bucket, &mut conn).await {
             tracing::error!(job_id = %job.job_id, "job failed: {e}");
             let progress = ProgressUpdate {
                 status: "failed".into(),
@@ -136,6 +127,7 @@ async fn main() {
                 tiles_done: None,
                 tiles_total: None,
                 download_url: None,
+                pmtiles_url: None,
                 error: Some(e.to_string()),
             };
             let _: redis::RedisResult<()> = conn
@@ -155,7 +147,7 @@ async fn main() {
 
 async fn process_job(
     job: &Job,
-    storage_path: &PathBuf,
+    bucket: &s3::Bucket,
     conn: &mut redis::aio::MultiplexedConnection,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let progress_key = format!("tileforge:progress:{}", job.job_id);
@@ -168,14 +160,19 @@ async fn process_job(
         tiles_done: Some(0),
         tiles_total: Some(0),
         download_url: None,
+        pmtiles_url: None,
         error: None,
     };
     conn.set_ex::<_, _, ()>(&progress_key, serde_json::to_string(&initial)?, 3600u64)
         .await?;
 
-    // Read image from uploads
-    let input_path = storage_path.join("uploads").join(format!("{}.bin", job.job_id));
-    let image_bytes = tokio::fs::read(&input_path).await?;
+    // Download image from S3
+    let s3_key = format!("uploads/{}.bin", job.job_id);
+    let resp = bucket
+        .get_object(&s3_key)
+        .await
+        .map_err(|e| format!("S3 download failed: {e}"))?;
+    let image_bytes = resp.to_vec();
 
     let tile_size = job.tile_size.unwrap_or(256);
     let projection = match job.projection.as_deref() {
@@ -214,6 +211,7 @@ async fn process_job(
                     tiles_done: Some(p.tiles_done),
                     tiles_total: Some(p.tiles_total),
                     download_url: None,
+                    pmtiles_url: None,
                     error: None,
                 };
                 let _: redis::RedisResult<()> = conn
@@ -231,13 +229,18 @@ async fn process_job(
         }
     });
 
-    // Run the CPU-heavy tiling in a blocking thread
+    // Clone image bytes for the PMTiles pass
+    let image_bytes_for_pmtiles = image_bytes.clone();
+    let pmtiles_config = config.clone();
+
+    // Run the CPU-heavy tiling in a blocking thread (ZIP pass)
     let progress_writer = Arc::clone(&shared_progress);
     let zip_bytes = tokio::task::spawn_blocking(move || {
         let tiler = Tiler::new(config);
-        let mut buf = Cursor::new(Vec::new());
+        let buf = Cursor::new(Vec::new());
+        let mut zip_writer = ZipTileWriter::new(buf);
         let last_write = Cell::new(Instant::now());
-        tiler.process_bytes(&image_bytes, &mut buf, |p: TileProgress| {
+        tiler.process_bytes(&image_bytes, &mut zip_writer, |p: TileProgress| {
             let now = Instant::now();
             // Throttle updates: first tile, every 250ms, or last tile
             if p.tiles_done == 1
@@ -248,7 +251,7 @@ async fn process_job(
                 last_write.set(now);
             }
         })?;
-        Ok::<_, tileforge_core::TilerError>(buf.into_inner())
+        Ok::<_, tileforge_core::TilerError>(zip_writer.into_inner().unwrap().into_inner())
     })
     .await??;
 
@@ -257,11 +260,45 @@ async fn process_job(
     poller.abort();
     let _ = poller.await;
 
-    // Write ZIP to output directory
-    let output_dir = storage_path.join("tiles").join(&job.job_id);
-    tokio::fs::create_dir_all(&output_dir).await?;
-    let output_path = output_dir.join("tiles.zip");
-    tokio::fs::write(&output_path, &zip_bytes).await?;
+    // Upload ZIP to S3
+    bucket
+        .put_object(&format!("tiles/{}/tiles.zip", job.job_id), &zip_bytes)
+        .await
+        .map_err(|e| format!("S3 ZIP upload failed: {e}"))?;
+
+    tracing::info!(
+        job_id = %job.job_id,
+        zip_size = zip_bytes.len(),
+        "ZIP uploaded to S3"
+    );
+
+    // PMTiles pass
+    // TODO(perf): TeeWriter to avoid double processing
+    let min_zoom = pmtiles_config.min_zoom.unwrap_or(0);
+    let max_zoom = pmtiles_config.max_zoom.unwrap_or(5);
+    let pmtiles_bytes = tokio::task::spawn_blocking(move || {
+        let tiler = Tiler::new(pmtiles_config);
+        let tmp = tempfile::NamedTempFile::new()?;
+        let file = tmp.reopen()?;
+        let mut writer = PmTilesTileWriter::new(file, min_zoom as u8, max_zoom as u8)?;
+        tiler.process_bytes(&image_bytes_for_pmtiles, &mut writer, |_| {})?;
+        std::fs::read(tmp.path()).map_err(tileforge_core::TilerError::Io)
+    })
+    .await??;
+
+    bucket
+        .put_object(
+            &format!("tiles/{}/tiles.pmtiles", job.job_id),
+            &pmtiles_bytes,
+        )
+        .await
+        .map_err(|e| format!("S3 PMTiles upload failed: {e}"))?;
+
+    tracing::info!(
+        job_id = %job.job_id,
+        pmtiles_size = pmtiles_bytes.len(),
+        "PMTiles uploaded to S3"
+    );
 
     // Set final progress
     let final_progress = ProgressUpdate {
@@ -271,21 +308,19 @@ async fn process_job(
         tiles_done: None,
         tiles_total: None,
         download_url: Some(format!("/api/tiles/{}/download", job.job_id)),
+        pmtiles_url: Some(format!("/api/tiles/{}/download/pmtiles", job.job_id)),
         error: None,
     };
     conn.set_ex::<_, _, ()>(&progress_key, serde_json::to_string(&final_progress)?, 3600u64)
         .await?;
 
-    // Cleanup: delete uploaded image
-    if let Err(e) = tokio::fs::remove_file(&input_path).await {
-        tracing::warn!(job_id = %job.job_id, "failed to delete upload: {e}");
-    }
+    // Cleanup: delete upload from S3
+    bucket
+        .delete_object(&format!("uploads/{}.bin", job.job_id))
+        .await
+        .ok();
 
-    tracing::info!(
-        job_id = %job.job_id,
-        zip_size = zip_bytes.len(),
-        "job complete"
-    );
+    tracing::info!(job_id = %job.job_id, "job complete");
 
     Ok(())
 }
