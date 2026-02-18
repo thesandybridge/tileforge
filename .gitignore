@@ -9,3 +9,4 @@ docs/
 .env.*
 web/.env.local
 web/next-env.d.ts
+mprocs.log
