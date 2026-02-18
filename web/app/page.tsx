@@ -1,10 +1,12 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useReducer, useRef } from "react";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { LoaderCircle, Upload } from "lucide-react";
+import { ScrollReveal } from "@/components/scroll-reveal";
+import { useProcessing } from "@/components/processing-context";
 import { useTileforge } from "@/lib/use-tileforge";
 import { PLAN_PRO } from "@/lib/plans";
 import { Button } from "@/components/ui/button";
@@ -61,119 +63,182 @@ function calcTotalTiles(minZoom: number, maxZoom: number): number {
   return total;
 }
 
+// --- Form state reducer ---
+
+interface FormState {
+  mode: "local" | "server";
+  fileName: string | null;
+  imageInfo: ImageInfo | null;
+  tileSize: number;
+  maxZoom: number;
+  projection: "flat" | "mercator";
+  hasFile: boolean;
+  dragging: boolean;
+}
+
+type FormAction =
+  | { type: "SET_MODE"; mode: "local" | "server" }
+  | { type: "FILE_LOADED"; fileName: string; imageInfo: ImageInfo | null; tileSize: number }
+  | { type: "FILE_BUFFERED" }
+  | { type: "TILE_SIZE_CHANGED"; tileSize: number }
+  | { type: "MAX_ZOOM_CHANGED"; maxZoom: number }
+  | { type: "PROJECTION_CHANGED"; projection: "flat" | "mercator" }
+  | { type: "DRAG_START" }
+  | { type: "DRAG_END" }
+  | { type: "RESET" };
+
+const initialFormState: FormState = {
+  mode: "local",
+  fileName: null,
+  imageInfo: null,
+  tileSize: 256,
+  maxZoom: 4,
+  projection: "flat",
+  hasFile: false,
+  dragging: false,
+};
+
+function formReducer(state: FormState, action: FormAction): FormState {
+  switch (action.type) {
+    case "SET_MODE":
+      return { ...state, mode: action.mode };
+    case "FILE_LOADED": {
+      const maxZoom = action.imageInfo
+        ? calcMaxZoom(action.imageInfo.width, action.imageInfo.height, action.tileSize)
+        : state.maxZoom;
+      return { ...state, fileName: action.fileName, imageInfo: action.imageInfo, maxZoom };
+    }
+    case "FILE_BUFFERED":
+      return { ...state, hasFile: true };
+    case "TILE_SIZE_CHANGED": {
+      const maxZoom = state.imageInfo
+        ? Math.min(state.maxZoom, calcMaxZoom(state.imageInfo.width, state.imageInfo.height, action.tileSize))
+        : state.maxZoom;
+      return { ...state, tileSize: action.tileSize, maxZoom };
+    }
+    case "MAX_ZOOM_CHANGED":
+      return { ...state, maxZoom: action.maxZoom };
+    case "PROJECTION_CHANGED":
+      return { ...state, projection: action.projection };
+    case "DRAG_START":
+      return state.dragging ? state : { ...state, dragging: true };
+    case "DRAG_END":
+      return state.dragging ? { ...state, dragging: false } : state;
+    case "RESET":
+      return initialFormState;
+  }
+}
+
 export default function Home() {
   const { status, progress, zipBlob, pmtilesUrl, error, durationMs, process, processServer, reset } = useTileforge();
   const { data: session } = useSession();
-  const [useServer, setUseServer] = useState(false);
-  const [fileName, setFileName] = useState<string | null>(null);
-  const [imageInfo, setImageInfo] = useState<ImageInfo | null>(null);
-  const [tileSize, setTileSize] = useState("256");
-  const [maxZoom, setMaxZoom] = useState("4");
-  const [projection, setProjection] = useState<"flat" | "mercator">("flat");
+  const { setProcessing } = useProcessing();
+  const [form, dispatch] = useReducer(formReducer, initialFormState);
   const fileRef = useRef<ArrayBuffer | null>(null);
-  const [hasFile, setHasFile] = useState(false);
-  const [dragging, setDragging] = useState(false);
+
+  useEffect(() => {
+    setProcessing(status === "processing" || status === "waking");
+  }, [status, setProcessing]);
 
   const handleFile = useCallback(async (file: File) => {
-    setFileName(file.name);
+    let imageInfo: ImageInfo | null = null;
     try {
-      const info = await readImageDimensions(file);
-      setImageInfo(info);
-      const calculated = calcMaxZoom(info.width, info.height, Number(tileSize));
-      setMaxZoom(String(calculated));
+      imageInfo = await readImageDimensions(file);
     } catch {
-      setImageInfo(null);
+      // imageInfo stays null
     }
+    dispatch({ type: "FILE_LOADED", fileName: file.name, imageInfo, tileSize: form.tileSize });
     const buf = await file.arrayBuffer();
     fileRef.current = buf;
-    setHasFile(true);
-  }, [tileSize]);
+    dispatch({ type: "FILE_BUFFERED" });
+  }, [form.tileSize]);
 
   const onDrop = useCallback(
     (e: React.DragEvent) => {
       e.preventDefault();
-      setDragging(false);
+      dispatch({ type: "DRAG_END" });
       const file = e.dataTransfer.files[0];
       if (file) handleFile(file);
     },
     [handleFile],
   );
 
-  const ts = Number(tileSize);
-  const mz = Number(maxZoom);
-  const calculatedMaxZoom = imageInfo
-    ? calcMaxZoom(imageInfo.width, imageInfo.height, ts)
+  // Derived values (not stored in state)
+  const calculatedMaxZoom = form.imageInfo
+    ? calcMaxZoom(form.imageInfo.width, form.imageInfo.height, form.tileSize)
     : 0;
-  const totalTiles = calcTotalTiles(0, mz);
-  const memoryWarning = imageInfo && imageInfo.decodedMB > 1200;
+  const totalTiles = calcTotalTiles(0, form.maxZoom);
+  const memoryWarning = form.imageInfo && form.imageInfo.decodedMB > 1200;
+  const canProcess = form.hasFile && (form.mode === "server" || status === "ready") && status !== "processing" && status !== "waking";
+  const showCard = form.mode === "server" || status === "ready" || status === "done" || status === "error" || status === "processing" || status === "waking";
 
   const onProcess = useCallback(() => {
     if (!fileRef.current) return;
     const copy = fileRef.current.slice(0);
-    if (useServer) {
-      processServer(copy, { tileSize: ts, maxZoom: mz, projection, token: session?.accessToken });
+    if (form.mode === "server") {
+      processServer(copy, { tileSize: form.tileSize, maxZoom: form.maxZoom, projection: form.projection, token: session?.accessToken });
     } else {
-      process(copy, { tileSize: ts, maxZoom: mz, projection });
+      process(copy, { tileSize: form.tileSize, maxZoom: form.maxZoom, projection: form.projection });
     }
-  }, [process, processServer, ts, mz, projection, useServer, session?.accessToken]);
+  }, [process, processServer, form.tileSize, form.maxZoom, form.projection, form.mode, session?.accessToken]);
 
   const onDownload = useCallback(() => {
     if (!zipBlob) return;
     const url = URL.createObjectURL(zipBlob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = fileName
-      ? fileName.replace(/\.[^.]+$/, "_tiles.zip")
+    a.download = form.fileName
+      ? form.fileName.replace(/\.[^.]+$/, "_tiles.zip")
       : "tiles.zip";
     a.click();
     URL.revokeObjectURL(url);
-  }, [zipBlob, fileName]);
+  }, [zipBlob, form.fileName]);
 
   const onDownloadPmtiles = useCallback(() => {
     if (!pmtilesUrl) return;
     const a = document.createElement("a");
     a.href = pmtilesUrl;
-    a.download = fileName
-      ? fileName.replace(/\.[^.]+$/, "_tiles.pmtiles")
+    a.download = form.fileName
+      ? form.fileName.replace(/\.[^.]+$/, "_tiles.pmtiles")
       : "tiles.pmtiles";
     a.click();
-  }, [pmtilesUrl, fileName]);
+  }, [pmtilesUrl, form.fileName]);
 
   const onReset = useCallback(() => {
     fileRef.current = null;
-    setHasFile(false);
-    setFileName(null);
-    setImageInfo(null);
+    dispatch({ type: "RESET" });
     reset();
   }, [reset]);
-
-  const canProcess = hasFile && (useServer || status === "ready") && status !== "processing" && status !== "waking";
-  const showCard = useServer || status === "ready" || status === "done" || status === "error" || status === "processing" || status === "waking";
 
   return (
     <div className="py-16">
       {/* Hero */}
-      <header className="mx-auto max-w-2xl px-6 text-center">
-        <div className="inline-flex items-center gap-3">
-          <svg
-            viewBox="0 0 32 32"
-            className="text-primary h-10 w-10 sm:h-12 sm:w-12"
-            role="img"
-            aria-label="Tileforge logo"
-          >
-            <rect x="1" y="1" width="13.5" height="13.5" rx="3" fill="currentColor" />
-            <rect x="17.5" y="1" width="13.5" height="13.5" rx="3" fill="currentColor" opacity="0.7" />
-            <rect x="1" y="17.5" width="13.5" height="13.5" rx="3" fill="currentColor" opacity="0.7" />
-            <rect x="17.5" y="17.5" width="13.5" height="13.5" rx="3" fill="currentColor" opacity="0.4" />
-          </svg>
-          <h1 className="text-4xl font-bold tracking-tight sm:text-5xl">
-            Tileforge
-          </h1>
-        </div>
-        <p className="text-muted-foreground mt-4 text-lg">
-          Slice any image into XYZ map tiles — entirely in your browser, powered by WebAssembly.
-        </p>
-      </header>
+      <ScrollReveal>
+        <header className="mx-auto max-w-2xl px-6 text-center">
+          <div className="inline-flex items-center gap-3">
+            <svg
+              viewBox="0 0 32 32"
+              className="text-primary h-10 w-10 sm:h-12 sm:w-12"
+              role="img"
+              aria-label="tileforge logo"
+            >
+              <rect x="5" y="5" width="9" height="9" rx="2" fill="currentColor" />
+              <rect x="18" y="5" width="9" height="9" rx="2" fill="currentColor" />
+              <rect x="5" y="18" width="9" height="9" rx="2" fill="currentColor" />
+              <rect x="19" y="19" width="7.5" height="7.5" rx="2" fill="currentColor" opacity="0.5" />
+            </svg>
+            <h1
+              className="font-[family-name:var(--font-geist-mono)] text-primary text-4xl font-bold tracking-tight sm:text-5xl"
+              style={{ textShadow: "0 0 20px rgba(215,153,33,0.3)" }}
+            >
+              tileforge
+            </h1>
+          </div>
+          <p className="text-muted-foreground mt-4 text-lg">
+            Slice any image into XYZ map tiles — entirely in your browser, powered by WebAssembly.
+          </p>
+        </header>
+      </ScrollReveal>
 
       <noscript>
         <p className="mx-auto mt-10 max-w-md text-center text-sm text-yellow-500">
@@ -182,36 +247,37 @@ export default function Home() {
       </noscript>
 
       {/* Main tool card */}
+      <ScrollReveal>
       <main className="mx-auto mt-10 max-w-2xl px-6">
-        {!useServer && (status === "idle" || status === "loading") && (
+        {form.mode === "local" && (status === "idle" || status === "loading") && (
           <p className="text-muted-foreground text-center text-sm">Loading WASM engine...</p>
         )}
 
         {showCard && (
-          <Card className="border-border/50 shadow-lg">
+          <Card className="border-border/50 corona-glow shadow-lg">
             <CardContent className="space-y-6 p-6 sm:p-8">
               {/* Drop zone */}
               <div
                 onDragOver={(e) => {
                   e.preventDefault();
-                  setDragging(true);
+                  dispatch({ type: "DRAG_START" });
                 }}
-                onDragLeave={() => setDragging(false)}
+                onDragLeave={() => dispatch({ type: "DRAG_END" })}
                 onDrop={onDrop}
                 className={`cursor-pointer rounded-xl border-2 border-dashed transition-colors ${
-                  dragging
+                  form.dragging
                     ? "border-primary bg-primary/5"
                     : "border-border hover:border-muted-foreground/30"
                 }`}
               >
                 <div className="flex flex-col items-center justify-center py-12 text-center">
                   <Upload className="text-muted-foreground mb-4 h-10 w-10" />
-                  {fileName ? (
+                  {form.fileName ? (
                     <div>
-                      <p className="font-medium">{fileName}</p>
-                      {imageInfo && (
+                      <p className="font-medium">{form.fileName}</p>
+                      {form.imageInfo && (
                         <p className="text-muted-foreground mt-1 text-sm">
-                          {imageInfo.width} &times; {imageInfo.height} &mdash; ~{Math.round(imageInfo.decodedMB)} MB decoded
+                          {form.imageInfo.width} &times; {form.imageInfo.height} &mdash; ~{Math.round(form.imageInfo.decodedMB)} MB decoded
                         </p>
                       )}
                     </div>
@@ -240,9 +306,9 @@ export default function Home() {
                 </div>
               </div>
 
-              {memoryWarning && (
+              {memoryWarning && form.imageInfo && (
                 <p className="text-sm text-yellow-500">
-                  This image requires ~{Math.round(imageInfo!.decodedMB)} MB of memory to decode.
+                  This image requires ~{Math.round(form.imageInfo.decodedMB)} MB of memory to decode.
                   Processing may fail on devices with limited RAM.
                 </p>
               )}
@@ -254,7 +320,7 @@ export default function Home() {
                     <label className="text-muted-foreground text-xs font-medium uppercase tracking-wider">
                       Mode
                     </label>
-                    <Select value={useServer ? "server" : "local"} onValueChange={(v) => setUseServer(v === "server")}>
+                    <Select value={form.mode} onValueChange={(v) => dispatch({ type: "SET_MODE", mode: v as "local" | "server" })}>
                       <SelectTrigger>
                         <SelectValue />
                       </SelectTrigger>
@@ -270,7 +336,7 @@ export default function Home() {
                   <label className="text-muted-foreground text-xs font-medium uppercase tracking-wider">
                     Tile size
                   </label>
-                  <Select value={tileSize} onValueChange={setTileSize}>
+                  <Select value={String(form.tileSize)} onValueChange={(v) => dispatch({ type: "TILE_SIZE_CHANGED", tileSize: Number(v) })}>
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
@@ -286,18 +352,18 @@ export default function Home() {
                   <label className="text-muted-foreground text-xs font-medium uppercase tracking-wider">
                     Max zoom
                   </label>
-                  <Select value={maxZoom} onValueChange={setMaxZoom}>
+                  <Select value={String(form.maxZoom)} onValueChange={(v) => dispatch({ type: "MAX_ZOOM_CHANGED", maxZoom: Number(v) })}>
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {Array.from({ length: useServer ? 13 : 9 }, (_, i) => (
+                      {Array.from({ length: form.mode === "server" ? 13 : 9 }, (_, i) => (
                         <SelectItem
                           key={i}
                           value={String(i)}
-                          disabled={!useServer && imageInfo ? i > calculatedMaxZoom : false}
+                          disabled={form.mode === "local" && form.imageInfo ? i > calculatedMaxZoom : false}
                         >
-                          {i}{!useServer && imageInfo && i === calculatedMaxZoom ? " (max)" : ""}
+                          {i}{form.mode === "local" && form.imageInfo && i === calculatedMaxZoom ? " (max)" : ""}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -308,7 +374,7 @@ export default function Home() {
                   <label className="text-muted-foreground text-xs font-medium uppercase tracking-wider">
                     Projection
                   </label>
-                  <Select value={projection} onValueChange={(v) => setProjection(v as "flat" | "mercator")}>
+                  <Select value={form.projection} onValueChange={(v) => dispatch({ type: "PROJECTION_CHANGED", projection: v as "flat" | "mercator" })}>
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
@@ -320,9 +386,9 @@ export default function Home() {
                 </div>
               </div>
 
-              {imageInfo && (
+              {form.imageInfo && (
                 <p className="text-muted-foreground text-center text-sm">
-                  {totalTiles} tiles &mdash; ~{Math.round(imageInfo.decodedMB)} MB peak memory
+                  {totalTiles} tiles &mdash; ~{Math.round(form.imageInfo.decodedMB)} MB peak memory
                 </p>
               )}
 
@@ -348,7 +414,7 @@ export default function Home() {
                     <div className="flex flex-col items-center gap-2 py-2">
                       <LoaderCircle className="text-primary h-6 w-6 animate-spin" />
                       <p className="text-muted-foreground text-xs">
-                        {useServer ? "Processing on server..." : "Processing..."}
+                        {form.mode === "server" ? "Processing on server..." : "Processing..."}
                       </p>
                     </div>
                   )}
@@ -382,9 +448,9 @@ export default function Home() {
               </div>
 
               {/* Stats */}
-              {status === "done" && durationMs != null && imageInfo && (
+              {status === "done" && durationMs != null && form.imageInfo && (
                 <p className="text-muted-foreground text-center text-xs">
-                  Done in {(durationMs / 1000).toFixed(1)}s &mdash; {totalTiles} tiles &mdash; peak memory ~{Math.round(imageInfo.decodedMB)} MB
+                  Done in {(durationMs / 1000).toFixed(1)}s &mdash; {totalTiles} tiles &mdash; peak memory ~{Math.round(form.imageInfo.decodedMB)} MB
                 </p>
               )}
 
@@ -395,17 +461,18 @@ export default function Home() {
           </Card>
         )}
       </main>
+      </ScrollReveal>
 
       {/* Tile preview — full width */}
-      {status === "done" && zipBlob && imageInfo && (
+      {status === "done" && zipBlob && form.imageInfo && (
         <div className="mx-auto mt-8 max-w-6xl px-6">
           <TilePreview
             zipBlob={zipBlob}
-            imageWidth={imageInfo.width}
-            imageHeight={imageInfo.height}
-            maxZoom={mz}
-            tileSize={ts}
-            projection={projection}
+            imageWidth={form.imageInfo.width}
+            imageHeight={form.imageInfo.height}
+            maxZoom={form.maxZoom}
+            tileSize={form.tileSize}
+            projection={form.projection}
           />
         </div>
       )}

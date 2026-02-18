@@ -22,6 +22,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { UpgradeBanner } from "@/components/upgrade-banner";
+import { ScrollReveal } from "@/components/scroll-reveal";
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -51,14 +52,16 @@ export default function MyTilesetsPage() {
 
   return (
     <div className="py-10">
-      <header className="mx-auto max-w-4xl px-6">
-        <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">
-          My Tilesets
-        </h1>
-        <p className="text-muted-foreground mt-2">
-          Tilesets you&apos;ve created.
-        </p>
-      </header>
+      <ScrollReveal>
+        <header className="mx-auto max-w-4xl px-6">
+          <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">
+            My Tilesets
+          </h1>
+          <p className="text-muted-foreground mt-2">
+            Tilesets you&apos;ve created.
+          </p>
+        </header>
+      </ScrollReveal>
 
       <main className="mx-auto mt-10 max-w-4xl px-6">
         {user && user.storage_quota > 0 && (
@@ -103,6 +106,7 @@ export default function MyTilesetsPage() {
         )}
 
         {tilesets && tilesets.length > 0 && (
+          <ScrollReveal>
           <div className="space-y-6">
             {isFree && (
               <UpgradeBanner message="Upgrade to Pro for server-side processing and persistent storage." />
@@ -110,7 +114,7 @@ export default function MyTilesetsPage() {
           <div className="grid gap-4 sm:grid-cols-2">
             {tilesets.map((ts) => (
               <AlertDialog key={ts.id}>
-                <Card className="border-border/50 group relative overflow-hidden">
+                <Card className="border-border/50 corona-glow-hover group relative overflow-hidden">
                   <Link href={`/tilesets/${encodeURIComponent(ts.slug)}`}>
                     <div className="bg-muted/50 relative aspect-video">
                       <img
@@ -189,6 +193,7 @@ export default function MyTilesetsPage() {
             ))}
           </div>
           </div>
+          </ScrollReveal>
         )}
       </main>
 

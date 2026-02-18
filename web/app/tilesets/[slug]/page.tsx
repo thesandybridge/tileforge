@@ -95,17 +95,18 @@ export default function TileSetDetailPage() {
   const backHref = isOwner || session?.user ? "/my-tilesets" : "/gallery";
   const backLabel = isOwner || session?.user ? "My Tilesets" : "Gallery";
 
-  const [editing, setEditing] = useState(false);
-  const [editName, setEditName] = useState("");
+  const [editState, setEditState] = useState<
+    { editing: false } | { editing: true; name: string }
+  >({ editing: false });
 
   function handleRename() {
-    if (!tileset) return;
-    const trimmed = editName.trim();
+    if (!tileset || !editState.editing) return;
+    const trimmed = editState.name.trim();
     if (!trimmed || trimmed === tileset.name) {
-      setEditing(false);
+      setEditState({ editing: false });
       return;
     }
-    updateTileset.mutate({ name: trimmed }, { onSuccess: () => setEditing(false) });
+    updateTileset.mutate({ name: trimmed }, { onSuccess: () => setEditState({ editing: false }) });
   }
 
   function handleToggleVisibility() {
@@ -189,27 +190,27 @@ const map = new maplibregl.Map({
         <div className="flex items-start gap-3">
           <Map className="text-primary mt-1 h-6 w-6 shrink-0" />
           <div className="min-w-0 flex-1">
-            {editing ? (
+            {editState.editing ? (
               <div className="flex items-center gap-2">
                 <input
                   autoFocus
-                  value={editName}
-                  onChange={(e) => setEditName(e.target.value)}
+                  value={editState.name}
+                  onChange={(e) => setEditState({ editing: true, name: e.target.value })}
                   onKeyDown={(e) => {
                     if (e.key === "Enter") handleRename();
-                    if (e.key === "Escape") setEditing(false);
+                    if (e.key === "Escape") setEditState({ editing: false });
                   }}
                   className="bg-transparent text-3xl font-bold tracking-tight outline-none border-b border-primary w-full"
                 />
                 <Button size="sm" onClick={handleRename}>Save</Button>
-                <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>Cancel</Button>
+                <Button size="sm" variant="ghost" onClick={() => setEditState({ editing: false })}>Cancel</Button>
               </div>
             ) : (
               <div className="group flex items-center gap-2">
                 <h1 className="text-3xl font-bold tracking-tight">{tileset.name}</h1>
                 {isOwner && (
                   <button
-                    onClick={() => { setEditName(tileset.name); setEditing(true); }}
+                    onClick={() => setEditState({ editing: true, name: tileset.name })}
                     className="text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 transition-opacity"
                   >
                     <Pencil className="h-4 w-4" />
@@ -224,7 +225,7 @@ const map = new maplibregl.Map({
         </div>
 
         {/* Metadata card */}
-        <Card className="border-border/50 mt-8">
+        <Card className="border-border/50 corona-glow mt-8">
           <CardHeader>
             <CardTitle className="text-lg">Details</CardTitle>
           </CardHeader>
@@ -302,14 +303,16 @@ const map = new maplibregl.Map({
           )}
         </div>
 
-        {/* Code snippets */}
-        <div className="mt-8 space-y-6">
-          <h2 className="text-lg font-semibold">Use this tile set</h2>
+        {/* Code snippets — owner only */}
+        {isOwner && (
+          <div className="mt-8 space-y-6">
+            <h2 className="text-lg font-semibold">Use this tile set</h2>
 
-          <CodeBlock label="Tile URL" code={tileUrl} />
-          <CodeBlock label="Leaflet" code={leafletSnippet} />
-          <CodeBlock label="MapLibre GL" code={maplibreSnippet} />
-        </div>
+            <CodeBlock label="Tile URL" code={tileUrl} />
+            <CodeBlock label="Leaflet" code={leafletSnippet} />
+            <CodeBlock label="MapLibre GL" code={maplibreSnippet} />
+          </div>
+        )}
 
         {/* Actions */}
         <div className="mt-8 flex gap-3">

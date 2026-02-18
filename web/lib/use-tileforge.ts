@@ -260,7 +260,9 @@ export function useTileforge() {
                   dispatch({ type: "set_pmtiles_url", url: `${API_URL}${data.pmtiles_url}` });
                 }
                 try {
-                  const dlRes = await fetch(`${API_URL}${data.download_url}`);
+                  const dlHeaders: Record<string, string> = {};
+                  if (opts.token) dlHeaders["authorization"] = `Bearer ${opts.token}`;
+                  const dlRes = await fetch(`${API_URL}${data.download_url}`, { headers: dlHeaders });
                   if (!dlRes.ok) throw new Error(`Download failed (${dlRes.status})`);
                   const buf = await dlRes.arrayBuffer();
                   dispatch({

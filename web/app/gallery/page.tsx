@@ -1,13 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useSession } from "next-auth/react";
 import { Map, Globe, Grid3X3, ImageIcon } from "lucide-react";
-import { API_URL, listTileSets, type TileSet } from "@/lib/api";
+import { API_URL } from "@/lib/api";
 import { PLAN_PRO } from "@/lib/plans";
+import { usePublicTilesets } from "@/hooks/use-tilesets";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { UpgradeBanner } from "@/components/upgrade-banner";
+import { ScrollReveal } from "@/components/scroll-reveal";
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -29,41 +30,34 @@ function timeAgo(dateStr: string): string {
 
 export default function GalleryPage() {
   const { data: session } = useSession();
-  const [tilesets, setTilesets] = useState<TileSet[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { data: tilesets = [], isLoading, error } = usePublicTilesets();
   const isFree = session?.user && session.user.plan !== PLAN_PRO;
-
-  useEffect(() => {
-    listTileSets()
-      .then(setTilesets)
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false));
-  }, []);
 
   return (
     <div className="py-10">
-      <header className="mx-auto max-w-4xl px-6">
-        <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">
-          Public Tile Sets
-        </h1>
-        <p className="text-muted-foreground mt-2">
-          Browse tile sets shared by the community.
-        </p>
-      </header>
+      <ScrollReveal>
+        <header className="mx-auto max-w-4xl px-6">
+          <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">
+            Public Tile Sets
+          </h1>
+          <p className="text-muted-foreground mt-2">
+            Browse tile sets shared by the community.
+          </p>
+        </header>
+      </ScrollReveal>
 
       <main className="mx-auto mt-10 max-w-4xl px-6">
-        {loading && (
+        {isLoading && (
           <p className="text-muted-foreground text-center text-sm">
             Loading tile sets...
           </p>
         )}
 
         {error && (
-          <p className="text-destructive text-center text-sm">{error}</p>
+          <p className="text-destructive text-center text-sm">{error.message}</p>
         )}
 
-        {!loading && !error && tilesets.length === 0 && (
+        {!isLoading && !error && tilesets.length === 0 && (
           <div className="text-muted-foreground py-16 text-center">
             <Map className="mx-auto mb-4 h-12 w-12 opacity-50" />
             <p>No public tile sets yet.</p>
@@ -73,17 +67,18 @@ export default function GalleryPage() {
           </div>
         )}
 
-        {isFree && !loading && tilesets.length > 0 && (
+        {isFree && !isLoading && tilesets.length > 0 && (
           <div className="mb-6">
             <UpgradeBanner message="Want to create your own? Upgrade to Pro for server-side processing." />
           </div>
         )}
 
         {tilesets.length > 0 && (
+          <ScrollReveal>
           <div className="grid gap-4 sm:grid-cols-2">
             {tilesets.map((ts) => (
               <Link key={ts.id} href={`/tilesets/${encodeURIComponent(ts.slug)}`}>
-                <Card className="border-border/50 hover:border-primary/30 overflow-hidden transition-colors">
+                <Card className="border-border/50 hover:border-primary/30 corona-glow-hover overflow-hidden transition-colors">
                   <div className="bg-muted/50 relative aspect-video">
                     <img
                       src={`${API_URL}/api/tiles/${encodeURIComponent(ts.slug)}/thumbnail`}
@@ -127,6 +122,7 @@ export default function GalleryPage() {
               </Link>
             ))}
           </div>
+          </ScrollReveal>
         )}
       </main>
 
