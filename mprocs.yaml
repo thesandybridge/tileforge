@@ -1,0 +1,10 @@
+procs:
+  api:
+    cmd: ["cargo", "run", "--release", "--package", "tileforge-api"]
+  worker:
+    cmd: ["cargo", "run", "--release", "--package", "tileforge-worker"]
+  web:
+    shell: "cd web && npm run dev"
+  stripe:
+    shell: "stripe listen --forward-to localhost:3000/api/stripe/webhook"
+    autostart: true

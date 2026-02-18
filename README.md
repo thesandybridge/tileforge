@@ -114,19 +114,26 @@ Turbopack cannot bundle WASM imports inside Web Workers. The worker and WASM glu
 - **wasm-pack** — `cargo install wasm-pack`
 - **Node.js** 20+ and **npm**
 - **Docker** — for Postgres, MinIO, and Redis
+- **[mprocs](https://github.com/pvolok/mprocs)** — `cargo install mprocs` (tabbed TUI for running services)
 - **Stripe CLI** — `brew install stripe/stripe-cli/stripe` (for webhook testing)
 
 ### Local Dev Quickstart
 
-Spin up all services for full-stack local development:
+**1. Create env files:**
 
-**1. Start infrastructure** (Postgres, MinIO, Redis)
+- `.env` in the project root with Rust service variables:
 
-```bash
-docker compose up -d
+```env
+DATABASE_URL=postgres://tileforge:tileforge@localhost:5433/tileforge
+REDIS_URL=redis://127.0.0.1:6380
+JWT_SECRET=<shared-secret>
+S3_ENDPOINT=http://localhost:9000
+S3_BUCKET=tileforge
+S3_ACCESS_KEY=minioadmin
+S3_SECRET_KEY=minioadmin
 ```
 
-**2. Create a `.env` file in `web/`** with your secrets:
+- `web/.env.local` with Next.js variables:
 
 ```env
 DATABASE_URL=postgres://tileforge:tileforge@localhost:5433/tileforge
@@ -135,40 +142,24 @@ AUTH_GITHUB_ID=<your-github-oauth-app-id>
 AUTH_GITHUB_SECRET=<your-github-oauth-app-secret>
 JWT_SECRET=<shared-secret>
 STRIPE_SECRET_KEY=sk_test_...
-STRIPE_WEBHOOK_SECRET=whsec_...   # from step 5 below
+STRIPE_WEBHOOK_SECRET=whsec_...
 STRIPE_PRICE_ID=price_...
 ```
 
-**3. Open 4 terminals:**
+**2. Start everything:**
 
 ```bash
-# Terminal 1 — Rust API
-DATABASE_URL=postgres://tileforge:tileforge@localhost:5433/tileforge \
-REDIS_URL=redis://127.0.0.1:6380 \
-JWT_SECRET=<shared-secret> \
-S3_ENDPOINT=http://localhost:9000 \
-S3_BUCKET=tileforge \
-S3_ACCESS_KEY=minioadmin \
-S3_SECRET_KEY=minioadmin \
-cargo run --release --package tileforge-api
-
-# Terminal 2 — Worker
-REDIS_URL=redis://127.0.0.1:6380 \
-DATABASE_URL=postgres://tileforge:tileforge@localhost:5433/tileforge \
-S3_ENDPOINT=http://localhost:9000 \
-S3_BUCKET=tileforge \
-S3_ACCESS_KEY=minioadmin \
-S3_SECRET_KEY=minioadmin \
-cargo run --release --package tileforge-worker
-
-# Terminal 3 — Stripe webhook forwarding
-stripe listen --forward-to localhost:3000/api/stripe/webhook
-
-# Terminal 4 — Next.js
-cd web && npm install && npm run dev
+cargo xtask dev
 ```
 
-> **Important:** Always use `--release` for Rust services — image processing is 10-100x slower in debug mode.
+This will:
+- Start Docker infrastructure (Postgres, Redis, MinIO) and wait for readiness
+- Install web dependencies if needed
+- Launch [mprocs](https://github.com/pvolok/mprocs) with tabbed views for **api**, **worker**, **web**, and **stripe**
+
+Use the mprocs TUI to switch between service logs. Ctrl+q exits and automatically stops Docker containers.
+
+> **Important:** Rust services are compiled with `--release` — image processing is 10-100x slower in debug mode.
 
 Open [http://localhost:3000](http://localhost:3000).
 
