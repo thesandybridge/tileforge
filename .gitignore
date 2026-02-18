@@ -8,3 +8,4 @@ docs/
 .env
 .env.*
 web/.env.local
+web/next-env.d.ts
