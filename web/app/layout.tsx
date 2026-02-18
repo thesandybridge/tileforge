@@ -1,12 +1,15 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
+import { Inter, Geist_Mono } from "next/font/google";
 import { ThemeProvider } from "@/components/theme-provider";
 import { SessionProvider } from "@/components/session-provider";
 import { QueryProvider } from "@/components/query-provider";
 import { Navbar } from "@/components/navbar";
+import { CursorGlow } from "@/components/cursor-glow";
+import { ProcessingProvider } from "@/components/processing-context";
 import "./globals.css";
 
 const inter = Inter({ subsets: ["latin"] });
+const geistMono = Geist_Mono({ subsets: ["latin"], variable: "--font-geist-mono" });
 
 const siteUrl = "https://tileforge.sandybridge.io";
 const title = "Tileforge — Slice Images into XYZ Map Tiles";
@@ -75,7 +78,7 @@ export default function RootLayout({
       <head>
         <link rel="icon" href="/icon.svg" type="image/svg+xml" />
         <link rel="apple-touch-icon" href="/icon.svg" />
-        <meta name="theme-color" content="#1a2e1a" media="(prefers-color-scheme: dark)" />
+        <meta name="theme-color" content="#1d2021" media="(prefers-color-scheme: dark)" />
         <meta name="theme-color" content="#fafaf5" media="(prefers-color-scheme: light)" />
         <script
           type="application/ld+json"
@@ -107,12 +110,15 @@ export default function RootLayout({
           }}
         />
       </head>
-      <body className={`${inter.className} min-h-screen antialiased`}>
+      <body className={`${inter.className} ${geistMono.variable} min-h-screen antialiased`}>
         <SessionProvider>
           <QueryProvider>
             <ThemeProvider attribute="class" defaultTheme="dark" enableSystem>
-              <Navbar />
-              {children}
+              <ProcessingProvider>
+                <CursorGlow />
+                <Navbar />
+                {children}
+              </ProcessingProvider>
             </ThemeProvider>
           </QueryProvider>
         </SessionProvider>

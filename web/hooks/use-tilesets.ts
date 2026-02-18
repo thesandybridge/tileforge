@@ -21,6 +21,14 @@ export function useTilesets() {
   });
 }
 
+export function usePublicTilesets() {
+  return useQuery({
+    queryKey: ["public-tilesets"],
+    queryFn: () => listTileSets(),
+    staleTime: 5 * 60 * 1000, // 5 minutes — public gallery changes infrequently
+  });
+}
+
 export function useTileset(slug: string) {
   const { data: session } = useSession();
   return useQuery({
@@ -59,10 +67,14 @@ export function useDeleteTileset() {
 }
 
 export function useTilesetPreview(slug: string) {
+  const { data: session } = useSession();
   return useMutation({
     mutationFn: async () => {
+      const headers: Record<string, string> = {};
+      if (session?.accessToken) headers["authorization"] = `Bearer ${session.accessToken}`;
       const res = await fetch(
         `${API_URL}/api/tiles/${encodeURIComponent(slug)}/download`,
+        { headers },
       );
       if (!res.ok) throw new Error("Download failed");
       return res.blob();

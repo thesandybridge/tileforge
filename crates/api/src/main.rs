@@ -610,6 +610,7 @@ async fn job_progress(
 // ---------------------------------------------------------------------------
 
 async fn job_download(
+    Claims(_user): Claims,
     State(state): State<AppState>,
     Path(job_id): Path<String>,
 ) -> Result<Response, ApiError> {
@@ -665,6 +666,7 @@ async fn job_thumbnail(
 }
 
 async fn job_download_pmtiles(
+    Claims(_user): Claims,
     State(state): State<AppState>,
     Path(job_id): Path<String>,
 ) -> Result<Response, ApiError> {

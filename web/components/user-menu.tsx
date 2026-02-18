@@ -1,7 +1,9 @@
 "use client";
 
 import { useSession, signIn, signOut } from "next-auth/react";
-import { CreditCard, LogIn, LogOut, Map, User } from "lucide-react";
+import { CreditCard, LogIn, LogOut, Map, Star, User } from "lucide-react";
+import { PLAN_PRO } from "@/lib/plans";
+import { useProcessing } from "@/components/processing-context";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -15,6 +17,7 @@ import Link from "next/link";
 
 export function UserMenu() {
   const { data: session, status } = useSession();
+  const { processing } = useProcessing();
 
   if (status === "loading") {
     return <div className="h-8 w-8 animate-pulse rounded-full bg-muted" />;
@@ -32,7 +35,10 @@ export function UserMenu() {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <button className="focus-visible:ring-ring rounded-full outline-none focus-visible:ring-2 focus-visible:ring-offset-2">
+        <button className="relative cursor-pointer rounded-full outline-none focus-visible:ring-ring focus-visible:ring-2 focus-visible:ring-offset-2">
+          {processing && (
+            <span className="absolute inset-[-3px] animate-spin rounded-full border-2 border-transparent border-t-primary" />
+          )}
           {session.user.image ? (
             <img
               src={session.user.image}
@@ -50,7 +56,14 @@ export function UserMenu() {
       <DropdownMenuContent align="end" className="w-48">
         <DropdownMenuLabel className="flex flex-col gap-1">
           <span className="text-sm font-medium">{session.user.username || session.user.name}</span>
-          <span className="text-muted-foreground text-xs capitalize">{session.user.plan} plan</span>
+          {session.user.plan === PLAN_PRO ? (
+            <span className="inline-flex items-center gap-1 text-xs font-medium text-amber-500">
+              <Star className="h-3 w-3 fill-amber-500" />
+              Pro
+            </span>
+          ) : (
+            <span className="text-muted-foreground text-xs capitalize">{session.user.plan} plan</span>
+          )}
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
         <DropdownMenuItem asChild>
