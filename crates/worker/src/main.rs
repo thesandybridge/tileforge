@@ -61,7 +61,7 @@ impl WorkerConfig {
     fn from_env() -> Self {
         Self {
             redis_url: std::env::var("REDIS_URL")
-                .unwrap_or_else(|_| "redis://127.0.0.1:6379".into()),
+                .unwrap_or_else(|_| "redis://127.0.0.1:6380".into()),
             database_url: std::env::var("DATABASE_URL").ok(),
         }
     }

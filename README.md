@@ -144,7 +144,7 @@ STRIPE_PRICE_ID=price_...
 ```bash
 # Terminal 1 — Rust API
 DATABASE_URL=postgres://tileforge:tileforge@localhost:5433/tileforge \
-REDIS_URL=redis://127.0.0.1:6379 \
+REDIS_URL=redis://127.0.0.1:6380 \
 JWT_SECRET=<shared-secret> \
 S3_ENDPOINT=http://localhost:9000 \
 S3_BUCKET=tileforge \
@@ -153,7 +153,7 @@ S3_SECRET_KEY=minioadmin \
 cargo run --release --package tileforge-api
 
 # Terminal 2 — Worker
-REDIS_URL=redis://127.0.0.1:6379 \
+REDIS_URL=redis://127.0.0.1:6380 \
 DATABASE_URL=postgres://tileforge:tileforge@localhost:5433/tileforge \
 S3_ENDPOINT=http://localhost:9000 \
 S3_BUCKET=tileforge \
@@ -222,7 +222,7 @@ Requires Redis and S3 to be configured. See environment variables below.
 
 | Variable       | Required | Default                  | Description                  |
 |----------------|----------|--------------------------|------------------------------|
-| `REDIS_URL`    | No       | `redis://127.0.0.1:6379` | Redis URL                    |
+| `REDIS_URL`    | No       | `redis://127.0.0.1:6380` | Redis URL                    |
 | `DATABASE_URL` | No       | —                        | Postgres (for tileset rows)  |
 | `S3_ENDPOINT`  | Yes      | —                        | S3-compatible endpoint URL   |
 | `S3_BUCKET`    | Yes      | —                        | S3 bucket name               |
