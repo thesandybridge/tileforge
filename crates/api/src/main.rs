@@ -139,7 +139,7 @@ impl IntoResponse for ApiError {
 // JWT auth
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 enum Plan {
     Free,
@@ -362,6 +362,30 @@ struct RateLimitInfo {
     reset: u64,
 }
 
+/// Rate limit tiers based on user plan
+#[derive(Clone, Copy)]
+struct RateLimitTier {
+    anonymous: u64,
+    free: u64,
+    pro: u64,
+}
+
+impl RateLimitTier {
+    const fn get(&self, plan: Option<Plan>) -> u64 {
+        match plan {
+            None => self.anonymous,
+            Some(Plan::Free) => self.free,
+            Some(Plan::Pro) => self.pro,
+        }
+    }
+}
+
+// Rate limit tiers per endpoint (requests per minute)
+const TIER_TILES: RateLimitTier = RateLimitTier { anonymous: 5, free: 10, pro: 60 };
+const TIER_PROGRESS: RateLimitTier = RateLimitTier { anonymous: 30, free: 60, pro: 300 };
+const TIER_DOWNLOAD: RateLimitTier = RateLimitTier { anonymous: 15, free: 30, pro: 120 };
+const TIER_MUTATIONS: RateLimitTier = RateLimitTier { anonymous: 10, free: 30, pro: 120 };
+
 fn extract_client_ip<B>(req: &Request<B>, peer: Option<SocketAddr>) -> String {
     // Prefer CF-Connecting-IP (Cloudflare), then X-Forwarded-For (leftmost), then peer
     if let Some(cf_ip) = req.headers().get("cf-connecting-ip") {
@@ -380,8 +404,26 @@ fn extract_client_ip<B>(req: &Request<B>, peer: Option<SocketAddr>) -> String {
 }
 
 impl RateLimit {
-    /// Check rate limit. Returns Ok(RateLimitInfo) if allowed, or an error response if exceeded.
-    async fn check(&self, ip: &str, endpoint: &str, max_requests: u64, window_secs: u64) -> Result<RateLimitInfo, Response> {
+    /// Check rate limit with user-aware tiering.
+    /// Uses user_id as key if authenticated, otherwise falls back to IP.
+    /// Applies different limits based on plan (anonymous < free < pro).
+    async fn check_tiered(
+        &self,
+        ip: &str,
+        user: Option<&UserClaims>,
+        endpoint: &str,
+        tier: RateLimitTier,
+        window_secs: u64,
+    ) -> Result<RateLimitInfo, Response> {
+        let plan = user.map(|u| u.plan);
+        let max_requests = tier.get(plan);
+
+        // Use user ID if authenticated, otherwise IP
+        let identity = match user {
+            Some(u) => format!("user:{}", u.sub),
+            None => format!("ip:{}", ip),
+        };
+
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -401,7 +443,7 @@ impl RateLimit {
             }
         };
 
-        let key = format!("ratelimit:{ip}:{endpoint}:{window}");
+        let key = format!("ratelimit:{identity}:{endpoint}:{window}");
 
         let count: u64 = match conn.incr(&key, 1u64).await {
             Ok(c) => c,
@@ -469,7 +511,8 @@ async fn rate_limit_tiles(
     next: Next,
 ) -> Response {
     let ip = extract_client_ip(&req, Some(addr));
-    let info = match rl.check(&ip, "post_tiles", 10, 60).await {
+    let user = req.extensions().get::<UserClaims>().cloned();
+    let info = match rl.check_tiered(&ip, user.as_ref(), "post_tiles", TIER_TILES, 60).await {
         Ok(info) => info,
         Err(resp) => return resp,
     };
@@ -483,7 +526,8 @@ async fn rate_limit_progress(
     next: Next,
 ) -> Response {
     let ip = extract_client_ip(&req, Some(addr));
-    let info = match rl.check(&ip, "progress", 60, 60).await {
+    let user = req.extensions().get::<UserClaims>().cloned();
+    let info = match rl.check_tiered(&ip, user.as_ref(), "progress", TIER_PROGRESS, 60).await {
         Ok(info) => info,
         Err(resp) => return resp,
     };
@@ -497,7 +541,8 @@ async fn rate_limit_download(
     next: Next,
 ) -> Response {
     let ip = extract_client_ip(&req, Some(addr));
-    let info = match rl.check(&ip, "download", 30, 60).await {
+    let user = req.extensions().get::<UserClaims>().cloned();
+    let info = match rl.check_tiered(&ip, user.as_ref(), "download", TIER_DOWNLOAD, 60).await {
         Ok(info) => info,
         Err(resp) => return resp,
     };
@@ -511,7 +556,8 @@ async fn rate_limit_mutations(
     next: Next,
 ) -> Response {
     let ip = extract_client_ip(&req, Some(addr));
-    let info = match rl.check(&ip, "mutations", 30, 60).await {
+    let user = req.extensions().get::<UserClaims>().cloned();
+    let info = match rl.check_tiered(&ip, user.as_ref(), "mutations", TIER_MUTATIONS, 60).await {
         Ok(info) => info,
         Err(resp) => return resp,
     };

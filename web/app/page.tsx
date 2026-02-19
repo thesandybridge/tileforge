@@ -271,14 +271,17 @@ export default function Home() {
   }, [pmtilesUrl, form.fileName]);
 
   const onProcessQueue = useCallback(() => {
+    // Pro users get higher concurrency (3 parallel), free users get 1 (sequential)
+    const concurrency = session?.user?.plan === PLAN_PRO ? 3 : 1;
     processQueue({
       tileSize: form.tileSize,
       minZoom: form.minZoom,
       maxZoom: form.maxZoom,
       projection: form.projection,
       token: session?.accessToken,
+      concurrency,
     });
-  }, [processQueue, form.tileSize, form.minZoom, form.maxZoom, form.projection, session?.accessToken]);
+  }, [processQueue, form.tileSize, form.minZoom, form.maxZoom, form.projection, session?.accessToken, session?.user?.plan]);
 
   const onReset = useCallback(() => {
     fileRef.current = null;

@@ -164,7 +164,7 @@ interface TileforgeContextValue {
   addToQueue: (file: File, imageInfo?: { width: number; height: number } | null) => Promise<string>;
   removeFromQueue: (id: string) => void;
   clearQueue: () => void;
-  processQueue: (opts: ServerProcessOpts) => void;
+  processQueue: (opts: ServerProcessOpts & { concurrency?: number }) => void;
   isProcessingQueue: boolean;
 }
 
@@ -214,6 +214,9 @@ export function TileforgeProvider({ children }: { children: ReactNode }) {
     const curr = state.status;
     prevStatusRef.current = curr;
 
+    // Skip notifications during batch processing - batch has its own notification
+    if (isProcessingQueue) return;
+
     if (prev === "processing" && curr === "done" && state.zipBlob) {
       const zipUrl = URL.createObjectURL(state.zipBlob);
       add({
@@ -232,7 +235,7 @@ export function TileforgeProvider({ children }: { children: ReactNode }) {
         message: state.error,
       });
     }
-  }, [state.status, state.zipBlob, state.pmtilesUrl, state.error, add]);
+  }, [state.status, state.zipBlob, state.pmtilesUrl, state.error, add, isProcessingQueue]);
 
   // Boot WASM worker once
   useEffect(() => {
@@ -473,7 +476,130 @@ export function TileforgeProvider({ children }: { children: ReactNode }) {
     setQueue((prev) => prev.map((f) => (f.id === id ? { ...f, ...updates } : f)));
   }, []);
 
-  const processQueue = useCallback(async (opts: ServerProcessOpts) => {
+  // Process a single file - extracted for reuse in parallel processing
+  const processSingleFile = useCallback(async (
+    file: QueuedFile,
+    opts: ServerProcessOpts,
+    signal: AbortSignal,
+  ): Promise<void> => {
+    updateQueueItem(file.id, { status: "processing", progress: null });
+
+    const params = new URLSearchParams();
+    params.set("tile_size", String(opts.tileSize ?? 256));
+    if (opts.minZoom != null) params.set("min_zoom", String(opts.minZoom));
+    if (opts.maxZoom != null) params.set("max_zoom", String(opts.maxZoom));
+    if (opts.projection) params.set("projection", opts.projection);
+    params.set("file_name", file.fileName);
+
+    const startTime = performance.now();
+
+    try {
+      const headers: Record<string, string> = { "content-type": "application/octet-stream" };
+      if (opts.token) headers["authorization"] = `Bearer ${opts.token}`;
+
+      const res = await fetch(`${API_URL}/api/tiles?${params}`, {
+        method: "POST",
+        headers,
+        body: file.buffer,
+        signal,
+      });
+
+      updateFromHeaders(res.headers, "tiles");
+
+      if (!res.ok && res.status !== 202) {
+        const body = await res.json().catch(() => ({ error: "Server error" }));
+        updateQueueItem(file.id, { status: "error", error: body.error ?? `Server error (${res.status})` });
+        return;
+      }
+
+      if (res.status === 202) {
+        const { job_id } = (await res.json()) as { job_id: string };
+
+        // Poll for progress via SSE
+        await new Promise<void>((resolve) => {
+          const sse = new EventSource(`${API_URL}/api/tiles/${job_id}/progress`);
+
+          const cleanup = () => {
+            sse.close();
+            resolve();
+          };
+
+          signal.addEventListener("abort", cleanup);
+
+          sse.onmessage = async (e) => {
+            try {
+              const data = JSON.parse(e.data) as {
+                status: string;
+                zoom?: number;
+                tiles_done?: number;
+                tiles_total?: number;
+                download_url?: string;
+                pmtiles_url?: string;
+                error?: string;
+              };
+
+              if (data.status === "processing" && data.tiles_done != null && data.tiles_total != null) {
+                updateQueueItem(file.id, {
+                  progress: {
+                    tilesDone: data.tiles_done,
+                    tilesTotal: data.tiles_total,
+                    zoom: data.zoom ?? 0,
+                    percent: data.tiles_total > 0 ? (data.tiles_done / data.tiles_total) * 100 : 0,
+                  },
+                });
+              } else if (data.status === "complete" && data.download_url) {
+                cleanup();
+                try {
+                  const dlHeaders: Record<string, string> = {};
+                  if (opts.token) dlHeaders["authorization"] = `Bearer ${opts.token}`;
+                  const dlRes = await fetch(`${API_URL}${data.download_url}`, { headers: dlHeaders });
+                  if (!dlRes.ok) throw new Error(`Download failed (${dlRes.status})`);
+                  const buf = await dlRes.arrayBuffer();
+                  updateQueueItem(file.id, {
+                    status: "done",
+                    zipBlob: new Blob([buf], { type: "application/zip" }),
+                    pmtilesUrl: data.pmtiles_url ? `${API_URL}${data.pmtiles_url}` : null,
+                    durationMs: performance.now() - startTime,
+                    progress: null,
+                  });
+                } catch (dlErr) {
+                  updateQueueItem(file.id, {
+                    status: "error",
+                    error: dlErr instanceof Error ? dlErr.message : "Download failed",
+                  });
+                }
+              } else if (data.status === "failed") {
+                cleanup();
+                updateQueueItem(file.id, { status: "error", error: data.error ?? "Processing failed" });
+              }
+            } catch {
+              // Ignore parse errors
+            }
+          };
+
+          sse.onerror = () => {
+            cleanup();
+            updateQueueItem(file.id, { status: "error", error: "Lost connection to server" });
+          };
+        });
+      } else {
+        // Sync response
+        const buf = await res.arrayBuffer();
+        updateQueueItem(file.id, {
+          status: "done",
+          zipBlob: new Blob([buf], { type: "application/zip" }),
+          durationMs: performance.now() - startTime,
+        });
+      }
+    } catch (err) {
+      if ((err as Error).name !== "AbortError") {
+        updateQueueItem(file.id, { status: "error", error: "Failed to connect to server" });
+      }
+    }
+  }, [updateQueueItem, updateFromHeaders]);
+
+  // Process queue with configurable concurrency
+  const processQueue = useCallback(async (opts: ServerProcessOpts & { concurrency?: number }) => {
     if (isProcessingQueue) return;
 
     const pendingFiles = queue.filter((f) => f.status === "queued");
@@ -481,148 +607,60 @@ export function TileforgeProvider({ children }: { children: ReactNode }) {
 
     setIsProcessingQueue(true);
     queueAbortRef.current = new AbortController();
+    const signal = queueAbortRef.current.signal;
 
     // Wait for server to be healthy
-    const healthy = await waitForHealth(queueAbortRef.current.signal);
+    const healthy = await waitForHealth(signal);
     if (!healthy) {
       setIsProcessingQueue(false);
       return;
     }
 
-    for (const file of pendingFiles) {
-      if (queueAbortRef.current.signal.aborted) break;
+    // Default concurrency: 3 for parallel processing
+    const concurrency = opts.concurrency ?? 3;
 
-      updateQueueItem(file.id, { status: "processing", progress: null });
+    // Process files with concurrency limit
+    const processWithConcurrency = async () => {
+      const executing: Promise<void>[] = [];
 
-      const params = new URLSearchParams();
-      params.set("tile_size", String(opts.tileSize ?? 256));
-      if (opts.minZoom != null) params.set("min_zoom", String(opts.minZoom));
-      if (opts.maxZoom != null) params.set("max_zoom", String(opts.maxZoom));
-      if (opts.projection) params.set("projection", opts.projection);
-      params.set("file_name", file.fileName);
+      for (const file of pendingFiles) {
+        if (signal.aborted) break;
 
-      const startTime = performance.now();
-
-      try {
-        const headers: Record<string, string> = { "content-type": "application/octet-stream" };
-        if (opts.token) headers["authorization"] = `Bearer ${opts.token}`;
-
-        const res = await fetch(`${API_URL}/api/tiles?${params}`, {
-          method: "POST",
-          headers,
-          body: file.buffer,
-          signal: queueAbortRef.current.signal,
+        const promise = processSingleFile(file, opts, signal).then(() => {
+          executing.splice(executing.indexOf(promise), 1);
         });
+        executing.push(promise);
 
-        updateFromHeaders(res.headers, "tiles");
-
-        if (!res.ok && res.status !== 202) {
-          const body = await res.json().catch(() => ({ error: "Server error" }));
-          updateQueueItem(file.id, { status: "error", error: body.error ?? `Server error (${res.status})` });
-          continue;
-        }
-
-        if (res.status === 202) {
-          const { job_id } = (await res.json()) as { job_id: string };
-
-          // Poll for progress via SSE
-          await new Promise<void>((resolve) => {
-            const sse = new EventSource(`${API_URL}/api/tiles/${job_id}/progress`);
-
-            const cleanup = () => {
-              sse.close();
-              resolve();
-            };
-
-            queueAbortRef.current?.signal.addEventListener("abort", cleanup);
-
-            sse.onmessage = async (e) => {
-              try {
-                const data = JSON.parse(e.data) as {
-                  status: string;
-                  zoom?: number;
-                  tiles_done?: number;
-                  tiles_total?: number;
-                  download_url?: string;
-                  pmtiles_url?: string;
-                  error?: string;
-                };
-
-                if (data.status === "processing" && data.tiles_done != null && data.tiles_total != null) {
-                  updateQueueItem(file.id, {
-                    progress: {
-                      tilesDone: data.tiles_done,
-                      tilesTotal: data.tiles_total,
-                      zoom: data.zoom ?? 0,
-                      percent: data.tiles_total > 0 ? (data.tiles_done / data.tiles_total) * 100 : 0,
-                    },
-                  });
-                } else if (data.status === "complete" && data.download_url) {
-                  cleanup();
-                  try {
-                    const dlHeaders: Record<string, string> = {};
-                    if (opts.token) dlHeaders["authorization"] = `Bearer ${opts.token}`;
-                    const dlRes = await fetch(`${API_URL}${data.download_url}`, { headers: dlHeaders });
-                    if (!dlRes.ok) throw new Error(`Download failed (${dlRes.status})`);
-                    const buf = await dlRes.arrayBuffer();
-                    updateQueueItem(file.id, {
-                      status: "done",
-                      zipBlob: new Blob([buf], { type: "application/zip" }),
-                      pmtilesUrl: data.pmtiles_url ? `${API_URL}${data.pmtiles_url}` : null,
-                      durationMs: performance.now() - startTime,
-                      progress: null,
-                    });
-                  } catch (dlErr) {
-                    updateQueueItem(file.id, {
-                      status: "error",
-                      error: dlErr instanceof Error ? dlErr.message : "Download failed",
-                    });
-                  }
-                } else if (data.status === "failed") {
-                  cleanup();
-                  updateQueueItem(file.id, { status: "error", error: data.error ?? "Processing failed" });
-                }
-              } catch {
-                // Ignore parse errors
-              }
-            };
-
-            sse.onerror = () => {
-              cleanup();
-              updateQueueItem(file.id, { status: "error", error: "Lost connection to server" });
-            };
-          });
-        } else {
-          // Sync response
-          const buf = await res.arrayBuffer();
-          updateQueueItem(file.id, {
-            status: "done",
-            zipBlob: new Blob([buf], { type: "application/zip" }),
-            durationMs: performance.now() - startTime,
-          });
-        }
-      } catch (err) {
-        if ((err as Error).name !== "AbortError") {
-          updateQueueItem(file.id, { status: "error", error: "Failed to connect to server" });
+        // If we've reached concurrency limit, wait for one to complete
+        if (executing.length >= concurrency) {
+          await Promise.race(executing);
         }
       }
-    }
+
+      // Wait for all remaining to complete
+      await Promise.all(executing);
+    };
+
+    await processWithConcurrency();
 
     setIsProcessingQueue(false);
     queryClient.invalidateQueries({ queryKey: ["user"] });
     queryClient.invalidateQueries({ queryKey: ["tilesets"] });
 
-    // Notify completion
-    const completed = queue.filter((f) => f.status === "done").length;
-    const failed = queue.filter((f) => f.status === "error").length;
-    if (completed > 0 || failed > 0) {
-      add({
-        type: completed > 0 ? "processing_complete" : "processing_failed",
-        title: "Batch processing complete",
-        message: `${completed} succeeded, ${failed} failed`,
-      });
-    }
-  }, [queue, isProcessingQueue, updateFromHeaders, queryClient, add, updateQueueItem]);
+    // Notify completion - use functional update to get latest queue state
+    setQueue((currentQueue) => {
+      const completed = currentQueue.filter((f) => f.status === "done").length;
+      const failed = currentQueue.filter((f) => f.status === "error").length;
+      if (completed > 0 || failed > 0) {
+        add({
+          type: completed > 0 ? "processing_complete" : "processing_failed",
+          title: "Batch processing complete",
+          message: `${completed} succeeded, ${failed} failed`,
+        });
+      }
+      return currentQueue; // Return unchanged
+    });
+  }, [queue, isProcessingQueue, queryClient, add, processSingleFile]);
 
   const processing = state.status === "processing" || state.status === "waking";
 
