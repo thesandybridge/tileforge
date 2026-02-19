@@ -62,7 +62,7 @@ export async function POST(req: NextRequest) {
       }
     }
   } catch (err) {
-    console.error("Stripe webhook DB error:", err);
+    console.error("[stripe/webhook] DB error:", err);
     return NextResponse.json({ error: "Database error" }, { status: 500 });
   }
 

@@ -109,7 +109,7 @@ export function CommandPaletteProvider({ children }: { children: ReactNode }) {
         setSearchResults(results);
       } catch (err) {
         if ((err as Error).name !== "AbortError") {
-          console.error("Search failed:", err);
+          console.error("[command-palette] Search failed:", err);
         }
       } finally {
         setIsSearching(false);
