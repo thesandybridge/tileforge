@@ -16,3 +16,5 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 rust-s3 = { version = "=0.37.1", default-features = false, features = ["tokio-rustls-tls"] }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
 tempfile = "3"
+async-nats = "0.38"
+futures = "0.3"

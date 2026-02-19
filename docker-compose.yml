@@ -28,6 +28,15 @@ services:
     volumes:
       - miniodata:/data
 
+  nats:
+    image: nats:2-alpine
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+    command: ["-js", "-sd", "/data", "-m", "8222"]
+    volumes:
+      - natsdata:/data
+
   # Creates the default bucket on first run
   minio-init:
     image: minio/mc
@@ -42,3 +51,4 @@ services:
 volumes:
   pgdata:
   miniodata:
+  natsdata:

@@ -37,6 +37,7 @@ struct AppConfig {
     port: u16,
     max_upload_bytes: usize,
     redis_url: Option<String>,
+    nats_url: Option<String>,
     cors_origin: Option<String>,
     database_url: Option<String>,
     jwt_secret: Option<String>,
@@ -55,6 +56,7 @@ impl AppConfig {
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(500 * 1024 * 1024), // 500 MB
             redis_url: std::env::var("REDIS_URL").ok(),
+            nats_url: std::env::var("NATS_URL").ok(),
             cors_origin: std::env::var("CORS_ORIGIN").ok(),
             database_url: std::env::var("DATABASE_URL").ok(),
             jwt_secret: std::env::var("JWT_SECRET").ok(),
@@ -71,6 +73,7 @@ impl AppConfig {
 struct AppState {
     max_upload_bytes: usize,
     redis: Option<redis::aio::MultiplexedConnection>,
+    nats: Option<async_nats::jetstream::Context>,
     bucket: Option<Arc<s3::Bucket>>,
     db: Option<PgPool>,
     jwt_secret: Option<String>,
@@ -535,12 +538,12 @@ async fn process_tiles(
     }
 
     if is_pro || is_large {
-        // Async path: enqueue to Redis, upload to S3
-        let (mut redis, bucket) = match (&state.redis, &state.bucket) {
-            (Some(r), Some(b)) => (r.clone(), b.clone()),
+        // Async path: upload to S3, enqueue via NATS JetStream
+        let (mut redis, nats, bucket) = match (&state.redis, &state.nats, &state.bucket) {
+            (Some(r), Some(n), Some(b)) => (r.clone(), n.clone(), b.clone()),
             _ => {
                 return Err(ApiError::ServiceUnavailable(
-                    "async processing not configured (REDIS_URL and S3 env vars required)".into(),
+                    "async processing not configured (REDIS_URL, NATS_URL, and S3 env vars required)".into(),
                 ));
             }
         };
@@ -572,7 +575,7 @@ async fn process_tiles(
             )
             .await;
 
-        // Enqueue job
+        // Enqueue job via NATS JetStream (awaits PubAck for durable write confirmation)
         let job = JobPayload {
             job_id: job_id.clone(),
             tile_size,
@@ -582,11 +585,14 @@ async fn process_tiles(
             user_id: claims.0.as_ref().map(|c| c.sub.clone()),
             file_name: params.file_name.clone(),
         };
-        let _: redis::RedisResult<()> = redis
-            .lpush("tileforge:jobs", serde_json::to_string(&job).unwrap())
-            .await;
+        let payload = serde_json::to_string(&job).unwrap();
+        nats.publish("tileforge.jobs", payload.into())
+            .await
+            .map_err(|e| ApiError::Processing(format!("NATS publish failed: {e}")))?
+            .await
+            .map_err(|e| ApiError::Processing(format!("NATS publish ack failed: {e}")))?;
 
-        tracing::info!(job_id = %job_id, "enqueued async job");
+        tracing::info!(job_id = %job_id, "enqueued async job via NATS");
 
         return Ok((StatusCode::ACCEPTED, Json(AcceptedResponse { job_id })).into_response());
     }
@@ -1668,6 +1674,47 @@ async fn main() {
         None
     };
 
+    // Connect to NATS JetStream if configured
+    let nats = if let Some(ref url) = config.nats_url {
+        match async_nats::connect(url).await {
+            Ok(client) => {
+                let js = async_nats::jetstream::new(client);
+                // Create (or reuse) the durable job stream
+                match js.get_or_create_stream(async_nats::jetstream::stream::Config {
+                    name: "TILEFORGE_JOBS".into(),
+                    subjects: vec!["tileforge.jobs".into()],
+                    retention: async_nats::jetstream::stream::RetentionPolicy::WorkQueue,
+                    max_age: std::time::Duration::from_secs(86400),
+                    storage: async_nats::jetstream::stream::StorageType::File,
+                    ..Default::default()
+                }).await {
+                    Ok(_) => tracing::info!("NATS JetStream stream TILEFORGE_JOBS ready"),
+                    Err(e) => tracing::warn!("failed to create NATS stream: {e}"),
+                }
+                // Create DLQ stream for messages that exceed max_deliver
+                match js.get_or_create_stream(async_nats::jetstream::stream::Config {
+                    name: "TILEFORGE_DLQ".into(),
+                    subjects: vec!["$JS.EVENT.ADVISORY.CONSUMER.MAX_DELIVERIES.TILEFORGE_JOBS.>".into()],
+                    max_age: std::time::Duration::from_secs(7 * 86400),
+                    storage: async_nats::jetstream::stream::StorageType::File,
+                    ..Default::default()
+                }).await {
+                    Ok(_) => tracing::info!("NATS DLQ stream TILEFORGE_DLQ ready"),
+                    Err(e) => tracing::warn!("failed to create NATS DLQ stream: {e}"),
+                }
+                tracing::info!("connected to NATS");
+                Some(js)
+            }
+            Err(e) => {
+                tracing::warn!("failed to connect to NATS: {e} — NATS job queue disabled");
+                None
+            }
+        }
+    } else {
+        tracing::info!("NATS_URL not set — NATS job queue disabled");
+        None
+    };
+
     // Initialize S3 bucket if configured
     let bucket = s3::bucket_from_env();
     tracing::info!("S3: {}", if bucket.is_some() { "configured" } else { "not configured" });
@@ -1676,6 +1723,7 @@ async fn main() {
     let state = AppState {
         max_upload_bytes: config.max_upload_bytes,
         redis: redis.clone(),
+        nats,
         bucket: bucket.map(Arc::from),
         db,
         jwt_secret: config.jwt_secret,

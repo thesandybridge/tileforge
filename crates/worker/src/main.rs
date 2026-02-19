@@ -1,12 +1,15 @@
 mod s3;
 
+use async_nats::jetstream::consumer::PullConsumer;
+use async_nats::jetstream::message::AckKind;
+use futures::StreamExt;
 use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use std::cell::Cell;
 use std::io::Cursor;
 use std::sync::{Arc, Mutex};
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tileforge_core::{PmTilesTileWriter, Projection, TeeTileWriter, TileConfig, TileProgress, Tiler, ZipTileWriter};
 
 fn unix_now() -> u64 {
@@ -55,6 +58,7 @@ struct ProgressUpdate {
 
 struct WorkerConfig {
     redis_url: String,
+    nats_url: String,
     database_url: Option<String>,
 }
 
@@ -63,6 +67,8 @@ impl WorkerConfig {
         Self {
             redis_url: std::env::var("REDIS_URL")
                 .unwrap_or_else(|_| "redis://127.0.0.1:6380".into()),
+            nats_url: std::env::var("NATS_URL")
+                .unwrap_or_else(|_| "nats://127.0.0.1:4222".into()),
             database_url: std::env::var("DATABASE_URL").ok(),
         }
     }
@@ -105,74 +111,139 @@ async fn main() {
         None
     };
 
-    tracing::info!("worker starting, redis={}", config.redis_url);
+    // Connect to Redis (for progress tracking)
+    tracing::info!("worker starting, redis={}, nats={}", config.redis_url, config.nats_url);
 
-    let client = redis::Client::open(config.redis_url.as_str())
+    let redis_client = redis::Client::open(config.redis_url.as_str())
         .expect("invalid REDIS_URL");
-    let mut conn = client
+    let mut conn = redis_client
         .get_multiplexed_async_connection()
         .await
         .expect("failed to connect to Redis");
 
-    tracing::info!("listening for jobs on tileforge:jobs");
+    // Connect to NATS JetStream
+    let nats_client = async_nats::connect(&config.nats_url)
+        .await
+        .expect("failed to connect to NATS");
+    let js = async_nats::jetstream::new(nats_client);
 
-    loop {
-        // BRPOP blocks until a job is available (0 = infinite timeout)
-        let result: redis::RedisResult<(String, String)> =
-            redis::cmd("BRPOP")
-                .arg("tileforge:jobs")
-                .arg(0)
-                .query_async(&mut conn)
-                .await;
+    // Get the job stream (API creates it on startup)
+    let stream = js
+        .get_or_create_stream(async_nats::jetstream::stream::Config {
+            name: "TILEFORGE_JOBS".into(),
+            subjects: vec!["tileforge.jobs".into()],
+            retention: async_nats::jetstream::stream::RetentionPolicy::WorkQueue,
+            max_age: Duration::from_secs(86400),
+            storage: async_nats::jetstream::stream::StorageType::File,
+            ..Default::default()
+        })
+        .await
+        .expect("failed to get TILEFORGE_JOBS stream");
 
-        let job_json = match result {
-            Ok((_key, val)) => val,
+    // Create durable pull consumer
+    let consumer: PullConsumer = stream
+        .get_or_create_consumer(
+            "tileforge-worker",
+            async_nats::jetstream::consumer::pull::Config {
+                durable_name: Some("tileforge-worker".into()),
+                ack_wait: Duration::from_secs(600), // 10 min for long tile jobs
+                max_deliver: 5,
+                backoff: vec![
+                    Duration::from_secs(30),
+                    Duration::from_secs(120),
+                    Duration::from_secs(300),
+                    Duration::from_secs(600),
+                ],
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("failed to create pull consumer");
+
+    tracing::info!("listening for jobs on NATS JetStream (TILEFORGE_JOBS)");
+
+    let mut messages = consumer.messages().await.expect("failed to start message stream");
+
+    while let Some(msg_result) = messages.next().await {
+        let msg = match msg_result {
+            Ok(m) => m,
             Err(e) => {
-                tracing::error!("BRPOP error: {e}");
-                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                tracing::error!("message receive error: {e}");
+                tokio::time::sleep(Duration::from_secs(1)).await;
                 continue;
             }
         };
 
-        let job: Job = match serde_json::from_str(&job_json) {
+        let job: Job = match serde_json::from_slice(&msg.payload) {
             Ok(j) => j,
             Err(e) => {
                 tracing::error!("invalid job JSON: {e}");
+                // Permanently reject unparseable messages
+                let _ = msg.ack_with(AckKind::Term).await;
                 continue;
             }
         };
 
-        tracing::info!(job_id = %job.job_id, "processing job");
+        let delivery_count = msg.info().map(|i| i.delivered).unwrap_or(1);
+        tracing::info!(job_id = %job.job_id, delivery = delivery_count, "processing job");
 
         let result = process_job(&job, &bucket, &mut conn, db.as_ref()).await;
 
-        // Always clean up the upload from S3, regardless of success or failure
-        bucket
-            .delete_object(&format!("uploads/{}.bin", job.job_id))
-            .await
-            .ok();
+        match result {
+            Ok(()) => {
+                if let Err(e) = msg.ack().await {
+                    tracing::error!(job_id = %job.job_id, "failed to ack message: {e}");
+                }
+                // Clean up S3 upload only after successful ack
+                bucket
+                    .delete_object(&format!("uploads/{}.bin", job.job_id))
+                    .await
+                    .ok();
+                tracing::info!(job_id = %job.job_id, "job complete, acked");
+            }
+            Err(e) => {
+                tracing::error!(job_id = %job.job_id, delivery = delivery_count, "job failed: {e}");
+                let progress = ProgressUpdate {
+                    status: "failed".into(),
+                    last_updated: unix_now(),
+                    zoom: None,
+                    tiles_done: None,
+                    tiles_total: None,
+                    download_url: None,
+                    pmtiles_url: None,
+                    error: Some(e.to_string()),
+                };
+                let _: redis::RedisResult<()> = conn
+                    .set_ex(
+                        format!("tileforge:progress:{}", job.job_id),
+                        serde_json::to_string(&progress).unwrap(),
+                        3600,
+                    )
+                    .await;
 
-        if let Err(e) = result {
-            tracing::error!(job_id = %job.job_id, "job failed: {e}");
-            let progress = ProgressUpdate {
-                status: "failed".into(),
-                last_updated: unix_now(),
-                zoom: None,
-                tiles_done: None,
-                tiles_total: None,
-                download_url: None,
-                pmtiles_url: None,
-                error: Some(e.to_string()),
-            };
-            let _: redis::RedisResult<()> = conn
-                .set_ex(
-                    format!("tileforge:progress:{}", job.job_id),
-                    serde_json::to_string(&progress).unwrap(),
-                    3600,
-                )
-                .await;
+                if delivery_count >= 5 {
+                    // Max retries reached — terminate and clean up
+                    tracing::warn!(job_id = %job.job_id, "max retries reached, terminating");
+                    let _ = msg.ack_with(AckKind::Term).await;
+                    bucket
+                        .delete_object(&format!("uploads/{}.bin", job.job_id))
+                        .await
+                        .ok();
+                } else {
+                    // Request redelivery after backoff
+                    let delay = match delivery_count {
+                        1 => Duration::from_secs(30),
+                        2 => Duration::from_secs(120),
+                        3 => Duration::from_secs(300),
+                        _ => Duration::from_secs(600),
+                    };
+                    let _ = msg.ack_with(AckKind::Nak(Some(delay))).await;
+                }
+            }
         }
     }
+
+    tracing::warn!("message stream ended, shutting down");
 }
 
 // ---------------------------------------------------------------------------
