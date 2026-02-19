@@ -121,9 +121,9 @@ export default function RootLayout({
                   <CursorGlow />
                   <Navbar />
                   <Toaster />
-                  <main className="flex flex-1 flex-col">
+                  <div className="flex flex-1 flex-col pb-16 sm:pb-24">
                     {children}
-                  </main>
+                  </div>
                 </TileforgeProvider>
               </NotificationProvider>
             </ThemeProvider>
