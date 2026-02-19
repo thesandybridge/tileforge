@@ -178,7 +178,26 @@ async fn optional_auth(
         let mut validation = Validation::new(Algorithm::HS256);
         validation.set_required_spec_claims(&["sub", "exp"]);
         if let Ok(data) = decode::<UserClaims>(token, &key, &validation) {
-            req.extensions_mut().insert(data.claims);
+            // Verify user is not deactivated before accepting JWT claims
+            let mut is_active = true;
+            if let Some(ref db) = state.db {
+                if let Ok(user_id) = Uuid::parse_str(&data.claims.sub) {
+                    let deactivated: Option<(bool,)> = sqlx::query_as(
+                        "SELECT deactivated_at IS NOT NULL FROM users WHERE id = $1",
+                    )
+                    .bind(user_id)
+                    .fetch_optional(db)
+                    .await
+                    .ok()
+                    .flatten();
+                    if let Some((true,)) = deactivated {
+                        is_active = false;
+                    }
+                }
+            }
+            if is_active {
+                req.extensions_mut().insert(data.claims);
+            }
         }
     }
 
@@ -1067,7 +1086,11 @@ async fn list_tilesets(
     let target_user_id = params.user_id.or(caller_id);
 
     let (limit, offset) = pagination(params.page, params.per_page);
-    let search_pattern = params.search.as_ref().map(|s| format!("%{}%", s));
+    let search_pattern = params.search.as_ref().map(|s| {
+        // Escape LIKE wildcards to prevent injection
+        let escaped = s.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_");
+        format!("%{}%", escaped)
+    });
 
     let rows = if let Some(user_id) = target_user_id {
         let is_owner = caller_id.map(|c| c == user_id).unwrap_or(false);
