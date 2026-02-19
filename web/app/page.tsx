@@ -516,26 +516,27 @@ export default function Home() {
               )}
 
               {/* Actions */}
-              <div className="flex items-center justify-center gap-3">
+              <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-3">
                 <Button
                   size="lg"
                   onClick={onProcess}
                   disabled={!canProcess}
+                  className="w-full sm:w-auto"
                 >
                   Process
                 </Button>
                 {status === "done" && zipBlob && (
-                  <Button size="lg" variant="secondary" onClick={onDownload}>
+                  <Button size="lg" variant="secondary" onClick={onDownload} className="flex-1 sm:flex-none">
                     Download ZIP ({(zipBlob.size / (1024 * 1024)).toFixed(1)} MB)
                   </Button>
                 )}
                 {status === "done" && pmtilesUrl && (
-                  <Button size="lg" variant="secondary" onClick={onDownloadPmtiles}>
+                  <Button size="lg" variant="secondary" onClick={onDownloadPmtiles} className="flex-1 sm:flex-none">
                     Download PMTiles
                   </Button>
                 )}
                 {(status === "done" || status === "error") && (
-                  <Button size="lg" variant="outline" onClick={onReset}>
+                  <Button size="lg" variant="outline" onClick={onReset} className="w-full sm:w-auto">
                     Reset
                   </Button>
                 )}

@@ -15,22 +15,114 @@ import {
 } from "@/components/ui/dropdown-menu";
 import Link from "next/link";
 
-export function UserMenu() {
+interface UserMenuProps {
+  mobile?: boolean;
+  onAction?: () => void;
+}
+
+export function UserMenu({ mobile, onAction }: UserMenuProps = {}) {
   const { data: session, status } = useSession();
 
   if (status === "loading") {
+    if (mobile) {
+      return <div className="h-12 animate-pulse rounded-lg bg-muted" />;
+    }
     return <div className="h-8 w-8 animate-pulse rounded-full bg-muted" />;
   }
 
   if (!session) {
     return (
-      <Button variant="outline" size="sm" onClick={() => signIn("github")}>
+      <Button
+        variant={mobile ? "default" : "outline"}
+        size={mobile ? "default" : "sm"}
+        className={mobile ? "w-full" : ""}
+        onClick={() => {
+          onAction?.();
+          signIn("github");
+        }}
+      >
         <LogIn className="mr-2 h-4 w-4" />
-        Sign in
+        Sign in with GitHub
       </Button>
     );
   }
 
+  // Mobile: render as a list of links
+  if (mobile) {
+    return (
+      <div className="flex flex-col gap-4">
+        {/* User info */}
+        <div className="flex items-center gap-3">
+          {session.user.image ? (
+            <img
+              src={session.user.image}
+              alt={session.user.username ?? "User avatar"}
+              className="h-10 w-10 rounded-full"
+              referrerPolicy="no-referrer"
+            />
+          ) : (
+            <div className="bg-muted flex h-10 w-10 items-center justify-center rounded-full">
+              <User className="h-5 w-5" />
+            </div>
+          )}
+          <div className="flex flex-col">
+            <span className="text-sm font-medium">{session.user.username || session.user.name}</span>
+            {session.user.plan === PLAN_PRO ? (
+              <span className="inline-flex items-center gap-1 text-xs font-medium text-amber-500">
+                <Star className="h-3 w-3 fill-amber-500" />
+                Pro
+              </span>
+            ) : (
+              <span className="text-muted-foreground text-xs capitalize">{session.user.plan} plan</span>
+            )}
+          </div>
+        </div>
+
+        {/* Menu items */}
+        <nav className="text-muted-foreground flex flex-col gap-3 text-base">
+          <Link
+            href="/my-tilesets"
+            onClick={onAction}
+            className="hover:text-foreground flex items-center gap-3 transition-colors"
+          >
+            <Map className="h-4 w-4" />
+            My Tilesets
+          </Link>
+          <Link
+            href="/billing"
+            onClick={onAction}
+            className="hover:text-foreground flex items-center gap-3 transition-colors"
+          >
+            <CreditCard className="h-4 w-4" />
+            Billing
+          </Link>
+          <Link
+            href="/settings"
+            onClick={onAction}
+            className="hover:text-foreground flex items-center gap-3 transition-colors"
+          >
+            <Settings className="h-4 w-4" />
+            Settings
+          </Link>
+        </nav>
+
+        {/* Sign out */}
+        <Button
+          variant="outline"
+          className="mt-2 w-full"
+          onClick={() => {
+            onAction?.();
+            signOut();
+          }}
+        >
+          <LogOut className="mr-2 h-4 w-4" />
+          Sign out
+        </Button>
+      </div>
+    );
+  }
+
+  // Desktop: dropdown menu
   return (
     <DropdownMenu>
       <ProcessingTooltip>

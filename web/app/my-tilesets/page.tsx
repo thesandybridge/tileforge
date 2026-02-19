@@ -154,10 +154,11 @@ export default function MyTilesetsPage() {
                   <AlertDialogTrigger asChild>
                     <Button
                       variant="ghost"
-                      size="sm"
-                      className="text-muted-foreground hover:text-destructive absolute right-3 top-3 opacity-0 transition-opacity group-hover:opacity-100"
+                      size="icon"
+                      className="text-muted-foreground hover:text-destructive bg-background/80 hover:bg-background absolute right-2 top-2 h-8 w-8 backdrop-blur-sm transition-opacity md:opacity-0 md:group-hover:opacity-100"
                     >
                       <Trash2 className="h-4 w-4" />
+                      <span className="sr-only">Delete tileset</span>
                     </Button>
                   </AlertDialogTrigger>
                 </Card>
