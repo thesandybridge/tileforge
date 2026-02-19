@@ -30,7 +30,7 @@ function parseChangelog(raw: string): ChangelogEntry {
 }
 
 function loadEntries(): ChangelogEntry[] {
-  const dir = path.join(process.cwd(), "..", "changelog");
+  const dir = path.join(process.cwd(), "changelog");
   if (!fs.existsSync(dir)) return [];
   const files = fs
     .readdirSync(dir)
