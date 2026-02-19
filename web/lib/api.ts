@@ -58,9 +58,15 @@ async function handleResponse<T>(res: Response): Promise<T> {
   return res.json();
 }
 
-export async function listTileSets(userId?: string, token?: string): Promise<TileSet[]> {
+export async function listTileSets(
+  userId?: string,
+  token?: string,
+  opts?: { page?: number; perPage?: number },
+): Promise<TileSet[]> {
   const params = new URLSearchParams();
   if (userId) params.set("user_id", userId);
+  if (opts?.page) params.set("page", String(opts.page));
+  if (opts?.perPage) params.set("per_page", String(opts.perPage));
   const headers: Record<string, string> = {};
   if (token) headers["Authorization"] = `Bearer ${token}`;
   const res = await fetch(`${API_URL}/api/tilesets?${params}`, { headers });
