@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Bell, CheckCircle, XCircle, Info, AlertTriangle, Download, Newspaper } from "lucide-react";
+import { Bell, CheckCircle, XCircle, Info, AlertTriangle, Download, PartyPopper } from "lucide-react";
 import { timeAgo } from "@/lib/utils";
 import { useNotifications } from "@/components/notification-context";
 import { Button } from "@/components/ui/button";
@@ -24,7 +24,7 @@ function NotificationIcon({ type }: { type: Notification["type"] }) {
     case "warning":
       return <AlertTriangle className="h-4 w-4 text-amber-500" />;
     case "changelog":
-      return <Newspaper className="h-4 w-4 text-primary" />;
+      return <PartyPopper className="h-4 w-4 text-primary" />;
     default:
       return <Info className="h-4 w-4 text-blue-500" />;
   }
