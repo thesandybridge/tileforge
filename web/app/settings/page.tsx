@@ -194,7 +194,7 @@ function SettingsContent() {
               <SelectContent>
                 {Array.from({ length: defaults.maxZoom + 1 }, (_, i) => (
                   <SelectItem key={i} value={String(i)}>
-                    {i}
+                    {String(i)}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -210,12 +210,12 @@ function SettingsContent() {
               onValueChange={(v) => update({ maxZoom: Number(v) })}
             >
               <SelectTrigger>
-                <SelectValue />
+                <SelectValue placeholder="0" />
               </SelectTrigger>
               <SelectContent>
                 {Array.from({ length: 13 }, (_, i) => (
                   <SelectItem key={i} value={String(i)} disabled={i < defaults.minZoom}>
-                    {i}
+                    {String(i)}
                   </SelectItem>
                 ))}
               </SelectContent>

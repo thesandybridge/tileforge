@@ -4,7 +4,8 @@ import { useCallback, useReducer, useRef } from "react";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
-import { LoaderCircle, Upload } from "lucide-react";
+import { Info, LoaderCircle, Upload } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { ScrollReveal } from "@/components/scroll-reveal";
 import { TileParticles } from "@/components/tile-particles";
 import { UpgradeBanner } from "@/components/upgrade-banner";
@@ -340,15 +341,26 @@ export default function Home() {
               <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
                 {session?.user?.plan === PLAN_PRO && (
                   <div className="space-y-2">
-                    <label className="text-muted-foreground text-xs font-medium uppercase tracking-wider">
+                    <label className="text-muted-foreground flex items-center gap-1 text-xs font-medium uppercase tracking-wider">
                       Mode
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Info className="size-3 cursor-help" />
+                          </TooltipTrigger>
+                          <TooltipContent side="top" sideOffset={4} className="max-w-60">
+                            <p><strong>Local</strong> processes in your browser via WASM. Images never leave your machine.</p>
+                            <p className="mt-1"><strong>Server</strong> offloads to the API. Faster for large images and higher zoom levels.</p>
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
                     </label>
                     <Select value={form.mode} onValueChange={(v) => dispatch({ type: "SET_MODE", mode: v as "local" | "server" })}>
                       <SelectTrigger>
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="local">Local WASM</SelectItem>
+                        <SelectItem value="local">Local</SelectItem>
                         <SelectItem value="server">Server</SelectItem>
                       </SelectContent>
                     </Select>
@@ -356,8 +368,18 @@ export default function Home() {
                 )}
 
                 <div className="space-y-2">
-                  <label className="text-muted-foreground text-xs font-medium uppercase tracking-wider">
+                  <label className="text-muted-foreground flex items-center gap-1 text-xs font-medium uppercase tracking-wider">
                     Tile size
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Info className="size-3 cursor-help" />
+                        </TooltipTrigger>
+                        <TooltipContent side="top" sideOffset={4} className="max-w-60">
+                          Pixel dimensions of each output tile. 256 is standard for most mapping libraries. Use 512 for high-DPI displays.
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
                   </label>
                   <Select value={String(form.tileSize)} onValueChange={(v) => dispatch({ type: "TILE_SIZE_CHANGED", tileSize: Number(v) })}>
                     <SelectTrigger>
@@ -372,17 +394,27 @@ export default function Home() {
                 </div>
 
                 <div className="space-y-2">
-                  <label className="text-muted-foreground text-xs font-medium uppercase tracking-wider">
+                  <label className="text-muted-foreground flex items-center gap-1 text-xs font-medium uppercase tracking-wider">
                     Min zoom
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Info className="size-3 cursor-help" />
+                        </TooltipTrigger>
+                        <TooltipContent side="top" sideOffset={4} className="max-w-60">
+                          Lowest zoom level to generate. Zoom 0 is a single tile covering the entire image. Increase to skip low-detail levels.
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
                   </label>
                   <Select value={String(form.minZoom)} onValueChange={(v) => dispatch({ type: "MIN_ZOOM_CHANGED", minZoom: Number(v) })}>
                     <SelectTrigger>
-                      <SelectValue />
+                      <SelectValue placeholder="0" />
                     </SelectTrigger>
                     <SelectContent>
                       {Array.from({ length: form.maxZoom + 1 }, (_, i) => (
                         <SelectItem key={i} value={String(i)}>
-                          {i}
+                          {String(i)}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -390,12 +422,22 @@ export default function Home() {
                 </div>
 
                 <div className="space-y-2">
-                  <label className="text-muted-foreground text-xs font-medium uppercase tracking-wider">
+                  <label className="text-muted-foreground flex items-center gap-1 text-xs font-medium uppercase tracking-wider">
                     Max zoom
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Info className="size-3 cursor-help" />
+                        </TooltipTrigger>
+                        <TooltipContent side="top" sideOffset={4} className="max-w-60">
+                          Highest zoom level to generate. Each level quadruples the tile count. Higher values give more detail but take longer to process.
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
                   </label>
                   <Select value={String(form.maxZoom)} onValueChange={(v) => dispatch({ type: "MAX_ZOOM_CHANGED", maxZoom: Number(v) })}>
                     <SelectTrigger>
-                      <SelectValue />
+                      <SelectValue placeholder="0" />
                     </SelectTrigger>
                     <SelectContent>
                       {Array.from({ length: form.mode === "server" ? 13 : 9 }, (_, i) => (
@@ -404,7 +446,7 @@ export default function Home() {
                           value={String(i)}
                           disabled={(form.mode === "local" && form.imageInfo ? i > calculatedMaxZoom : false) || i < form.minZoom}
                         >
-                          {i}{form.mode === "local" && form.imageInfo && i === calculatedMaxZoom ? " (max)" : ""}
+                          {String(i)}{form.mode === "local" && form.imageInfo && i === calculatedMaxZoom ? " (max)" : ""}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -412,8 +454,19 @@ export default function Home() {
                 </div>
 
                 <div className="space-y-2">
-                  <label className="text-muted-foreground text-xs font-medium uppercase tracking-wider">
+                  <label className="text-muted-foreground flex items-center gap-1 text-xs font-medium uppercase tracking-wider">
                     Projection
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Info className="size-3 cursor-help" />
+                        </TooltipTrigger>
+                        <TooltipContent side="top" sideOffset={4} className="max-w-60">
+                          <p><strong>Flat</strong> for fantasy maps, floor plans, artwork, and non-geographic images.</p>
+                          <p className="mt-1"><strong>Mercator</strong> for real-world geographic maps from equirectangular sources.</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
                   </label>
                   <Select value={form.projection} onValueChange={(v) => dispatch({ type: "PROJECTION_CHANGED", projection: v as "flat" | "mercator" })}>
                     <SelectTrigger>

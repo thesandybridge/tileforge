@@ -7,7 +7,7 @@ import Link from "next/link";
 import dynamic from "next/dynamic";
 import { ArrowLeft, Map, Globe, Grid3X3, Copy, Check, Eye, EyeOff, Trash2, Pencil, Loader2 } from "lucide-react";
 import { formatBytes } from "@/lib/utils";
-import { useTileset, useUpdateTileset, useDeleteTileset, useTilesetPreview } from "@/hooks/use-tilesets";
+import { useTileset, useUpdateTileset, useDeleteTileset, usePmtilesUrl } from "@/hooks/use-tilesets";
 import { useApiKey } from "@/hooks/use-api-key";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -23,7 +23,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 
-const TilePreview = dynamic(() => import("@/components/tile-preview"), {
+const PmtilesPreview = dynamic(() => import("@/components/pmtiles-preview"), {
   ssr: false,
   loading: () => (
     <p className="text-muted-foreground mt-4 text-sm">Loading map preview...</p>
@@ -95,7 +95,7 @@ export default function TileSetDetailPage() {
   const { data: tileset, isLoading, error } = useTileset(params.slug);
   const updateTileset = useUpdateTileset(params.slug);
   const deleteTileset = useDeleteTileset();
-  const preview = useTilesetPreview(params.slug);
+  const pmtiles = usePmtilesUrl(params.slug);
   const { data: apiKey } = useApiKey();
 
   const isOwner = !!(session?.user?.id && tileset?.user_id === session.user.id);
@@ -129,7 +129,7 @@ export default function TileSetDetailPage() {
   }
 
   function handleLoadPreview() {
-    preview.mutate();
+    pmtiles.mutate();
   }
 
   if (isLoading) {
@@ -140,7 +140,7 @@ export default function TileSetDetailPage() {
     );
   }
 
-  const displayError = error?.message ?? updateTileset.error?.message ?? deleteTileset.error?.message ?? preview.error?.message;
+  const displayError = error?.message ?? updateTileset.error?.message ?? deleteTileset.error?.message ?? pmtiles.error?.message;
 
   if (displayError || !tileset) {
     return (
@@ -292,9 +292,9 @@ const map = new maplibregl.Map({
         {/* Preview */}
         <div className="mt-8">
           <h2 className="text-lg font-semibold">Preview</h2>
-          {preview.data ? (
-            <TilePreview
-              zipBlob={preview.data}
+          {pmtiles.data ? (
+            <PmtilesPreview
+              pmtilesUrl={pmtiles.data}
               imageWidth={tileset.width ?? tileset.tile_size * (1 << tileset.max_zoom)}
               imageHeight={tileset.height ?? tileset.tile_size * (1 << tileset.max_zoom)}
               maxZoom={tileset.max_zoom}
@@ -305,13 +305,13 @@ const map = new maplibregl.Map({
             <Button
               variant="secondary"
               className="mt-3"
-              disabled={preview.isPending}
+              disabled={pmtiles.isPending}
               onClick={handleLoadPreview}
             >
-              {preview.isPending ? (
+              {pmtiles.isPending ? (
                 <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Loading...</>
               ) : (
-                <>Load Preview ({formatBytes(tileset.size_bytes)})</>
+                "Load Preview"
               )}
             </Button>
           )}

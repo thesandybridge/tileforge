@@ -1346,6 +1346,52 @@ async fn clear_notifications(
 }
 
 // ---------------------------------------------------------------------------
+// PMTiles presigned URL (for range-request preview)
+// ---------------------------------------------------------------------------
+
+async fn tileset_pmtiles_url(
+    State(state): State<AppState>,
+    claims: OptionalClaims,
+    Path(slug): Path<String>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let db = require_db(&state)?;
+    let bucket = state
+        .bucket
+        .as_ref()
+        .ok_or_else(|| ApiError::ServiceUnavailable("S3 not configured".into()))?;
+
+    let row = sqlx::query_as::<_, TileSetRow>(
+        "SELECT id, user_id, name, slug, projection, tile_size, min_zoom, max_zoom, tile_count, size_bytes, storage_path, public, created_at, width, height
+         FROM tile_sets WHERE slug = $1",
+    )
+    .bind(&slug)
+    .fetch_optional(&db)
+    .await
+    .map_err(|e| ApiError::Db(e.to_string()))?
+    .ok_or(ApiError::NotFound)?;
+
+    if !row.public {
+        let is_owner = claims
+            .0
+            .as_ref()
+            .and_then(|c| Uuid::parse_str(&c.sub).ok())
+            .map(|uid| uid == row.user_id)
+            .unwrap_or(false);
+        if !is_owner {
+            return Err(ApiError::NotFound);
+        }
+    }
+
+    let s3_key = format!("{}/tiles.pmtiles", row.storage_path);
+    let url = bucket
+        .presign_get(&s3_key, 600, None)
+        .await
+        .map_err(|_| ApiError::NotFound)?;
+
+    Ok(Json(serde_json::json!({ "url": url })))
+}
+
+// ---------------------------------------------------------------------------
 // Account deactivation
 // ---------------------------------------------------------------------------
 
@@ -1640,6 +1686,11 @@ async fn main() {
             "/api/tilesets/{slug}",
             get(get_tileset).patch(update_tileset).delete(delete_tileset)
                 .layer(middleware::from_fn_with_state(rate_limit.clone(), rate_limit_mutations)),
+        )
+        .route(
+            "/api/tilesets/{slug}/pmtiles-url",
+            get(tileset_pmtiles_url)
+                .layer(middleware::from_fn_with_state(rate_limit.clone(), rate_limit_download)),
         )
         .layer(middleware::from_fn_with_state(state.clone(), optional_auth))
         .layer(cors)

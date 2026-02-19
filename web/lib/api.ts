@@ -113,6 +113,17 @@ export async function deleteTileSet(slug: string, token?: string): Promise<void>
   }
 }
 
+export async function getPmtilesUrl(slug: string, token?: string): Promise<string> {
+  const headers: Record<string, string> = {};
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  const res = await fetch(
+    `${API_URL}/api/tilesets/${encodeURIComponent(slug)}/pmtiles-url`,
+    { headers },
+  );
+  const data = await handleResponse<{ url: string }>(res);
+  return data.url;
+}
+
 export interface CurrentUser {
   id: string;
   plan: string;
