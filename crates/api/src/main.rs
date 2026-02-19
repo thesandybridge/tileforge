@@ -597,10 +597,11 @@ async fn process_tiles(
     let projection_str = params.projection.as_deref().unwrap_or("flat");
     let projection = match projection_str {
         "mercator" => Projection::Mercator,
+        "isometric" => Projection::Isometric,
         "flat" => Projection::Flat,
         _ => {
             return Err(ApiError::InvalidField(
-                "projection must be 'flat' or 'mercator'".into(),
+                "projection must be 'flat', 'mercator', or 'isometric'".into(),
             ))
         }
     };

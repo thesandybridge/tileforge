@@ -36,6 +36,9 @@ pub enum Projection {
     Flat,
     /// Web Mercator (EPSG:3857) — suitable for real-world geographic maps.
     Mercator,
+    /// Isometric — transforms a top-down view to an isometric (2.5D) perspective.
+    /// Uses standard 30-degree isometric angles with foreshortened Y axis.
+    Isometric,
 }
 
 /// Scale metadata for accurate measurements on the output tileset.
@@ -314,6 +317,110 @@ impl Tiler {
                             image::Rgba([r, g, b, a])
                         };
                         canvas_buf.put_pixel(cx, cy, pixel);
+                    }
+                }
+
+                DynamicImage::ImageRgba8(canvas_buf)
+            } else if self.config.projection == Projection::Isometric {
+                // Isometric: transform top-down view to 2.5D isometric perspective
+                // Standard isometric uses 30° angles - we rotate 45° and scale Y by ~0.5
+                let resized = img.resize_exact(scaled_w, scaled_h, FilterType::CatmullRom);
+                let src_rgba = resized.to_rgba8();
+                let mut canvas_buf = RgbaImage::from_pixel(canvas_size, canvas_size, bg_pixel);
+
+                // Isometric transformation constants
+                // cos(45°) = sin(45°) ≈ 0.7071
+                let cos_45 = std::f64::consts::FRAC_1_SQRT_2;
+                let sin_45 = std::f64::consts::FRAC_1_SQRT_2;
+                // Vertical foreshortening factor (sin(30°) = 0.5)
+                let y_scale = 0.5;
+
+                // Calculate the transformed bounds to center the result
+                let src_w = scaled_w as f64;
+                let src_h = scaled_h as f64;
+                let canvas_f = canvas_size as f64;
+
+                // Transform corners to find bounding box
+                let corners = [
+                    (0.0, 0.0),
+                    (src_w, 0.0),
+                    (0.0, src_h),
+                    (src_w, src_h),
+                ];
+                let transformed: Vec<(f64, f64)> = corners
+                    .iter()
+                    .map(|&(x, y)| {
+                        let rx = (x - src_w / 2.0) * cos_45 - (y - src_h / 2.0) * sin_45;
+                        let ry = ((x - src_w / 2.0) * sin_45 + (y - src_h / 2.0) * cos_45) * y_scale;
+                        (rx, ry)
+                    })
+                    .collect();
+
+                let min_x = transformed.iter().map(|p| p.0).fold(f64::INFINITY, f64::min);
+                let max_x = transformed.iter().map(|p| p.0).fold(f64::NEG_INFINITY, f64::max);
+                let min_y = transformed.iter().map(|p| p.1).fold(f64::INFINITY, f64::min);
+                let max_y = transformed.iter().map(|p| p.1).fold(f64::NEG_INFINITY, f64::max);
+
+                let t_width = max_x - min_x;
+                let t_height = max_y - min_y;
+                let scale = (canvas_f / t_width.max(t_height)).min(1.0);
+                let offset_x = canvas_f / 2.0;
+                let offset_y = canvas_f / 2.0;
+
+                // Inverse transform: for each canvas pixel, find source pixel
+                for cy in 0..canvas_size {
+                    for cx in 0..canvas_size {
+                        // Canvas position relative to center, unscaled
+                        let dx = (cx as f64 - offset_x) / scale;
+                        let dy = (cy as f64 - offset_y) / scale / y_scale;
+
+                        // Inverse rotation (rotate back -45°)
+                        let src_x = dx * cos_45 + dy * sin_45 + src_w / 2.0;
+                        let src_y = -dx * sin_45 + dy * cos_45 + src_h / 2.0;
+
+                        // Bilinear sampling
+                        if src_x >= 0.0 && src_x < src_w - 1.0 && src_y >= 0.0 && src_y < src_h - 1.0 {
+                            let x0 = src_x.floor() as u32;
+                            let y0 = src_y.floor() as u32;
+                            let x1 = (x0 + 1).min(scaled_w - 1);
+                            let y1 = (y0 + 1).min(scaled_h - 1);
+                            let fx = src_x - x0 as f64;
+                            let fy = src_y - y0 as f64;
+
+                            let p00 = src_rgba.get_pixel(x0, y0);
+                            let p10 = src_rgba.get_pixel(x1, y0);
+                            let p01 = src_rgba.get_pixel(x0, y1);
+                            let p11 = src_rgba.get_pixel(x1, y1);
+
+                            let r = ((p00[0] as f64 * (1.0 - fx) + p10[0] as f64 * fx) * (1.0 - fy)
+                                + (p01[0] as f64 * (1.0 - fx) + p11[0] as f64 * fx) * fy)
+                                .round() as u8;
+                            let g = ((p00[1] as f64 * (1.0 - fx) + p10[1] as f64 * fx) * (1.0 - fy)
+                                + (p01[1] as f64 * (1.0 - fx) + p11[1] as f64 * fx) * fy)
+                                .round() as u8;
+                            let b = ((p00[2] as f64 * (1.0 - fx) + p10[2] as f64 * fx) * (1.0 - fy)
+                                + (p01[2] as f64 * (1.0 - fx) + p11[2] as f64 * fx) * fy)
+                                .round() as u8;
+                            let a = ((p00[3] as f64 * (1.0 - fx) + p10[3] as f64 * fx) * (1.0 - fy)
+                                + (p01[3] as f64 * (1.0 - fx) + p11[3] as f64 * fx) * fy)
+                                .round() as u8;
+
+                            let pixel = if a < 255 && !bg.is_transparent() {
+                                let alpha = a as f64 / 255.0;
+                                let inv_alpha = 1.0 - alpha;
+                                image::Rgba([
+                                    (r as f64 * alpha + bg.r as f64 * inv_alpha).round() as u8,
+                                    (g as f64 * alpha + bg.g as f64 * inv_alpha).round() as u8,
+                                    (b as f64 * alpha + bg.b as f64 * inv_alpha).round() as u8,
+                                    255,
+                                ])
+                            } else if a > 0 {
+                                image::Rgba([r, g, b, a])
+                            } else {
+                                continue; // Keep background
+                            };
+                            canvas_buf.put_pixel(cx, cy, pixel);
+                        }
                     }
                 }
 

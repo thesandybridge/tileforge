@@ -45,7 +45,7 @@ impl WasmTileConfig {
         self.max_zoom = Some(z);
     }
 
-    /// Set projection: 0 = Flat (default), 1 = Mercator.
+    /// Set projection: 0 = Flat (default), 1 = Mercator, 2 = Isometric.
     #[wasm_bindgen(js_name = setProjection)]
     pub fn set_projection(&mut self, p: u8) {
         self.projection = p;
@@ -84,6 +84,7 @@ impl WasmTileConfig {
     fn to_core_config(&self) -> TileConfig {
         let projection = match self.projection {
             1 => Projection::Mercator,
+            2 => Projection::Isometric,
             _ => Projection::Flat,
         };
 

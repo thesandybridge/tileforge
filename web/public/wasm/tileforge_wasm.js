@@ -89,7 +89,7 @@ let wasm_bindgen = (function(exports) {
             wasm.wasmtileconfig_setMinZoom(this.__wbg_ptr, z);
         }
         /**
-         * Set projection: 0 = Flat (default), 1 = Mercator.
+         * Set projection: 0 = Flat (default), 1 = Mercator, 2 = Isometric.
          * @param {number} p
          */
         setProjection(p) {

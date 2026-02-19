@@ -30,6 +30,7 @@ function process(msg) {
     if (msg.minZoom !== undefined) config.setMinZoom(msg.minZoom);
     if (msg.maxZoom !== undefined) config.setMaxZoom(msg.maxZoom);
     if (msg.projection === "mercator") config.setProjection(1);
+    else if (msg.projection === "isometric") config.setProjection(2);
 
     // New options
     if (msg.scale !== undefined) config.setScale(msg.scale);

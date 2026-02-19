@@ -159,7 +159,10 @@ impl StreamingTiler {
         for tile_row in 0..grid {
             // Source Y range needed (with 1px margin for interpolation)
             let (src_y_start_f, src_y_end_f) = match projection {
-                Projection::Flat => {
+                Projection::Flat | Projection::Isometric => {
+                    // Note: Isometric treated as Flat in streaming mode since full
+                    // transformation requires access to the entire image.
+                    // Use naive mode for proper isometric transformation.
                     let start = tile_row as f64 * tile_size as f64 * max_dim / canvas as f64;
                     let end = (tile_row + 1) as f64 * tile_size as f64 * max_dim / canvas as f64;
                     (start, end)
@@ -449,7 +452,7 @@ fn extract_tile(
         (tile_col + 1) as f64 * tile_size as f64 * max_dim / canvas as f64;
 
     let (src_y_start_f, src_y_end_f) = match projection {
-        Projection::Flat => {
+        Projection::Flat | Projection::Isometric => {
             let start = tile_row as f64 * tile_size as f64 * max_dim / canvas as f64;
             let end = (tile_row + 1) as f64 * tile_size as f64 * max_dim / canvas as f64;
             (start, end)

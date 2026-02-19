@@ -12,7 +12,7 @@ interface TilePreviewProps {
   imageHeight: number;
   maxZoom: number;
   tileSize: number;
-  projection: "flat" | "mercator";
+  projection: "flat" | "mercator" | "isometric";
 }
 
 function BlobTileLayer({
@@ -24,7 +24,7 @@ function BlobTileLayer({
   tiles: Map<string, string>;
   tileSize: number;
   maxZoom: number;
-  projection: "flat" | "mercator";
+  projection: "flat" | "mercator" | "isometric";
 }) {
   const map = useMap();
   const layerRef = useRef<L.GridLayer | null>(null);

@@ -59,8 +59,9 @@ fn main() {
     let projection = match args.projection.as_str() {
         "flat" => tileforge_core::Projection::Flat,
         "mercator" => tileforge_core::Projection::Mercator,
+        "isometric" => tileforge_core::Projection::Isometric,
         other => {
-            eprintln!("Unknown projection '{other}'. Use 'flat' or 'mercator'.");
+            eprintln!("Unknown projection '{other}'. Use 'flat', 'mercator', or 'isometric'.");
             std::process::exit(1);
         }
     };

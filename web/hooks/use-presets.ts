@@ -8,7 +8,7 @@ export interface Preset {
   tileSize: number;
   minZoom: number;
   maxZoom: number;
-  projection: "flat" | "mercator";
+  projection: "flat" | "mercator" | "isometric";
 }
 
 const STORAGE_KEY = "tileforge:presets";

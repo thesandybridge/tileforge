@@ -4,7 +4,7 @@ import { useCallback, useReducer, useRef } from "react";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
-import { Info, LoaderCircle, Upload, Save, Trash2, ChevronDown, Palette } from "lucide-react";
+import { Info, LoaderCircle, Upload, Save, Trash2, ChevronDown, Palette, Ruler } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { ScrollReveal } from "@/components/scroll-reveal";
 import { TileParticles } from "@/components/tile-particles";
@@ -82,13 +82,17 @@ interface FormState {
   tileSize: number;
   minZoom: number;
   maxZoom: number;
-  projection: "flat" | "mercator";
+  projection: "flat" | "mercator" | "isometric";
   hasFile: boolean;
   dragState: DragState;
   // Advanced options
   scale: number | null;
   backgroundColor: string | null;
   includePmtiles: boolean;
+  // Scale metadata for measurements
+  scaleMode: "none" | "pixels_per_unit" | "units_per_tile";
+  scaleValue: number;
+  scaleUnit: string;
 }
 
 type FormAction =
@@ -98,10 +102,13 @@ type FormAction =
   | { type: "TILE_SIZE_CHANGED"; tileSize: number }
   | { type: "MIN_ZOOM_CHANGED"; minZoom: number }
   | { type: "MAX_ZOOM_CHANGED"; maxZoom: number }
-  | { type: "PROJECTION_CHANGED"; projection: "flat" | "mercator" }
+  | { type: "PROJECTION_CHANGED"; projection: "flat" | "mercator" | "isometric" }
   | { type: "SCALE_CHANGED"; scale: number | null }
   | { type: "BACKGROUND_COLOR_CHANGED"; backgroundColor: string | null }
   | { type: "INCLUDE_PMTILES_CHANGED"; includePmtiles: boolean }
+  | { type: "SCALE_MODE_CHANGED"; scaleMode: "none" | "pixels_per_unit" | "units_per_tile" }
+  | { type: "SCALE_VALUE_CHANGED"; scaleValue: number }
+  | { type: "SCALE_UNIT_CHANGED"; scaleUnit: string }
   | { type: "DRAG_HOVER" }
   | { type: "DRAG_INVALID" }
   | { type: "DRAG_END" }
@@ -120,6 +127,9 @@ const initialFormState: FormState = {
   scale: null,
   backgroundColor: null,
   includePmtiles: true,
+  scaleMode: "none",
+  scaleValue: 1,
+  scaleUnit: "meters",
 };
 
 function formReducer(state: FormState, action: FormAction): FormState {
@@ -154,6 +164,12 @@ function formReducer(state: FormState, action: FormAction): FormState {
       return { ...state, backgroundColor: action.backgroundColor };
     case "INCLUDE_PMTILES_CHANGED":
       return { ...state, includePmtiles: action.includePmtiles };
+    case "SCALE_MODE_CHANGED":
+      return { ...state, scaleMode: action.scaleMode };
+    case "SCALE_VALUE_CHANGED":
+      return { ...state, scaleValue: action.scaleValue };
+    case "SCALE_UNIT_CHANGED":
+      return { ...state, scaleUnit: action.scaleUnit };
     case "DRAG_HOVER":
       return state.dragState === "hovering" ? state : { ...state, dragState: "hovering" };
     case "DRAG_INVALID":
@@ -257,6 +273,11 @@ export default function Home() {
   const onProcess = useCallback(() => {
     if (!fileRef.current) return;
     const copy = fileRef.current.slice(0);
+    const scaleMetadata = form.scaleMode !== "none" ? {
+      mode: form.scaleMode,
+      value: form.scaleValue,
+      unit: form.scaleUnit,
+    } : undefined;
     const baseOpts = {
       tileSize: form.tileSize,
       minZoom: form.minZoom,
@@ -265,13 +286,14 @@ export default function Home() {
       fileName: form.fileName ?? undefined,
       scale: form.scale ?? undefined,
       backgroundColor: form.backgroundColor ?? undefined,
+      scaleMetadata,
     };
     if (form.mode === "server") {
       processServer(copy, { ...baseOpts, token: session?.accessToken });
     } else {
       process(copy, { ...baseOpts, includePmtiles: form.includePmtiles });
     }
-  }, [process, processServer, form.tileSize, form.minZoom, form.maxZoom, form.projection, form.mode, form.fileName, form.scale, form.backgroundColor, form.includePmtiles, session?.accessToken]);
+  }, [process, processServer, form.tileSize, form.minZoom, form.maxZoom, form.projection, form.mode, form.fileName, form.scale, form.backgroundColor, form.includePmtiles, form.scaleMode, form.scaleValue, form.scaleUnit, session?.accessToken]);
 
   const onDownload = useCallback(() => {
     if (!zipBlob) return;
@@ -625,20 +647,22 @@ export default function Home() {
                         <TooltipTrigger asChild>
                           <Info className="size-3 cursor-help" />
                         </TooltipTrigger>
-                        <TooltipContent side="top" sideOffset={4} className="max-w-60">
+                        <TooltipContent side="top" sideOffset={4} className="max-w-72">
                           <p><strong>Flat</strong> for fantasy maps, floor plans, artwork, and non-geographic images.</p>
                           <p className="mt-1"><strong>Mercator</strong> for real-world geographic maps from equirectangular sources.</p>
+                          <p className="mt-1"><strong>Isometric</strong> transforms top-down views into a 2.5D isometric perspective.</p>
                         </TooltipContent>
                       </Tooltip>
                     </TooltipProvider>
                   </label>
-                  <Select value={form.projection} onValueChange={(v) => dispatch({ type: "PROJECTION_CHANGED", projection: v as "flat" | "mercator" })}>
+                  <Select value={form.projection} onValueChange={(v) => dispatch({ type: "PROJECTION_CHANGED", projection: v as "flat" | "mercator" | "isometric" })}>
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="flat">Flat</SelectItem>
                       <SelectItem value="mercator">Mercator</SelectItem>
+                      <SelectItem value="isometric">Isometric</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -650,106 +674,212 @@ export default function Home() {
                   <ChevronDown className="h-4 w-4 transition-transform group-open:rotate-180" />
                   Advanced Options
                 </summary>
-                <div className="mt-4 grid gap-4 sm:grid-cols-3">
-                  {/* Pre-scale */}
-                  <div className="space-y-2">
-                    <label className="text-muted-foreground flex items-center gap-1 text-xs font-medium uppercase tracking-wider">
-                      Pre-scale
-                      <TooltipProvider>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Info className="size-3 cursor-help" />
-                          </TooltipTrigger>
-                          <TooltipContent side="top" sideOffset={4} className="max-w-60">
-                            <p>Scale the image before tiling. Use 0.5 to halve the size, 2 to double it.</p>
-                          </TooltipContent>
-                        </Tooltip>
-                      </TooltipProvider>
-                    </label>
-                    <Select
-                      value={form.scale?.toString() ?? "none"}
-                      onValueChange={(v) => dispatch({ type: "SCALE_CHANGED", scale: v === "none" ? null : parseFloat(v) })}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">None (1x)</SelectItem>
-                        <SelectItem value="0.25">0.25x (quarter)</SelectItem>
-                        <SelectItem value="0.5">0.5x (half)</SelectItem>
-                        <SelectItem value="2">2x (double)</SelectItem>
-                        <SelectItem value="4">4x (quadruple)</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  {/* Background Color */}
-                  <div className="space-y-2">
-                    <label className="text-muted-foreground flex items-center gap-1 text-xs font-medium uppercase tracking-wider">
-                      Background
-                      <TooltipProvider>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Info className="size-3 cursor-help" />
-                          </TooltipTrigger>
-                          <TooltipContent side="top" sideOffset={4} className="max-w-60">
-                            <p>Fill transparent areas with a solid color. Leave empty for transparent.</p>
-                          </TooltipContent>
-                        </Tooltip>
-                      </TooltipProvider>
-                    </label>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="color"
-                        value={form.backgroundColor ?? "#ffffff"}
-                        onChange={(e) => dispatch({ type: "BACKGROUND_COLOR_CHANGED", backgroundColor: e.target.value })}
-                        className="h-9 w-9 cursor-pointer rounded border border-input bg-transparent p-0.5"
-                        disabled={!form.backgroundColor}
-                      />
-                      <Button
-                        type="button"
-                        variant={form.backgroundColor ? "secondary" : "outline"}
-                        size="sm"
-                        className="flex-1"
-                        onClick={() => dispatch({
-                          type: "BACKGROUND_COLOR_CHANGED",
-                          backgroundColor: form.backgroundColor ? null : "#ffffff"
-                        })}
-                      >
-                        {form.backgroundColor ? (
-                          <>
-                            <Palette className="mr-1.5 h-3.5 w-3.5" />
-                            {form.backgroundColor}
-                          </>
-                        ) : (
-                          "Transparent"
-                        )}
-                      </Button>
-                    </div>
-                  </div>
-
-                  {/* PMTiles (local mode only) */}
-                  {form.mode === "local" && (
+                <div className="mt-4 space-y-4">
+                  <div className="grid gap-4 sm:grid-cols-3">
+                    {/* Pre-scale */}
                     <div className="space-y-2">
                       <label className="text-muted-foreground flex items-center gap-1 text-xs font-medium uppercase tracking-wider">
-                        Output Format
+                        Pre-scale
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Info className="size-3 cursor-help" />
+                            </TooltipTrigger>
+                            <TooltipContent side="top" sideOffset={4} className="max-w-60">
+                              <p>Scale the image before tiling. Use 0.5 to halve the size, 2 to double it.</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
                       </label>
-                      <div className="flex items-center gap-3">
-                        <label className="flex cursor-pointer items-center gap-2 text-sm">
-                          <input
-                            type="checkbox"
-                            checked={form.includePmtiles}
-                            onChange={(e) => dispatch({ type: "INCLUDE_PMTILES_CHANGED", includePmtiles: e.target.checked })}
-                            className="h-4 w-4 rounded border-input"
-                          />
-                          Include PMTiles
-                        </label>
-                      </div>
-                      <p className="text-muted-foreground text-xs">
-                        Always includes ZIP. PMTiles is a single-file format for web maps.
-                      </p>
+                      <Select
+                        value={form.scale?.toString() ?? "none"}
+                        onValueChange={(v) => dispatch({ type: "SCALE_CHANGED", scale: v === "none" ? null : parseFloat(v) })}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">None (1x)</SelectItem>
+                          <SelectItem value="0.25">0.25x (quarter)</SelectItem>
+                          <SelectItem value="0.5">0.5x (half)</SelectItem>
+                          <SelectItem value="2">2x (double)</SelectItem>
+                          <SelectItem value="4">4x (quadruple)</SelectItem>
+                        </SelectContent>
+                      </Select>
                     </div>
-                  )}
+
+                    {/* Background Color */}
+                    <div className="space-y-2">
+                      <label className="text-muted-foreground flex items-center gap-1 text-xs font-medium uppercase tracking-wider">
+                        Background
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Info className="size-3 cursor-help" />
+                            </TooltipTrigger>
+                            <TooltipContent side="top" sideOffset={4} className="max-w-60">
+                              <p>Fill transparent areas with a solid color. Leave empty for transparent.</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                      </label>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="color"
+                          value={form.backgroundColor ?? "#ffffff"}
+                          onChange={(e) => dispatch({ type: "BACKGROUND_COLOR_CHANGED", backgroundColor: e.target.value })}
+                          className="h-9 w-9 cursor-pointer rounded border border-input bg-transparent p-0.5"
+                          disabled={!form.backgroundColor}
+                        />
+                        <Button
+                          type="button"
+                          variant={form.backgroundColor ? "secondary" : "outline"}
+                          size="sm"
+                          className="flex-1"
+                          onClick={() => dispatch({
+                            type: "BACKGROUND_COLOR_CHANGED",
+                            backgroundColor: form.backgroundColor ? null : "#ffffff"
+                          })}
+                        >
+                          {form.backgroundColor ? (
+                            <>
+                              <Palette className="mr-1.5 h-3.5 w-3.5" />
+                              {form.backgroundColor}
+                            </>
+                          ) : (
+                            "Transparent"
+                          )}
+                        </Button>
+                      </div>
+                    </div>
+
+                    {/* PMTiles (local mode only) */}
+                    {form.mode === "local" && (
+                      <div className="space-y-2">
+                        <label className="text-muted-foreground flex items-center gap-1 text-xs font-medium uppercase tracking-wider">
+                          Output Format
+                        </label>
+                        <div className="flex items-center gap-3">
+                          <label className="flex cursor-pointer items-center gap-2 text-sm">
+                            <input
+                              type="checkbox"
+                              checked={form.includePmtiles}
+                              onChange={(e) => dispatch({ type: "INCLUDE_PMTILES_CHANGED", includePmtiles: e.target.checked })}
+                              className="h-4 w-4 rounded border-input"
+                            />
+                            Include PMTiles
+                          </label>
+                        </div>
+                        <p className="text-muted-foreground text-xs">
+                          Always includes ZIP. PMTiles is a single-file format for web maps.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Scale Metadata for Measurements */}
+                  <div className="space-y-3 border-t border-border/50 pt-4">
+                    <label className="text-muted-foreground flex items-center gap-1 text-xs font-medium uppercase tracking-wider">
+                      <Ruler className="size-3" />
+                      Scale for Measurements
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Info className="size-3 cursor-help" />
+                          </TooltipTrigger>
+                          <TooltipContent side="top" sideOffset={4} className="max-w-72">
+                            <p>Define how pixels relate to real-world units for accurate measurements.</p>
+                            <p className="mt-1"><strong>Pixels per unit:</strong> How many pixels represent one unit (e.g., 10 pixels = 1 meter).</p>
+                            <p className="mt-1"><strong>Units per tile:</strong> How many units one tile covers (e.g., 1 tile = 100 meters).</p>
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    </label>
+                    <div className="flex flex-wrap items-center gap-3">
+                      <label className="flex cursor-pointer items-center gap-2 text-sm">
+                        <input
+                          type="radio"
+                          name="scaleMode"
+                          checked={form.scaleMode === "none"}
+                          onChange={() => dispatch({ type: "SCALE_MODE_CHANGED", scaleMode: "none" })}
+                          className="h-4 w-4"
+                        />
+                        None
+                      </label>
+                      <label className="flex cursor-pointer items-center gap-2 text-sm">
+                        <input
+                          type="radio"
+                          name="scaleMode"
+                          checked={form.scaleMode === "pixels_per_unit"}
+                          onChange={() => dispatch({ type: "SCALE_MODE_CHANGED", scaleMode: "pixels_per_unit" })}
+                          className="h-4 w-4"
+                        />
+                        Pixels per unit
+                      </label>
+                      <label className="flex cursor-pointer items-center gap-2 text-sm">
+                        <input
+                          type="radio"
+                          name="scaleMode"
+                          checked={form.scaleMode === "units_per_tile"}
+                          onChange={() => dispatch({ type: "SCALE_MODE_CHANGED", scaleMode: "units_per_tile" })}
+                          className="h-4 w-4"
+                        />
+                        Units per tile
+                      </label>
+                    </div>
+                    {form.scaleMode !== "none" && (
+                      <div className="flex items-center gap-2 text-sm">
+                        {form.scaleMode === "pixels_per_unit" ? (
+                          <>
+                            <input
+                              type="number"
+                              min="0.001"
+                              step="any"
+                              value={form.scaleValue || ""}
+                              onChange={(e) => {
+                                const val = parseFloat(e.target.value);
+                                dispatch({ type: "SCALE_VALUE_CHANGED", scaleValue: isNaN(val) ? 0 : val });
+                              }}
+                              className="h-9 w-20 rounded border border-input bg-background px-2 text-center"
+                            />
+                            <span className="text-muted-foreground">pixels =</span>
+                            <span>1</span>
+                          </>
+                        ) : (
+                          <>
+                            <span>1 tile =</span>
+                            <input
+                              type="number"
+                              min="0.001"
+                              step="any"
+                              value={form.scaleValue || ""}
+                              onChange={(e) => {
+                                const val = parseFloat(e.target.value);
+                                dispatch({ type: "SCALE_VALUE_CHANGED", scaleValue: isNaN(val) ? 0 : val });
+                              }}
+                              className="h-9 w-20 rounded border border-input bg-background px-2 text-center"
+                            />
+                          </>
+                        )}
+                        <Select
+                          value={form.scaleUnit}
+                          onValueChange={(v) => dispatch({ type: "SCALE_UNIT_CHANGED", scaleUnit: v })}
+                        >
+                          <SelectTrigger className="w-28">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="meters">meters</SelectItem>
+                            <SelectItem value="feet">feet</SelectItem>
+                            <SelectItem value="kilometers">kilometers</SelectItem>
+                            <SelectItem value="miles">miles</SelectItem>
+                            <SelectItem value="yards">yards</SelectItem>
+                            <SelectItem value="inches">inches</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </details>
 

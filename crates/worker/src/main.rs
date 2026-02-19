@@ -401,6 +401,7 @@ async fn process_job(
     let tile_size = job.tile_size.unwrap_or(256);
     let projection = match job.projection.as_deref() {
         Some("mercator") => Projection::Mercator,
+        Some("isometric") => Projection::Isometric,
         _ => Projection::Flat,
     };
 

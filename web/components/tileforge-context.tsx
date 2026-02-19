@@ -35,7 +35,7 @@ export interface ProcessOpts {
   tileSize?: number;
   minZoom?: number;
   maxZoom?: number;
-  projection?: "flat" | "mercator";
+  projection?: "flat" | "mercator" | "isometric";
   fileName?: string;
   /** Pre-scale factor (e.g., 0.5 = half size, 2.0 = double) */
   scale?: number;

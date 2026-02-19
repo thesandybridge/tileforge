@@ -24,7 +24,7 @@ declare namespace wasm_bindgen {
         setMaxZoom(z: number): void;
         setMinZoom(z: number): void;
         /**
-         * Set projection: 0 = Flat (default), 1 = Mercator.
+         * Set projection: 0 = Flat (default), 1 = Mercator, 2 = Isometric.
          */
         setProjection(p: number): void;
         /**

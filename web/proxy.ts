@@ -4,7 +4,7 @@ import authConfig from "@/auth.config";
 const { auth } = NextAuth(authConfig);
 import { NextResponse } from "next/server";
 
-const publicPaths = ["/", "/gallery", "/changelog", "/api/auth", "/billing"];
+const publicPaths = ["/", "/gallery", "/changelog", "/api/auth", "/billing", "/pricing"];
 
 function isPublic(pathname: string): boolean {
   if (publicPaths.includes(pathname)) return true;
@@ -14,7 +14,7 @@ function isPublic(pathname: string): boolean {
   return false;
 }
 
-export default auth((req) => {
+export const proxy = auth((req) => {
   const { pathname } = req.nextUrl;
 
   // Allow public routes, static assets, and images
