@@ -4,6 +4,7 @@ import { useCallback, useSyncExternalStore } from "react";
 
 export interface TileDefaults {
   tileSize: number;
+  minZoom: number;
   maxZoom: number;
   projection: "flat" | "mercator";
   defaultPublic: boolean;
@@ -13,6 +14,7 @@ const STORAGE_KEY = "tileforge:tile-defaults";
 
 const DEFAULT_VALUES: TileDefaults = {
   tileSize: 256,
+  minZoom: 0,
   maxZoom: 4,
   projection: "flat",
   defaultPublic: false,

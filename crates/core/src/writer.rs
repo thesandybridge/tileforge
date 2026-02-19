@@ -53,6 +53,40 @@ impl<W: Write + Seek> TileWriter for ZipTileWriter<W> {
     }
 }
 
+/// Writes tiles into two `TileWriter`s simultaneously (fan-out).
+///
+/// This eliminates the need for a second processing pass when you want both
+/// ZIP and PMTiles output from the same image.
+pub struct TeeTileWriter<A: TileWriter, B: TileWriter> {
+    a: A,
+    b: B,
+}
+
+impl<A: TileWriter, B: TileWriter> TeeTileWriter<A, B> {
+    pub fn new(a: A, b: B) -> Self {
+        Self { a, b }
+    }
+
+    /// Consume the tee and return both inner writers.
+    pub fn into_inner(self) -> (A, B) {
+        (self.a, self.b)
+    }
+}
+
+impl<A: TileWriter, B: TileWriter> TileWriter for TeeTileWriter<A, B> {
+    fn write_tile(&mut self, zoom: u32, x: u32, y: u32, png_bytes: &[u8]) -> Result<(), TilerError> {
+        self.a.write_tile(zoom, x, y, png_bytes)?;
+        self.b.write_tile(zoom, x, y, png_bytes)?;
+        Ok(())
+    }
+
+    fn finish(&mut self) -> Result<(), TilerError> {
+        self.a.finish()?;
+        self.b.finish()?;
+        Ok(())
+    }
+}
+
 /// Writes tiles into a PMTiles archive.
 ///
 /// Note: `PmTilesStreamWriter::finalize()` does not return the underlying writer,

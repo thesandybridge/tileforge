@@ -182,6 +182,27 @@ function SettingsContent() {
 
           <div className="space-y-2">
             <label className="text-muted-foreground text-xs font-medium uppercase tracking-wider">
+              Min Zoom
+            </label>
+            <Select
+              value={String(defaults.minZoom)}
+              onValueChange={(v) => update({ minZoom: Number(v) })}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {Array.from({ length: defaults.maxZoom + 1 }, (_, i) => (
+                  <SelectItem key={i} value={String(i)}>
+                    {i}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-muted-foreground text-xs font-medium uppercase tracking-wider">
               Max Zoom
             </label>
             <Select
@@ -193,7 +214,7 @@ function SettingsContent() {
               </SelectTrigger>
               <SelectContent>
                 {Array.from({ length: 13 }, (_, i) => (
-                  <SelectItem key={i} value={String(i)}>
+                  <SelectItem key={i} value={String(i)} disabled={i < defaults.minZoom}>
                     {i}
                   </SelectItem>
                 ))}

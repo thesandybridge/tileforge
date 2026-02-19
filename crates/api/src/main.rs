@@ -152,28 +152,47 @@ struct UserClaims {
 }
 
 /// Middleware: extract Bearer token, validate JWT, inject UserClaims into extensions.
-/// No-op if no token or JWT_SECRET is not configured.
+/// Supports three auth paths:
+/// 1. JWT Bearer token (Authorization: Bearer <jwt>)
+/// 2. API key as Bearer token (Authorization: Bearer tf_...)
+/// 3. API key as query parameter (?key=tf_...)
 async fn optional_auth(
     State(state): State<AppState>,
     mut req: Request<axum::body::Body>,
     next: Next,
 ) -> Response {
-    if let Some(ref secret) = state.jwt_secret {
-        if let Some(auth_header) = req.headers().get(header::AUTHORIZATION) {
-            if let Ok(val) = auth_header.to_str() {
-                if let Some(token) = val.strip_prefix("Bearer ") {
-                    let key = DecodingKey::from_secret(secret.as_bytes());
-                    let mut validation = Validation::new(Algorithm::HS256);
-                    validation.set_required_spec_claims(&["sub", "exp"]);
-                    if let Ok(data) = decode::<UserClaims>(token, &key, &validation) {
-                        req.extensions_mut().insert(data.claims);
+    // Extract bearer token if present
+    let bearer_token = req
+        .headers()
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .map(|s| s.to_string());
+
+    // Path 1: JWT from Bearer token
+    if let (Some(ref secret), Some(ref token)) = (&state.jwt_secret, &bearer_token) {
+        let key = DecodingKey::from_secret(secret.as_bytes());
+        let mut validation = Validation::new(Algorithm::HS256);
+        validation.set_required_spec_claims(&["sub", "exp"]);
+        if let Ok(data) = decode::<UserClaims>(token, &key, &validation) {
+            req.extensions_mut().insert(data.claims);
+        }
+    }
+
+    // Path 2: API key as Bearer token (Authorization: Bearer tf_...)
+    if req.extensions().get::<UserClaims>().is_none() {
+        if let Some(ref token) = bearer_token {
+            if token.starts_with("tf_") && token.len() == 35 {
+                if let Some(ref db) = state.db {
+                    if let Some(claims) = validate_api_key(db, token).await {
+                        req.extensions_mut().insert(claims);
                     }
                 }
             }
         }
     }
 
-    // Path 2: API key query parameter (?key=tf_...)
+    // Path 3: API key query parameter (?key=tf_...)
     if req.extensions().get::<UserClaims>().is_none() {
         if let Some(ref db) = state.db {
             if let Some(api_key) = extract_api_key_from_query(req.uri()) {
@@ -851,6 +870,8 @@ struct TileSetRow {
     storage_path: String,
     public: bool,
     created_at: chrono::DateTime<chrono::Utc>,
+    width: Option<i32>,
+    height: Option<i32>,
 }
 
 #[derive(Deserialize)]
@@ -890,7 +911,7 @@ async fn create_tileset(
     let row = sqlx::query_as::<_, TileSetRow>(
         "INSERT INTO tile_sets (user_id, name, slug, projection, tile_size, min_zoom, max_zoom, tile_count, size_bytes, storage_path, public)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-         RETURNING id, user_id, name, slug, projection, tile_size, min_zoom, max_zoom, tile_count, size_bytes, storage_path, public, created_at",
+         RETURNING id, user_id, name, slug, projection, tile_size, min_zoom, max_zoom, tile_count, size_bytes, storage_path, public, created_at, width, height",
     )
     .bind(user_id)
     .bind(&body.name)
@@ -934,7 +955,7 @@ async fn list_tilesets(
         let is_owner = caller_id.map(|c| c == user_id).unwrap_or(false);
         if is_owner {
             sqlx::query_as::<_, TileSetRow>(
-                "SELECT id, user_id, name, slug, projection, tile_size, min_zoom, max_zoom, tile_count, size_bytes, storage_path, public, created_at
+                "SELECT id, user_id, name, slug, projection, tile_size, min_zoom, max_zoom, tile_count, size_bytes, storage_path, public, created_at, width, height
                  FROM tile_sets WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3",
             )
             .bind(user_id)
@@ -945,7 +966,7 @@ async fn list_tilesets(
             .map_err(|e| ApiError::Db(e.to_string()))?
         } else {
             sqlx::query_as::<_, TileSetRow>(
-                "SELECT id, user_id, name, slug, projection, tile_size, min_zoom, max_zoom, tile_count, size_bytes, storage_path, public, created_at
+                "SELECT id, user_id, name, slug, projection, tile_size, min_zoom, max_zoom, tile_count, size_bytes, storage_path, public, created_at, width, height
                  FROM tile_sets WHERE user_id = $1 AND public = true ORDER BY created_at DESC LIMIT $2 OFFSET $3",
             )
             .bind(user_id)
@@ -957,7 +978,7 @@ async fn list_tilesets(
         }
     } else {
         sqlx::query_as::<_, TileSetRow>(
-            "SELECT id, user_id, name, slug, projection, tile_size, min_zoom, max_zoom, tile_count, size_bytes, storage_path, public, created_at
+            "SELECT id, user_id, name, slug, projection, tile_size, min_zoom, max_zoom, tile_count, size_bytes, storage_path, public, created_at, width, height
              FROM tile_sets WHERE public = true ORDER BY created_at DESC LIMIT $1 OFFSET $2",
         )
         .bind(limit)
@@ -978,7 +999,7 @@ async fn get_tileset(
     let db = require_db(&state)?;
 
     let row = sqlx::query_as::<_, TileSetRow>(
-        "SELECT id, user_id, name, slug, projection, tile_size, min_zoom, max_zoom, tile_count, size_bytes, storage_path, public, created_at
+        "SELECT id, user_id, name, slug, projection, tile_size, min_zoom, max_zoom, tile_count, size_bytes, storage_path, public, created_at, width, height
          FROM tile_sets WHERE slug = $1",
     )
     .bind(&slug)
@@ -1017,7 +1038,7 @@ async fn update_tileset(
          SET name = COALESCE($1, name),
              public = COALESCE($2, public)
          WHERE slug = $3 AND user_id = $4
-         RETURNING id, user_id, name, slug, projection, tile_size, min_zoom, max_zoom, tile_count, size_bytes, storage_path, public, created_at",
+         RETURNING id, user_id, name, slug, projection, tile_size, min_zoom, max_zoom, tile_count, size_bytes, storage_path, public, created_at, width, height",
     )
     .bind(&body.name)
     .bind(body.public)
@@ -1041,7 +1062,7 @@ async fn delete_tileset(
 
     // Fetch the tileset first so we can get its storage_path for S3 cleanup
     let row = sqlx::query_as::<_, TileSetRow>(
-        "SELECT id, user_id, name, slug, projection, tile_size, min_zoom, max_zoom, tile_count, size_bytes, storage_path, public, created_at
+        "SELECT id, user_id, name, slug, projection, tile_size, min_zoom, max_zoom, tile_count, size_bytes, storage_path, public, created_at, width, height
          FROM tile_sets WHERE slug = $1 AND user_id = $2",
     )
     .bind(&slug)

@@ -14,6 +14,8 @@ export interface TileSet {
   storage_path: string;
   public: boolean;
   created_at: string;
+  width: number | null;
+  height: number | null;
 }
 
 export interface CreateTileSetInput {
