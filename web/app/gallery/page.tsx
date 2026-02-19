@@ -7,7 +7,7 @@ import { API_URL } from "@/lib/api";
 import { PLAN_PRO } from "@/lib/plans";
 import { usePublicTilesets } from "@/hooks/use-tilesets";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { UpgradeBanner } from "@/components/upgrade-banner";
+import { UpgradeInlineBanner } from "@/components/upgrade-banner";
 import { ScrollReveal } from "@/components/scroll-reveal";
 
 function formatBytes(bytes: number): string {
@@ -69,7 +69,7 @@ export default function GalleryPage() {
 
         {isFree && !isLoading && tilesets.length > 0 && (
           <div className="mb-6">
-            <UpgradeBanner message="Want to create your own? Upgrade to Pro for server-side processing." />
+            <UpgradeInlineBanner message="Want to create your own? Upgrade to Pro for server-side processing." />
           </div>
         )}
 

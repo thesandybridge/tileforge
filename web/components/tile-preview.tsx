@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import L from "leaflet";
 import { MapContainer, useMap } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
@@ -29,58 +29,63 @@ function BlobTileLayer({
   const map = useMap();
   const layerRef = useRef<L.GridLayer | null>(null);
 
-  const addLayer = useCallback(() => {
-    if (layerRef.current) {
-      map.removeLayer(layerRef.current);
-    }
-
-    const BlobLayer = L.GridLayer.extend({
-      createTile(coords: L.Coords) {
-        const tile = L.DomUtil.create(
-          "img",
-          "leaflet-tile",
-        ) as HTMLImageElement;
-        const key = `${coords.z}/${coords.x}/${coords.y}.png`;
-        const url = tiles.get(key);
-        if (url) {
-          tile.src = url;
-        }
-        tile.width = tileSize;
-        tile.height = tileSize;
-        return tile;
-      },
-    });
-
-    const layerOptions: Record<string, unknown> = {
-      tileSize,
-      noWrap: true,
-      maxNativeZoom: maxZoom,
-      minNativeZoom: 0,
-    };
-
-    if (projection === "flat") {
-      layerOptions.bounds = [
-        [-tileSize, 0],
-        [0, tileSize],
-      ];
-    }
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const layer = new (BlobLayer as any)(layerOptions);
-    layer.addTo(map);
-    layerRef.current = layer;
-  }, [map, tiles, tileSize, maxZoom, projection]);
-
   useEffect(() => {
+    // Guard: panes must exist before adding layers. In strict-mode
+    // double-mounts or fast re-renders the container may not be
+    // initialised yet.
+    function addLayer() {
+      if (!map.getPane("tilePane")) return;
+
+      if (layerRef.current) {
+        map.removeLayer(layerRef.current);
+      }
+
+      const BlobLayer = L.GridLayer.extend({
+        createTile(coords: L.Coords) {
+          const tile = L.DomUtil.create(
+            "img",
+            "leaflet-tile",
+          ) as HTMLImageElement;
+          const key = `${coords.z}/${coords.x}/${coords.y}.png`;
+          const url = tiles.get(key);
+          if (url) {
+            tile.src = url;
+          }
+          tile.width = tileSize;
+          tile.height = tileSize;
+          return tile;
+        },
+      });
+
+      const layerOptions: Record<string, unknown> = {
+        tileSize,
+        noWrap: true,
+        maxNativeZoom: maxZoom,
+        minNativeZoom: 0,
+      };
+
+      if (projection === "flat") {
+        layerOptions.bounds = [
+          [-tileSize, 0],
+          [0, tileSize],
+        ];
+      }
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const layer = new (BlobLayer as any)(layerOptions);
+      layer.addTo(map);
+      layerRef.current = layer;
+    }
+
     map.whenReady(addLayer);
 
     return () => {
       if (layerRef.current) {
-        map.removeLayer(layerRef.current);
+        try { map.removeLayer(layerRef.current); } catch { /* map may already be torn down */ }
         layerRef.current = null;
       }
     };
-  }, [map, addLayer]);
+  }, [map, tiles, tileSize, maxZoom, projection]);
 
   return null;
 }

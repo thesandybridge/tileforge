@@ -6,6 +6,8 @@ import Link from "next/link";
 import dynamic from "next/dynamic";
 import { LoaderCircle, Upload } from "lucide-react";
 import { ScrollReveal } from "@/components/scroll-reveal";
+import { TileParticles } from "@/components/tile-particles";
+import { UpgradeBanner } from "@/components/upgrade-banner";
 import { useTileforge } from "@/components/tileforge-context";
 import { PLAN_PRO } from "@/lib/plans";
 import { useTileDefaults } from "@/hooks/use-tile-defaults";
@@ -248,14 +250,16 @@ export default function Home() {
       </noscript>
 
       {/* Main tool card */}
-      <ScrollReveal>
+      <ScrollReveal className="overflow-visible">
       <main className="mx-auto mt-10 max-w-2xl px-6">
         {form.mode === "local" && (status === "idle" || status === "loading") && (
           <p className="text-muted-foreground text-center text-sm">Loading WASM engine...</p>
         )}
 
         {showCard && (
-          <Card className="border-border/50 corona-glow shadow-lg">
+          <div className="relative overflow-visible">
+            <TileParticles active={status === "processing" || status === "waking"} />
+            <Card className="relative z-10 border-border/50 corona-glow shadow-lg">
             <CardContent className="space-y-6 p-6 sm:p-8">
               {/* Drop zone */}
               <div
@@ -396,7 +400,7 @@ export default function Home() {
               {/* Waking server */}
               {status === "waking" && (
                 <div className="flex flex-col items-center gap-2 py-2">
-                  <LoaderCircle className="text-primary h-6 w-6 animate-spin" />
+                  <LoaderCircle className="text-primary h-6 w-6 motion-safe:animate-spin" />
                   <p className="text-muted-foreground text-xs">Waking up server...</p>
                 </div>
               )}
@@ -413,7 +417,7 @@ export default function Home() {
                     </>
                   ) : (
                     <div className="flex flex-col items-center gap-2 py-2">
-                      <LoaderCircle className="text-primary h-6 w-6 animate-spin" />
+                      <LoaderCircle className="text-primary h-6 w-6 motion-safe:animate-spin" />
                       <p className="text-muted-foreground text-xs">
                         {form.mode === "server" ? "Processing on server..." : "Processing..."}
                       </p>
@@ -460,9 +464,17 @@ export default function Home() {
               )}
             </CardContent>
           </Card>
+          </div>
         )}
       </main>
       </ScrollReveal>
+
+      {/* Upgrade CTA */}
+      <div className="mx-auto mt-8 max-w-2xl px-6">
+        <ScrollReveal>
+          <UpgradeBanner />
+        </ScrollReveal>
+      </div>
 
       {/* Tile preview — full width */}
       {status === "done" && zipBlob && form.imageInfo && (
@@ -482,6 +494,10 @@ export default function Home() {
         <Link href="/gallery" className="hover:text-foreground underline underline-offset-4 transition-colors">
           Gallery
         </Link>
+        <span className="mx-2">&middot;</span>
+        <a href="https://github.com/thesandybridge/tileforge" target="_blank" rel="noopener noreferrer" className="hover:text-foreground underline underline-offset-4 transition-colors">
+          GitHub
+        </a>
         <span className="mx-2">&middot;</span>
         &copy; {new Date().getFullYear()} &mdash; made with &hearts; by <a href="https://sandybridge.io" className="hover:text-foreground underline underline-offset-4 transition-colors">sandybridge</a>
       </footer>
