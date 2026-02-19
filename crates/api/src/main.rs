@@ -538,12 +538,12 @@ async fn process_tiles(
     }
 
     if is_pro || is_large {
-        // Async path: upload to S3, enqueue via NATS JetStream
-        let (mut redis, nats, bucket) = match (&state.redis, &state.nats, &state.bucket) {
-            (Some(r), Some(n), Some(b)) => (r.clone(), n.clone(), b.clone()),
+        // Async path: upload to S3, enqueue via NATS JetStream (or Redis fallback)
+        let (mut redis, bucket) = match (&state.redis, &state.bucket) {
+            (Some(r), Some(b)) => (r.clone(), b.clone()),
             _ => {
                 return Err(ApiError::ServiceUnavailable(
-                    "async processing not configured (REDIS_URL, NATS_URL, and S3 env vars required)".into(),
+                    "async processing not configured (REDIS_URL and S3 env vars required)".into(),
                 ));
             }
         };
@@ -575,7 +575,7 @@ async fn process_tiles(
             )
             .await;
 
-        // Enqueue job via NATS JetStream (awaits PubAck for durable write confirmation)
+        // Enqueue job
         let job = JobPayload {
             job_id: job_id.clone(),
             tile_size,
@@ -585,14 +585,21 @@ async fn process_tiles(
             user_id: claims.0.as_ref().map(|c| c.sub.clone()),
             file_name: params.file_name.clone(),
         };
-        let payload = serde_json::to_string(&job).unwrap();
-        nats.publish("tileforge.jobs", payload.into())
-            .await
-            .map_err(|e| ApiError::Processing(format!("NATS publish failed: {e}")))?
-            .await
-            .map_err(|e| ApiError::Processing(format!("NATS publish ack failed: {e}")))?;
+        let job_json = serde_json::to_string(&job).unwrap();
 
-        tracing::info!(job_id = %job_id, "enqueued async job via NATS");
+        if let Some(ref nats) = state.nats {
+            // NATS JetStream: awaits PubAck for durable write confirmation
+            nats.publish("tileforge.jobs", job_json.into())
+                .await
+                .map_err(|e| ApiError::Processing(format!("NATS publish failed: {e}")))?
+                .await
+                .map_err(|e| ApiError::Processing(format!("NATS publish ack failed: {e}")))?;
+            tracing::info!(job_id = %job_id, "enqueued async job via NATS");
+        } else {
+            // Fallback: Redis LPUSH (no delivery guarantees)
+            let _: redis::RedisResult<()> = redis.lpush("tileforge:jobs", &job_json).await;
+            tracing::info!(job_id = %job_id, "enqueued async job via Redis (NATS not configured)");
+        }
 
         return Ok((StatusCode::ACCEPTED, Json(AcceptedResponse { job_id })).into_response());
     }

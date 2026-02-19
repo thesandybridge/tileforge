@@ -58,7 +58,7 @@ struct ProgressUpdate {
 
 struct WorkerConfig {
     redis_url: String,
-    nats_url: String,
+    nats_url: Option<String>,
     database_url: Option<String>,
 }
 
@@ -67,8 +67,7 @@ impl WorkerConfig {
         Self {
             redis_url: std::env::var("REDIS_URL")
                 .unwrap_or_else(|_| "redis://127.0.0.1:6380".into()),
-            nats_url: std::env::var("NATS_URL")
-                .unwrap_or_else(|_| "nats://127.0.0.1:4222".into()),
+            nats_url: std::env::var("NATS_URL").ok(),
             database_url: std::env::var("DATABASE_URL").ok(),
         }
     }
@@ -111,8 +110,12 @@ async fn main() {
         None
     };
 
-    // Connect to Redis (for progress tracking)
-    tracing::info!("worker starting, redis={}, nats={}", config.redis_url, config.nats_url);
+    // Connect to Redis (for progress tracking, and job queue fallback)
+    tracing::info!(
+        "worker starting, redis={}, nats={}",
+        config.redis_url,
+        config.nats_url.as_deref().unwrap_or("(disabled)"),
+    );
 
     let redis_client = redis::Client::open(config.redis_url.as_str())
         .expect("invalid REDIS_URL");
@@ -121,13 +124,29 @@ async fn main() {
         .await
         .expect("failed to connect to Redis");
 
-    // Connect to NATS JetStream
-    let nats_client = async_nats::connect(&config.nats_url)
+    if let Some(ref nats_url) = config.nats_url {
+        run_nats_loop(nats_url, &bucket, &mut conn, db.as_ref()).await;
+    } else {
+        tracing::info!("NATS_URL not set — using Redis BRPOP fallback");
+        run_redis_loop(&bucket, &mut conn, db.as_ref()).await;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// NATS JetStream consumer loop
+// ---------------------------------------------------------------------------
+
+async fn run_nats_loop(
+    nats_url: &str,
+    bucket: &s3::Bucket,
+    conn: &mut redis::aio::MultiplexedConnection,
+    db: Option<&PgPool>,
+) {
+    let nats_client = async_nats::connect(nats_url)
         .await
         .expect("failed to connect to NATS");
     let js = async_nats::jetstream::new(nats_client);
 
-    // Get the job stream (API creates it on startup)
     let stream = js
         .get_or_create_stream(async_nats::jetstream::stream::Config {
             name: "TILEFORGE_JOBS".into(),
@@ -140,13 +159,12 @@ async fn main() {
         .await
         .expect("failed to get TILEFORGE_JOBS stream");
 
-    // Create durable pull consumer
     let consumer: PullConsumer = stream
         .get_or_create_consumer(
             "tileforge-worker",
             async_nats::jetstream::consumer::pull::Config {
                 durable_name: Some("tileforge-worker".into()),
-                ack_wait: Duration::from_secs(600), // 10 min for long tile jobs
+                ack_wait: Duration::from_secs(600),
                 max_deliver: 5,
                 backoff: vec![
                     Duration::from_secs(30),
@@ -178,7 +196,6 @@ async fn main() {
             Ok(j) => j,
             Err(e) => {
                 tracing::error!("invalid job JSON: {e}");
-                // Permanently reject unparseable messages
                 let _ = msg.ack_with(AckKind::Term).await;
                 continue;
             }
@@ -187,14 +204,13 @@ async fn main() {
         let delivery_count = msg.info().map(|i| i.delivered).unwrap_or(1);
         tracing::info!(job_id = %job.job_id, delivery = delivery_count, "processing job");
 
-        let result = process_job(&job, &bucket, &mut conn, db.as_ref()).await;
+        let result = process_job(&job, bucket, conn, db).await;
 
         match result {
             Ok(()) => {
                 if let Err(e) = msg.ack().await {
                     tracing::error!(job_id = %job.job_id, "failed to ack message: {e}");
                 }
-                // Clean up S3 upload only after successful ack
                 bucket
                     .delete_object(&format!("uploads/{}.bin", job.job_id))
                     .await
@@ -222,7 +238,6 @@ async fn main() {
                     .await;
 
                 if delivery_count >= 5 {
-                    // Max retries reached — terminate and clean up
                     tracing::warn!(job_id = %job.job_id, "max retries reached, terminating");
                     let _ = msg.ack_with(AckKind::Term).await;
                     bucket
@@ -230,7 +245,6 @@ async fn main() {
                         .await
                         .ok();
                 } else {
-                    // Request redelivery after backoff
                     let delay = match delivery_count {
                         1 => Duration::from_secs(30),
                         2 => Duration::from_secs(120),
@@ -243,7 +257,76 @@ async fn main() {
         }
     }
 
-    tracing::warn!("message stream ended, shutting down");
+    tracing::warn!("NATS message stream ended, shutting down");
+}
+
+// ---------------------------------------------------------------------------
+// Redis BRPOP fallback loop (when NATS_URL is not set)
+// ---------------------------------------------------------------------------
+
+async fn run_redis_loop(
+    bucket: &s3::Bucket,
+    conn: &mut redis::aio::MultiplexedConnection,
+    db: Option<&PgPool>,
+) {
+    tracing::info!("listening for jobs on Redis (tileforge:jobs)");
+
+    loop {
+        let result: redis::RedisResult<(String, String)> =
+            redis::cmd("BRPOP")
+                .arg("tileforge:jobs")
+                .arg(0)
+                .query_async(conn)
+                .await;
+
+        let job_json = match result {
+            Ok((_key, val)) => val,
+            Err(e) => {
+                tracing::error!("BRPOP error: {e}");
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                continue;
+            }
+        };
+
+        let job: Job = match serde_json::from_str(&job_json) {
+            Ok(j) => j,
+            Err(e) => {
+                tracing::error!("invalid job JSON: {e}");
+                continue;
+            }
+        };
+
+        tracing::info!(job_id = %job.job_id, "processing job");
+
+        let result = process_job(&job, bucket, conn, db).await;
+
+        // Always clean up the upload from S3
+        bucket
+            .delete_object(&format!("uploads/{}.bin", job.job_id))
+            .await
+            .ok();
+
+        if let Err(e) = result {
+            tracing::error!(job_id = %job.job_id, "job failed: {e}");
+            let progress = ProgressUpdate {
+                status: "failed".into(),
+                last_updated: unix_now(),
+                zoom: None,
+                tiles_done: None,
+                tiles_total: None,
+                download_url: None,
+                pmtiles_url: None,
+                error: Some(e.to_string()),
+            };
+            let _: redis::RedisResult<()> = conn
+                .set_ex(
+                    format!("tileforge:progress:{}", job.job_id),
+                    serde_json::to_string(&progress).unwrap(),
+                    3600,
+                )
+                .await;
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
