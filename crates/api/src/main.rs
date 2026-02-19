@@ -832,13 +832,14 @@ async fn job_download_pmtiles(
 // ---------------------------------------------------------------------------
 
 async fn get_storage_used(db: &PgPool, user_id: Uuid) -> Result<i64, ApiError> {
-    let row: (Option<i64>,) =
-        sqlx::query_as("SELECT COALESCE(SUM(size_bytes), 0)::bigint FROM tile_sets WHERE user_id = $1")
+    // Use denormalized storage_used_bytes column (maintained by trigger)
+    let row: (i64,) =
+        sqlx::query_as("SELECT storage_used_bytes FROM users WHERE id = $1")
             .bind(user_id)
             .fetch_one(db)
             .await
             .map_err(|e| ApiError::Db(e.to_string()))?;
-    Ok(row.0.unwrap_or(0))
+    Ok(row.0)
 }
 
 fn require_db(state: &AppState) -> Result<PgPool, ApiError> {
@@ -1582,34 +1583,39 @@ async fn purge_deactivated(
     .await
     .map_err(|e| ApiError::Db(e.to_string()))?;
 
-    let mut deleted = 0u64;
-    for (uid,) in &rows {
-        // Get all storage paths for S3 cleanup
-        let tilesets: Vec<(String,)> = sqlx::query_as(
-            "SELECT storage_path FROM tile_sets WHERE user_id = $1",
-        )
-        .bind(uid)
-        .fetch_all(&db)
+    if rows.is_empty() {
+        return Ok(Json(PurgeResponse { deleted: 0 }));
+    }
+
+    let user_ids: Vec<Uuid> = rows.into_iter().map(|(id,)| id).collect();
+    let deleted = user_ids.len() as u64;
+
+    // Batch fetch all storage paths for S3 cleanup (single query)
+    let tilesets: Vec<(String,)> = sqlx::query_as(
+        "SELECT storage_path FROM tile_sets WHERE user_id = ANY($1::uuid[])",
+    )
+    .bind(&user_ids)
+    .fetch_all(&db)
+    .await
+    .map_err(|e| ApiError::Db(e.to_string()))?;
+
+    // Delete S3 objects (can't batch S3 deletes, but we've reduced DB queries)
+    if let Some(ref bucket) = state.bucket {
+        for (storage_path,) in &tilesets {
+            let _ = bucket.delete_object(&format!("{storage_path}/tiles.zip")).await;
+            let _ = bucket.delete_object(&format!("{storage_path}/tiles.pmtiles")).await;
+            let _ = bucket.delete_object(&format!("{storage_path}/thumbnail.jpg")).await;
+        }
+    }
+
+    // Batch delete all users (CASCADE handles tile_sets and api_keys)
+    sqlx::query("DELETE FROM users WHERE id = ANY($1::uuid[])")
+        .bind(&user_ids)
+        .execute(&db)
         .await
         .map_err(|e| ApiError::Db(e.to_string()))?;
 
-        // Delete S3 objects
-        if let Some(ref bucket) = state.bucket {
-            for (storage_path,) in &tilesets {
-                let _ = bucket.delete_object(&format!("{storage_path}/tiles.zip")).await;
-                let _ = bucket.delete_object(&format!("{storage_path}/tiles.pmtiles")).await;
-                let _ = bucket.delete_object(&format!("{storage_path}/thumbnail.jpg")).await;
-            }
-        }
-
-        // CASCADE deletes tile_sets and api_keys
-        sqlx::query("DELETE FROM users WHERE id = $1")
-            .bind(uid)
-            .execute(&db)
-            .await
-            .map_err(|e| ApiError::Db(e.to_string()))?;
-
-        deleted += 1;
+    for uid in &user_ids {
         tracing::info!(user_id = %uid, "purged deactivated user");
     }
 

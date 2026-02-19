@@ -3,9 +3,14 @@ name = "tileforge-core"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+default = ["parallel"]
+parallel = ["rayon"]
+
 [dependencies]
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 png = "0.18"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 pmtiles = { version = "=0.19.2", default-features = false, features = ["write"] }
 thiserror = "2"
+rayon = { version = "1.10", optional = true }

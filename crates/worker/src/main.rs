@@ -10,7 +10,10 @@ use std::cell::Cell;
 use std::io::Cursor;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use tileforge_core::{PmTilesTileWriter, Projection, TeeTileWriter, TileConfig, TileProgress, Tiler, ZipTileWriter};
+use tileforge_core::{
+    streaming::should_use_streaming, PmTilesTileWriter, Projection, TeeTileWriter, TileConfig,
+    TileProgress, Tiler, ZipTileWriter, STREAMING_THRESHOLD,
+};
 
 fn unix_now() -> u64 {
     SystemTime::now()
@@ -363,9 +366,14 @@ async fn process_job(
         .map_err(|e| format!("S3 download failed: {e}"))?;
     let image_bytes = resp.to_vec();
 
-    // Generate thumbnail (best-effort, don't fail the job)
-    match image::load_from_memory(&image_bytes) {
+    // Check if we'll use streaming (to avoid double-decode for small images)
+    let will_stream = should_use_streaming(&image_bytes, STREAMING_THRESHOLD);
+
+    // For small images, decode once and reuse for both thumbnail and tiling
+    // For large images, decode for thumbnail only (tiler will stream)
+    let decoded_image = match image::load_from_memory(&image_bytes) {
         Ok(img) => {
+            // Generate thumbnail (best-effort, don't fail the job)
             let thumb = img.thumbnail(480, 480);
             let mut jpeg_buf = Vec::new();
             let mut cursor = Cursor::new(&mut jpeg_buf);
@@ -381,9 +389,14 @@ async fn process_job(
                     Err(e) => tracing::warn!(job_id = %job.job_id, "thumbnail upload failed: {e}"),
                 }
             }
+            // Keep decoded image for small images to avoid re-decoding in tiler
+            if will_stream { None } else { Some(img) }
         }
-        Err(e) => tracing::warn!(job_id = %job.job_id, "thumbnail decode failed: {e}"),
-    }
+        Err(e) => {
+            tracing::warn!(job_id = %job.job_id, "thumbnail decode failed: {e}");
+            None
+        }
+    };
 
     let tile_size = job.tile_size.unwrap_or(256);
     let projection = match job.projection.as_deref() {
@@ -458,7 +471,7 @@ async fn process_job(
 
         let mut tee = TeeTileWriter::new(zip_writer, pmtiles_writer);
         let last_write = Cell::new(Instant::now());
-        let output = tiler.process_bytes(&image_bytes, &mut tee, |p: TileProgress| {
+        let on_progress = |p: TileProgress| {
             let now = Instant::now();
             if p.tiles_done == 1
                 || p.tiles_done == p.tiles_total
@@ -467,7 +480,14 @@ async fn process_job(
                 *progress_writer.lock().unwrap() = Some(p);
                 last_write.set(now);
             }
-        })?;
+        };
+
+        // Use pre-decoded image if available (avoids double decode for small images)
+        let output = if let Some(ref img) = decoded_image {
+            tiler.process_image(img, &mut tee, on_progress)?
+        } else {
+            tiler.process_bytes(&image_bytes, &mut tee, on_progress)?
+        };
 
         let (zip_w, _pmtiles_w) = tee.into_inner();
         let zip_bytes = zip_w.into_inner().unwrap().into_inner();

@@ -2,6 +2,9 @@ use image::imageops::FilterType;
 use image::{DynamicImage, GenericImageView, RgbaImage};
 use std::io::BufRead;
 
+#[cfg(feature = "parallel")]
+use rayon::prelude::*;
+
 use crate::writer::TileWriter;
 use crate::{Projection, TileConfig, TileOutput, TileProgress, Tiler, TilerError};
 
@@ -336,34 +339,55 @@ impl StreamingTiler {
         let projection = self.config.projection;
 
         for tile_row in 0..grid {
+            // Extract and encode tiles in parallel, then write sequentially
+            #[cfg(feature = "parallel")]
+            let row_results: Vec<(RgbaImage, Vec<u8>)> = (0..grid)
+                .into_par_iter()
+                .map(|tile_col| {
+                    let tile = extract_tile(
+                        &source,
+                        0,
+                        tile_col,
+                        tile_row,
+                        tile_size,
+                        src_w,
+                        src_h,
+                        canvas,
+                        projection,
+                    );
+                    let png_bytes = encode_tile_to_png(&tile, tile_size);
+                    (tile, png_bytes)
+                })
+                .collect();
+
+            #[cfg(not(feature = "parallel"))]
+            let row_results: Vec<(RgbaImage, Vec<u8>)> = (0..grid)
+                .map(|tile_col| {
+                    let tile = extract_tile(
+                        &source,
+                        0,
+                        tile_col,
+                        tile_row,
+                        tile_size,
+                        src_w,
+                        src_h,
+                        canvas,
+                        projection,
+                    );
+                    let png_bytes = encode_tile_to_png(&tile, tile_size);
+                    (tile, png_bytes)
+                })
+                .collect();
+
+            // Write tiles sequentially (TileWriter is not thread-safe)
             let mut row_tiles = Vec::with_capacity(grid as usize);
-
-            for tile_col in 0..grid {
-                let tile = extract_tile(
-                    &source,
-                    0, // strip_start_row = 0, source is the full image
-                    tile_col,
-                    tile_row,
-                    tile_size,
-                    src_w,
-                    src_h,
-                    canvas,
-                    projection,
-                );
-
-                encode_and_write_tile(
-                    tile_writer,
-                    max_zoom,
-                    tile_col,
-                    tile_row,
-                    &tile,
-                    tile_size,
-                )?;
+            for (tile_col, (tile, png_bytes)) in row_results.into_iter().enumerate() {
+                tile_writer.write_tile(max_zoom, tile_col as u32, tile_row, &png_bytes)?;
 
                 tiles_done += 1;
                 on_progress(TileProgress {
                     zoom: max_zoom,
-                    x: tile_col,
+                    x: tile_col as u32,
                     y: tile_row,
                     tiles_done,
                     tiles_total: total_tiles,
@@ -468,7 +492,7 @@ fn extract_tile(
     let dest_h = (frac_y * tile_size as f64).round().max(1.0) as u32;
 
     let resized =
-        image::imageops::resize(&*crop, dest_w, dest_h, FilterType::Lanczos3);
+        image::imageops::resize(&*crop, dest_w, dest_h, FilterType::CatmullRom);
 
     if dest_w >= tile_size && dest_h >= tile_size {
         resized
@@ -480,6 +504,25 @@ fn extract_tile(
     }
 }
 
+/// Encode a tile as PNG bytes (used for parallel encoding).
+fn encode_tile_to_png(tile: &RgbaImage, tile_size: u32) -> Vec<u8> {
+    let mut png_buf = Vec::new();
+    let encoder = image::codecs::png::PngEncoder::new_with_quality(
+        &mut png_buf,
+        image::codecs::png::CompressionType::Fast,
+        image::codecs::png::FilterType::Adaptive,
+    );
+    // This should not fail for valid RGBA data
+    let _ = image::ImageEncoder::write_image(
+        encoder,
+        tile.as_raw(),
+        tile_size,
+        tile_size,
+        image::ExtendedColorType::Rgba8,
+    );
+    png_buf
+}
+
 /// Encode a tile as PNG and write it via the TileWriter.
 fn encode_and_write_tile<TW: TileWriter>(
     tile_writer: &mut TW,
@@ -489,15 +532,7 @@ fn encode_and_write_tile<TW: TileWriter>(
     tile: &RgbaImage,
     tile_size: u32,
 ) -> Result<(), TilerError> {
-    let mut png_buf = Vec::new();
-    let encoder = image::codecs::png::PngEncoder::new(&mut png_buf);
-    image::ImageEncoder::write_image(
-        encoder,
-        tile.as_raw(),
-        tile_size,
-        tile_size,
-        image::ExtendedColorType::Rgba8,
-    )?;
+    let png_buf = encode_tile_to_png(tile, tile_size);
     tile_writer.write_tile(zoom, x, y, &png_buf)?;
     Ok(())
 }
@@ -523,7 +558,9 @@ fn merge_tile_rows(top: &[RgbaImage], bottom: &[RgbaImage], tile_size: u32) -> V
         image::imageops::overlay(&mut canvas, bl, 0, ts as i64);
         image::imageops::overlay(&mut canvas, br, ts as i64, ts as i64);
 
-        let merged = image::imageops::resize(&canvas, ts, ts, FilterType::Lanczos3);
+        // Use Triangle (bilinear) for pyramid merge - the 2x2 composite is already
+        // oversampled, so a lighter filter is sufficient and faster
+        let merged = image::imageops::resize(&canvas, ts, ts, FilterType::Triangle);
         result.push(merged);
     }
 

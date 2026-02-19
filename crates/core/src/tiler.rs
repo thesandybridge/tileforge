@@ -2,6 +2,9 @@ use image::imageops::FilterType;
 use image::{DynamicImage, GenericImageView, RgbaImage};
 use thiserror::Error;
 
+#[cfg(feature = "parallel")]
+use rayon::prelude::*;
+
 use crate::writer::TileWriter;
 
 #[derive(Debug, Error)]
@@ -186,7 +189,7 @@ impl Tiler {
 
             let canvas_img = if self.config.projection == Projection::Mercator {
                 // Mercator: resize X uniformly, then remap Y per-row
-                let resized = img.resize_exact(scaled_w, height, FilterType::Lanczos3);
+                let resized = img.resize_exact(scaled_w, height, FilterType::CatmullRom);
                 let src_rgba = resized.to_rgba8();
                 let mut canvas_buf = RgbaImage::new(canvas_size, canvas_size);
 
@@ -213,37 +216,78 @@ impl Tiler {
                 DynamicImage::ImageRgba8(canvas_buf)
             } else {
                 // Flat: standard resize + overlay
-                let resized = img.resize_exact(scaled_w, scaled_h, FilterType::Lanczos3);
+                let resized = img.resize_exact(scaled_w, scaled_h, FilterType::CatmullRom);
                 let mut canvas_buf = RgbaImage::new(canvas_size, canvas_size);
                 image::imageops::overlay(&mut canvas_buf, &resized.to_rgba8(), 0, 0);
                 DynamicImage::ImageRgba8(canvas_buf)
             };
 
-            for x in 0..grid_size {
-                for y in 0..grid_size {
-                    let tile = canvas_img.crop_imm(
-                        x * tile_size,
-                        y * tile_size,
-                        tile_size,
-                        tile_size,
-                    );
+            // Process tiles row by row, parallelizing within each row
+            for y in 0..grid_size {
+                // Extract and encode tiles in parallel
+                #[cfg(feature = "parallel")]
+                let row_tiles: Vec<Vec<u8>> = (0..grid_size)
+                    .into_par_iter()
+                    .map(|x| {
+                        let tile = canvas_img.crop_imm(
+                            x * tile_size,
+                            y * tile_size,
+                            tile_size,
+                            tile_size,
+                        );
+                        let rgba: RgbaImage = tile.to_rgba8();
+                        let mut png_buf = Vec::new();
+                        let encoder = image::codecs::png::PngEncoder::new_with_quality(
+                            &mut png_buf,
+                            image::codecs::png::CompressionType::Fast,
+                            image::codecs::png::FilterType::Adaptive,
+                        );
+                        let _ = image::ImageEncoder::write_image(
+                            encoder,
+                            rgba.as_raw(),
+                            tile_size,
+                            tile_size,
+                            image::ExtendedColorType::Rgba8,
+                        );
+                        png_buf
+                    })
+                    .collect();
 
-                    let rgba: RgbaImage = tile.to_rgba8();
-                    let mut png_buf = Vec::new();
-                    let encoder = image::codecs::png::PngEncoder::new(&mut png_buf);
-                    image::ImageEncoder::write_image(
-                        encoder,
-                        rgba.as_raw(),
-                        tile_size,
-                        tile_size,
-                        image::ExtendedColorType::Rgba8,
-                    )?;
-                    tile_writer.write_tile(z, x, y, &png_buf)?;
+                #[cfg(not(feature = "parallel"))]
+                let row_tiles: Vec<Vec<u8>> = (0..grid_size)
+                    .map(|x| {
+                        let tile = canvas_img.crop_imm(
+                            x * tile_size,
+                            y * tile_size,
+                            tile_size,
+                            tile_size,
+                        );
+                        let rgba: RgbaImage = tile.to_rgba8();
+                        let mut png_buf = Vec::new();
+                        let encoder = image::codecs::png::PngEncoder::new_with_quality(
+                            &mut png_buf,
+                            image::codecs::png::CompressionType::Fast,
+                            image::codecs::png::FilterType::Adaptive,
+                        );
+                        let _ = image::ImageEncoder::write_image(
+                            encoder,
+                            rgba.as_raw(),
+                            tile_size,
+                            tile_size,
+                            image::ExtendedColorType::Rgba8,
+                        );
+                        png_buf
+                    })
+                    .collect();
+
+                // Write tiles sequentially
+                for (x, png_buf) in row_tiles.into_iter().enumerate() {
+                    tile_writer.write_tile(z, x as u32, y, &png_buf)?;
 
                     tiles_done += 1;
                     on_progress(TileProgress {
                         zoom: z,
-                        x,
+                        x: x as u32,
                         y,
                         tiles_done,
                         tiles_total: total_tiles,
