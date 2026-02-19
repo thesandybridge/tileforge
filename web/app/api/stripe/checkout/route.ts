@@ -1,25 +1,24 @@
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
-import { auth } from "@/auth";
 import pool from "@/lib/db";
+import { requireAuth, getStripeCustomerId, getOrigin } from "@/lib/api-utils";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
 
+/**
+ * POST /api/stripe/checkout
+ * Creates a Stripe Checkout session for Pro subscription.
+ * Requires authentication.
+ *
+ * @returns { url: string } - Checkout session URL
+ */
 export async function POST() {
-  const session = await auth();
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const userId = session.user.id;
+  const authResult = await requireAuth();
+  if (authResult instanceof NextResponse) return authResult;
+  const { session, userId } = authResult;
 
   // Look up or create Stripe customer
-  const userRow = await pool.query(
-    "SELECT stripe_customer_id FROM users WHERE id = $1",
-    [userId],
-  );
-
-  let customerId = userRow.rows[0]?.stripe_customer_id as string | null;
+  let customerId = await getStripeCustomerId(userId);
 
   if (!customerId) {
     const customer = await stripe.customers.create({
@@ -34,14 +33,12 @@ export async function POST() {
     );
   }
 
-  const origin = process.env.NEXTAUTH_URL ?? "http://localhost:3000";
-
   const checkoutSession = await stripe.checkout.sessions.create({
     customer: customerId,
     mode: "subscription",
     line_items: [{ price: process.env.STRIPE_PRO_PRICE_ID!, quantity: 1 }],
-    success_url: `${origin}/billing?upgraded=true`,
-    cancel_url: `${origin}/billing`,
+    success_url: `${getOrigin()}/billing?upgraded=true`,
+    cancel_url: `${getOrigin()}/billing`,
     subscription_data: {
       metadata: { user_id: userId },
     },

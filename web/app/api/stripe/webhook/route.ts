@@ -5,6 +5,17 @@ import { PLAN_FREE, PLAN_PRO } from "@/lib/plans";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
 
+/**
+ * POST /api/stripe/webhook
+ * Handles Stripe webhook events for subscription lifecycle.
+ *
+ * Events handled:
+ * - checkout.session.completed: Upgrades user to Pro plan
+ * - customer.subscription.deleted: Downgrades user to Free plan
+ * - customer.subscription.updated: Updates plan based on subscription status
+ *
+ * @returns { received: boolean }
+ */
 export async function POST(req: NextRequest) {
   const body = await req.text();
   const sig = req.headers.get("stripe-signature");

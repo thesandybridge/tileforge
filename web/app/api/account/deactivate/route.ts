@@ -1,24 +1,26 @@
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
-import { auth } from "@/auth";
-import pool from "@/lib/db";
 import { API_URL } from "@/lib/api";
+import { requireAuth, getStripeCustomerId } from "@/lib/api-utils";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
 
+/**
+ * POST /api/account/deactivate
+ * Deactivates the user's account:
+ * - Cancels all active Stripe subscriptions
+ * - Marks user as deactivated in backend (30-day deletion window)
+ * Requires authentication with access token.
+ *
+ * @returns { deactivated: boolean }
+ */
 export async function POST() {
-  const session = await auth();
-  if (!session?.user?.id || !session.accessToken) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const authResult = await requireAuth({ requireToken: true });
+  if (authResult instanceof NextResponse) return authResult;
+  const { userId, accessToken } = authResult;
 
   // Cancel active Stripe subscriptions if any
-  const userRow = await pool.query(
-    "SELECT stripe_customer_id FROM users WHERE id = $1",
-    [session.user.id],
-  );
-
-  const customerId = userRow.rows[0]?.stripe_customer_id as string | null;
+  const customerId = await getStripeCustomerId(userId);
   if (customerId) {
     const subscriptions = await stripe.subscriptions.list({
       customer: customerId,
@@ -32,7 +34,7 @@ export async function POST() {
   // Call Rust API to deactivate user
   const res = await fetch(`${API_URL}/api/user/deactivate`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${session.accessToken}` },
+    headers: { Authorization: `Bearer ${accessToken}` },
   });
 
   if (!res.ok) {

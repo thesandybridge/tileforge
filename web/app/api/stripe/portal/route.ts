@@ -1,31 +1,29 @@
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
-import { auth } from "@/auth";
-import pool from "@/lib/db";
+import { requireAuth, getStripeCustomerId, getOrigin } from "@/lib/api-utils";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
 
+/**
+ * POST /api/stripe/portal
+ * Creates a Stripe Billing Portal session for subscription management.
+ * Requires authentication and an existing Stripe customer.
+ *
+ * @returns { url: string } - Billing portal URL
+ */
 export async function POST() {
-  const session = await auth();
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const authResult = await requireAuth();
+  if (authResult instanceof NextResponse) return authResult;
+  const { userId } = authResult;
 
-  const userRow = await pool.query(
-    "SELECT stripe_customer_id FROM users WHERE id = $1",
-    [session.user.id],
-  );
-
-  const customerId = userRow.rows[0]?.stripe_customer_id as string | null;
+  const customerId = await getStripeCustomerId(userId);
   if (!customerId) {
     return NextResponse.json({ error: "No subscription found" }, { status: 400 });
   }
 
-  const origin = process.env.NEXTAUTH_URL ?? "http://localhost:3000";
-
   const portalSession = await stripe.billingPortal.sessions.create({
     customer: customerId,
-    return_url: `${origin}/billing`,
+    return_url: `${getOrigin()}/billing`,
   });
 
   return NextResponse.json({ url: portalSession.url });
