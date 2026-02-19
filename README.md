@@ -106,7 +106,8 @@ tileforge/
 | **web**    | Next.js 16 — UI, auth (Auth.js v5), SSR                      |
 | **api**    | Rust (axum) — tile processing, downloads, CRUD, auth, rate limiting |
 | **worker** | Rust — async job consumer, thumbnail generation               |
-| Redis      | Job queue (`tileforge:jobs`) + progress cache + rate limiting  |
+| NATS       | JetStream job queue — durable publish, explicit ack, retry/DLQ |
+| Redis      | Progress cache + rate limiting (job queue fallback if no NATS) |
 | Postgres   | Users, tile sets, notifications, API keys                     |
 | S3         | Tile storage (ZIP, PMTiles, thumbnails, uploads)              |
 
@@ -132,7 +133,7 @@ Turbopack cannot bundle WASM imports inside Web Workers. The worker and WASM glu
 - **Rust** (stable) — [rustup.rs](https://rustup.rs/)
 - **wasm-pack** — `cargo install wasm-pack`
 - **Node.js** 20+ and **npm**
-- **Docker** — for Postgres, MinIO, and Redis
+- **Docker** — for Postgres, MinIO, Redis, and NATS
 - **[mprocs](https://github.com/pvolok/mprocs)** — `cargo install mprocs` (tabbed TUI for running services)
 - **Stripe CLI** — `brew install stripe/stripe-cli/stripe` (for webhook testing)
 
@@ -145,6 +146,7 @@ Turbopack cannot bundle WASM imports inside Web Workers. The worker and WASM glu
 ```env
 DATABASE_URL=postgres://tileforge:tileforge@localhost:5433/tileforge
 REDIS_URL=redis://127.0.0.1:6380
+NATS_URL=nats://127.0.0.1:4222
 JWT_SECRET=<shared-secret>
 S3_ENDPOINT=http://localhost:9000
 S3_BUCKET=tileforge
@@ -172,7 +174,7 @@ cargo xtask dev
 ```
 
 This will:
-- Start Docker infrastructure (Postgres, Redis, MinIO) and wait for readiness
+- Start Docker infrastructure (Postgres, Redis, MinIO, NATS) and wait for readiness
 - Install web dependencies if needed
 - Launch [mprocs](https://github.com/pvolok/mprocs) with tabbed views for **api**, **worker**, **web**, and **stripe**
 
@@ -218,7 +220,8 @@ Requires Redis and S3 to be configured. See environment variables below.
 |-------------------|----------|------------------------|-----------------------------------|
 | `PORT`            | No       | `8080`                 | HTTP listen port                  |
 | `MAX_UPLOAD_BYTES`| No       | `524288000` (500 MB)   | Max image upload size             |
-| `REDIS_URL`       | No       | —                      | Redis URL (enables async jobs)    |
+| `REDIS_URL`       | No       | —                      | Redis URL (enables progress + rate limiting) |
+| `NATS_URL`        | No       | —                      | NATS URL (enables JetStream job queue; falls back to Redis) |
 | `DATABASE_URL`    | No       | —                      | Postgres URL (enables tileset CRUD) |
 | `CORS_ORIGIN`     | No       | `*` (permissive)       | Allowed CORS origin               |
 | `JWT_SECRET`      | No       | —                      | Shared HS256 secret for JWT auth  |
@@ -233,7 +236,8 @@ Requires Redis and S3 to be configured. See environment variables below.
 
 | Variable       | Required | Default                  | Description                  |
 |----------------|----------|--------------------------|------------------------------|
-| `REDIS_URL`    | No       | `redis://127.0.0.1:6380` | Redis URL                    |
+| `REDIS_URL`    | No       | `redis://127.0.0.1:6380` | Redis URL (progress tracking)  |
+| `NATS_URL`     | No       | —                        | NATS URL (JetStream job queue; falls back to Redis BRPOP) |
 | `DATABASE_URL` | No       | —                        | Postgres (for tileset rows)  |
 | `S3_ENDPOINT`  | Yes      | —                        | S3-compatible endpoint URL   |
 | `S3_BUCKET`    | Yes      | —                        | S3 bucket name               |
@@ -399,7 +403,7 @@ A GitHub Actions workflow (`.github/workflows/wasm-build.yml`) automatically reb
 |---|---|
 | Core library | Rust (`image`, `png`, `zip`, `pmtiles`, `thiserror`) |
 | HTTP API | Rust + axum, tower-http |
-| Worker | Rust + redis, rust-s3, sqlx |
+| Worker | Rust + async-nats, redis, rust-s3, sqlx |
 | WASM bridge | `wasm-bindgen`, `js-sys`, `wasm-pack` |
 | CLI | Rust + `clap` |
 | Web framework | Next.js 16 (App Router, Turbopack) |
@@ -408,7 +412,7 @@ A GitHub Actions workflow (`.github/workflows/wasm-build.yml`) automatically reb
 | Map preview | Leaflet + react-leaflet + pmtiles |
 | ZIP (browser) | fflate |
 | Database | PostgreSQL + sqlx migrations |
-| Queue | Redis (BRPOP job queue) |
+| Queue | NATS JetStream (durable job queue with retry/DLQ; Redis BRPOP fallback) |
 | Storage | S3-compatible (Railway bucket / MinIO) |
 | CI | GitHub Actions |
 
