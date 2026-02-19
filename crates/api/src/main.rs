@@ -1248,6 +1248,7 @@ struct NotificationRow {
     notification_type: String,
     title: String,
     message: Option<String>,
+    link: Option<String>,
     read: bool,
     created_at: chrono::DateTime<chrono::Utc>,
 }
@@ -1258,6 +1259,7 @@ struct CreateNotificationBody {
     notification_type: String,
     title: String,
     message: Option<String>,
+    link: Option<String>,
 }
 
 async fn list_notifications(
@@ -1268,7 +1270,7 @@ async fn list_notifications(
     let user_id = Uuid::parse_str(&user.sub).map_err(|_| ApiError::Unauthorized)?;
 
     let rows = sqlx::query_as::<_, NotificationRow>(
-        "SELECT id, user_id, type, title, message, read, created_at
+        "SELECT id, user_id, type, title, message, link, read, created_at
          FROM notifications WHERE user_id = $1 ORDER BY created_at DESC LIMIT 50",
     )
     .bind(user_id)
@@ -1298,14 +1300,15 @@ async fn create_notification(
     let user_id = Uuid::parse_str(&user.sub).map_err(|_| ApiError::Unauthorized)?;
 
     let row = sqlx::query_as::<_, NotificationRow>(
-        "INSERT INTO notifications (user_id, type, title, message)
-         VALUES ($1, $2, $3, $4)
-         RETURNING id, user_id, type, title, message, read, created_at",
+        "INSERT INTO notifications (user_id, type, title, message, link)
+         VALUES ($1, $2, $3, $4, $5)
+         RETURNING id, user_id, type, title, message, link, read, created_at",
     )
     .bind(user_id)
     .bind(&body.notification_type)
     .bind(&body.title)
     .bind(&body.message)
+    .bind(&body.link)
     .fetch_one(&db)
     .await
     .map_err(|e| ApiError::Db(e.to_string()))?;
@@ -1343,6 +1346,79 @@ async fn clear_notifications(
         .map_err(|e| ApiError::Db(e.to_string()))?;
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+// ---------------------------------------------------------------------------
+// Broadcast notification (admin)
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize)]
+struct BroadcastResponse {
+    notified: i64,
+}
+
+async fn broadcast_notification(
+    State(state): State<AppState>,
+    req: Request<axum::body::Body>,
+) -> Result<Json<BroadcastResponse>, ApiError> {
+    let admin_secret = state
+        .admin_secret
+        .as_ref()
+        .ok_or(ApiError::Forbidden)?;
+
+    let auth_header = req
+        .headers()
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .ok_or(ApiError::Unauthorized)?;
+
+    if auth_header != admin_secret {
+        return Err(ApiError::Forbidden);
+    }
+
+    let body_bytes = axum::body::to_bytes(req.into_body(), 1024 * 64)
+        .await
+        .map_err(|_| ApiError::InvalidField("invalid request body".into()))?;
+    let body: CreateNotificationBody = serde_json::from_slice(&body_bytes)
+        .map_err(|e| ApiError::InvalidField(format!("invalid JSON: {e}")))?;
+
+    if body.notification_type.len() > 50 {
+        return Err(ApiError::InvalidField("type must be 50 characters or fewer".into()));
+    }
+    if body.title.len() > 200 {
+        return Err(ApiError::InvalidField("title must be 200 characters or fewer".into()));
+    }
+
+    let db = require_db(&state)?;
+
+    let user_ids: Vec<(Uuid,)> = sqlx::query_as(
+        "SELECT id FROM users WHERE deactivated_at IS NULL",
+    )
+    .fetch_all(&db)
+    .await
+    .map_err(|e| ApiError::Db(e.to_string()))?;
+
+    let ids: Vec<Uuid> = user_ids.into_iter().map(|(id,)| id).collect();
+    let count = ids.len() as i64;
+
+    if count > 0 {
+        sqlx::query(
+            "INSERT INTO notifications (user_id, type, title, message, link)
+             SELECT unnest($1::uuid[]), $2, $3, $4, $5",
+        )
+        .bind(&ids)
+        .bind(&body.notification_type)
+        .bind(&body.title)
+        .bind(&body.message)
+        .bind(&body.link)
+        .execute(&db)
+        .await
+        .map_err(|e| ApiError::Db(e.to_string()))?;
+    }
+
+    tracing::info!(count = count, "broadcast notification to all users");
+    Ok(Json(BroadcastResponse { notified: count }))
 }
 
 // ---------------------------------------------------------------------------
@@ -1662,6 +1738,7 @@ async fn main() {
                 .layer(middleware::from_fn_with_state(rate_limit.clone(), rate_limit_mutations)),
         )
         .route("/api/admin/purge-deactivated", post(purge_deactivated))
+        .route("/api/admin/broadcast-notification", post(broadcast_notification))
         .route(
             "/api/notifications",
             get(list_notifications).post(create_notification).delete(clear_notifications)

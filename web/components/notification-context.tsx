@@ -51,6 +51,9 @@ function toastForType(type: Notification["type"], title: string) {
     case "warning":
       toast.warning(title);
       break;
+    case "changelog":
+      toast.info(title);
+      break;
     default:
       toast(title);
   }
@@ -68,6 +71,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
 
   const isPro = session?.user?.plan === PLAN_PRO && !!session?.accessToken;
+  const isAuthenticated = !!session?.accessToken;
   const token = session?.accessToken ?? "";
 
   const [localNotifications, setLocalNotifications] = useState<Notification[]>([]);
@@ -75,7 +79,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   const { data: serverNotifications = [] } = useQuery({
     queryKey: ["notifications"],
     queryFn: () => fetchNotifications(token),
-    enabled: isPro,
+    enabled: isAuthenticated,
     refetchInterval: 30_000,
   });
 
@@ -96,8 +100,8 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   });
 
   const notifications = useMemo(
-    () => (isPro ? [...localNotifications, ...serverNotifications] : localNotifications),
-    [isPro, localNotifications, serverNotifications],
+    () => (isAuthenticated ? [...localNotifications, ...serverNotifications] : localNotifications),
+    [isAuthenticated, localNotifications, serverNotifications],
   );
 
   const unreadCount = useMemo(
@@ -135,13 +139,13 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
 
   const markAllRead = useCallback(() => {
     setLocalNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
-    if (isPro) markReadMutation.mutate();
-  }, [isPro, markReadMutation]);
+    if (isAuthenticated) markReadMutation.mutate();
+  }, [isAuthenticated, markReadMutation]);
 
   const clear = useCallback(() => {
     setLocalNotifications([]);
-    if (isPro) clearMutation.mutate();
-  }, [isPro, clearMutation]);
+    if (isAuthenticated) clearMutation.mutate();
+  }, [isAuthenticated, clearMutation]);
 
   const value = useMemo(
     () => ({ notifications, unreadCount, add, markAllRead, clear }),

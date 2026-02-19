@@ -28,6 +28,7 @@ export function Navbar() {
             {session?.user && (
               <Link href="/my-tilesets" className="hover:text-foreground transition-colors">My Tilesets</Link>
             )}
+            <Link href="/changelog" className="hover:text-foreground transition-colors">Changelog</Link>
           </div>
         </div>
         <div className="flex items-center gap-2">
