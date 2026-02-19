@@ -1,6 +1,7 @@
 "use client";
 
-import { Bell, CheckCircle, XCircle, Info, AlertTriangle, Download } from "lucide-react";
+import Link from "next/link";
+import { Bell, CheckCircle, XCircle, Info, AlertTriangle, Download, Newspaper } from "lucide-react";
 import { timeAgo } from "@/lib/utils";
 import { useNotifications } from "@/components/notification-context";
 import { Button } from "@/components/ui/button";
@@ -22,6 +23,8 @@ function NotificationIcon({ type }: { type: Notification["type"] }) {
       return <XCircle className="h-4 w-4 text-destructive" />;
     case "warning":
       return <AlertTriangle className="h-4 w-4 text-amber-500" />;
+    case "changelog":
+      return <Newspaper className="h-4 w-4 text-primary" />;
     default:
       return <Info className="h-4 w-4 text-blue-500" />;
   }
@@ -119,28 +122,36 @@ export function NotificationPanel() {
               No notifications yet
             </p>
           ) : (
-            notifications.map((n) => (
-              <div
-                key={n.id}
-                className={`flex gap-3 px-3 py-2.5 ${
-                  n.read ? "opacity-60" : ""
-                }`}
-              >
-                <div className="mt-0.5 shrink-0">
-                  <NotificationIcon type={n.type} />
+            notifications.map((n) => {
+              const content = (
+                <div
+                  className={`flex gap-3 px-3 py-2.5 ${
+                    n.read ? "opacity-60" : ""
+                  } ${n.link ? "hover:bg-muted/50 transition-colors" : ""}`}
+                >
+                  <div className="mt-0.5 shrink-0">
+                    <NotificationIcon type={n.type} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium leading-tight">{n.title}</p>
+                    {n.message && (
+                      <p className="text-muted-foreground mt-0.5 text-xs">{n.message}</p>
+                    )}
+                    <DownloadButtons n={n} />
+                    <p className="text-muted-foreground mt-1 text-[10px]">
+                      {timeAgo(n.created_at)}
+                    </p>
+                  </div>
                 </div>
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium leading-tight">{n.title}</p>
-                  {n.message && (
-                    <p className="text-muted-foreground mt-0.5 text-xs">{n.message}</p>
-                  )}
-                  <DownloadButtons n={n} />
-                  <p className="text-muted-foreground mt-1 text-[10px]">
-                    {timeAgo(n.created_at)}
-                  </p>
-                </div>
-              </div>
-            ))
+              );
+              return n.link ? (
+                <Link key={n.id} href={n.link} className="block">
+                  {content}
+                </Link>
+              ) : (
+                <div key={n.id}>{content}</div>
+              );
+            })
           )}
         </div>
       </DropdownMenuContent>
