@@ -72,6 +72,7 @@ interface FormState {
   fileName: string | null;
   imageInfo: ImageInfo | null;
   tileSize: number;
+  minZoom: number;
   maxZoom: number;
   projection: "flat" | "mercator";
   hasFile: boolean;
@@ -83,6 +84,7 @@ type FormAction =
   | { type: "FILE_LOADED"; fileName: string; imageInfo: ImageInfo | null; tileSize: number }
   | { type: "FILE_BUFFERED" }
   | { type: "TILE_SIZE_CHANGED"; tileSize: number }
+  | { type: "MIN_ZOOM_CHANGED"; minZoom: number }
   | { type: "MAX_ZOOM_CHANGED"; maxZoom: number }
   | { type: "PROJECTION_CHANGED"; projection: "flat" | "mercator" }
   | { type: "DRAG_START" }
@@ -94,6 +96,7 @@ const initialFormState: FormState = {
   fileName: null,
   imageInfo: null,
   tileSize: 256,
+  minZoom: 0,
   maxZoom: 4,
   projection: "flat",
   hasFile: false,
@@ -108,7 +111,8 @@ function formReducer(state: FormState, action: FormAction): FormState {
       const maxZoom = action.imageInfo
         ? calcMaxZoom(action.imageInfo.width, action.imageInfo.height, action.tileSize)
         : state.maxZoom;
-      return { ...state, fileName: action.fileName, imageInfo: action.imageInfo, maxZoom };
+      const minZoom = Math.min(state.minZoom, maxZoom);
+      return { ...state, fileName: action.fileName, imageInfo: action.imageInfo, maxZoom, minZoom };
     }
     case "FILE_BUFFERED":
       return { ...state, hasFile: true };
@@ -116,10 +120,13 @@ function formReducer(state: FormState, action: FormAction): FormState {
       const maxZoom = state.imageInfo
         ? Math.min(state.maxZoom, calcMaxZoom(state.imageInfo.width, state.imageInfo.height, action.tileSize))
         : state.maxZoom;
-      return { ...state, tileSize: action.tileSize, maxZoom };
+      const minZoom = Math.min(state.minZoom, maxZoom);
+      return { ...state, tileSize: action.tileSize, maxZoom, minZoom };
     }
+    case "MIN_ZOOM_CHANGED":
+      return { ...state, minZoom: action.minZoom };
     case "MAX_ZOOM_CHANGED":
-      return { ...state, maxZoom: action.maxZoom };
+      return { ...state, maxZoom: action.maxZoom, minZoom: Math.min(state.minZoom, action.maxZoom) };
     case "PROJECTION_CHANGED":
       return { ...state, projection: action.projection };
     case "DRAG_START":
@@ -138,6 +145,7 @@ export default function Home() {
   const [form, dispatch] = useReducer(formReducer, defaults, (d) => ({
     ...initialFormState,
     tileSize: d.tileSize,
+    minZoom: d.minZoom ?? 0,
     maxZoom: d.maxZoom,
     projection: d.projection,
   }));
@@ -170,7 +178,7 @@ export default function Home() {
   const calculatedMaxZoom = form.imageInfo
     ? calcMaxZoom(form.imageInfo.width, form.imageInfo.height, form.tileSize)
     : 0;
-  const totalTiles = calcTotalTiles(0, form.maxZoom);
+  const totalTiles = calcTotalTiles(form.minZoom, form.maxZoom);
   const memoryWarning = form.imageInfo && form.imageInfo.decodedMB > 1200;
   const canProcess = form.hasFile && (form.mode === "server" || status === "ready") && status !== "processing" && status !== "waking";
   const showCard = form.mode === "server" || status === "ready" || status === "done" || status === "error" || status === "processing" || status === "waking";
@@ -179,11 +187,11 @@ export default function Home() {
     if (!fileRef.current) return;
     const copy = fileRef.current.slice(0);
     if (form.mode === "server") {
-      processServer(copy, { tileSize: form.tileSize, maxZoom: form.maxZoom, projection: form.projection, token: session?.accessToken, fileName: form.fileName ?? undefined });
+      processServer(copy, { tileSize: form.tileSize, minZoom: form.minZoom, maxZoom: form.maxZoom, projection: form.projection, token: session?.accessToken, fileName: form.fileName ?? undefined });
     } else {
-      process(copy, { tileSize: form.tileSize, maxZoom: form.maxZoom, projection: form.projection, fileName: form.fileName ?? undefined });
+      process(copy, { tileSize: form.tileSize, minZoom: form.minZoom, maxZoom: form.maxZoom, projection: form.projection, fileName: form.fileName ?? undefined });
     }
-  }, [process, processServer, form.tileSize, form.maxZoom, form.projection, form.mode, form.fileName, session?.accessToken]);
+  }, [process, processServer, form.tileSize, form.minZoom, form.maxZoom, form.projection, form.mode, form.fileName, session?.accessToken]);
 
   const onDownload = useCallback(() => {
     if (!zipBlob) return;
@@ -329,7 +337,7 @@ export default function Home() {
               )}
 
               {/* Config */}
-              <div className={`grid gap-4 ${session?.user?.plan === PLAN_PRO ? "grid-cols-4" : "grid-cols-3"}`}>
+              <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
                 {session?.user?.plan === PLAN_PRO && (
                   <div className="space-y-2">
                     <label className="text-muted-foreground text-xs font-medium uppercase tracking-wider">
@@ -365,6 +373,24 @@ export default function Home() {
 
                 <div className="space-y-2">
                   <label className="text-muted-foreground text-xs font-medium uppercase tracking-wider">
+                    Min zoom
+                  </label>
+                  <Select value={String(form.minZoom)} onValueChange={(v) => dispatch({ type: "MIN_ZOOM_CHANGED", minZoom: Number(v) })}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {Array.from({ length: form.maxZoom + 1 }, (_, i) => (
+                        <SelectItem key={i} value={String(i)}>
+                          {i}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-muted-foreground text-xs font-medium uppercase tracking-wider">
                     Max zoom
                   </label>
                   <Select value={String(form.maxZoom)} onValueChange={(v) => dispatch({ type: "MAX_ZOOM_CHANGED", maxZoom: Number(v) })}>
@@ -376,7 +402,7 @@ export default function Home() {
                         <SelectItem
                           key={i}
                           value={String(i)}
-                          disabled={form.mode === "local" && form.imageInfo ? i > calculatedMaxZoom : false}
+                          disabled={(form.mode === "local" && form.imageInfo ? i > calculatedMaxZoom : false) || i < form.minZoom}
                         >
                           {i}{form.mode === "local" && form.imageInfo && i === calculatedMaxZoom ? " (max)" : ""}
                         </SelectItem>

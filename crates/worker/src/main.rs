@@ -7,7 +7,7 @@ use std::cell::Cell;
 use std::io::Cursor;
 use std::sync::{Arc, Mutex};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
-use tileforge_core::{PmTilesTileWriter, Projection, TileConfig, TileProgress, Tiler, ZipTileWriter};
+use tileforge_core::{PmTilesTileWriter, Projection, TeeTileWriter, TileConfig, TileProgress, Tiler, ZipTileWriter};
 
 fn unix_now() -> u64 {
     SystemTime::now()
@@ -286,20 +286,26 @@ async fn process_job(
         }
     });
 
-    // Clone image bytes for the PMTiles pass
-    let image_bytes_for_pmtiles = image_bytes.clone();
-    let pmtiles_config = config.clone();
+    let min_zoom = config.min_zoom.unwrap_or(0);
+    let max_zoom = config.max_zoom.unwrap_or(5);
 
-    // Run the CPU-heavy tiling in a blocking thread (ZIP pass)
+    // Single-pass tiling: TeeTileWriter writes to both ZIP and PMTiles simultaneously
     let progress_writer = Arc::clone(&shared_progress);
-    let zip_bytes = tokio::task::spawn_blocking(move || {
+    let (zip_bytes, pmtiles_bytes, img_width, img_height) = tokio::task::spawn_blocking(move || {
         let tiler = Tiler::new(config);
-        let buf = Cursor::new(Vec::new());
-        let mut zip_writer = ZipTileWriter::new(buf);
+
+        // ZIP writer: in-memory
+        let zip_writer = ZipTileWriter::new(Cursor::new(Vec::new()));
+
+        // PMTiles writer: tempfile (finalize() consumes the writer)
+        let tmp = tempfile::NamedTempFile::new()?;
+        let file = tmp.reopen()?;
+        let pmtiles_writer = PmTilesTileWriter::new(file, min_zoom as u8, max_zoom as u8)?;
+
+        let mut tee = TeeTileWriter::new(zip_writer, pmtiles_writer);
         let last_write = Cell::new(Instant::now());
-        tiler.process_bytes(&image_bytes, &mut zip_writer, |p: TileProgress| {
+        let output = tiler.process_bytes(&image_bytes, &mut tee, |p: TileProgress| {
             let now = Instant::now();
-            // Throttle updates: first tile, every 250ms, or last tile
             if p.tiles_done == 1
                 || p.tiles_done == p.tiles_total
                 || now.duration_since(last_write.get()).as_millis() >= 250
@@ -308,7 +314,12 @@ async fn process_job(
                 last_write.set(now);
             }
         })?;
-        Ok::<_, tileforge_core::TilerError>(zip_writer.into_inner().unwrap().into_inner())
+
+        let (zip_w, _pmtiles_w) = tee.into_inner();
+        let zip_bytes = zip_w.into_inner().unwrap().into_inner();
+        let pmtiles_bytes = std::fs::read(tmp.path()).map_err(tileforge_core::TilerError::Io)?;
+
+        Ok::<_, tileforge_core::TilerError>((zip_bytes, pmtiles_bytes, output.width, output.height))
     })
     .await??;
 
@@ -317,7 +328,7 @@ async fn process_job(
     poller.abort();
     let _ = poller.await;
 
-    // Upload ZIP to S3
+    // Upload both artifacts to S3
     bucket
         .put_object(&format!("tiles/{}/tiles.zip", job.job_id), &zip_bytes)
         .await
@@ -328,38 +339,6 @@ async fn process_job(
         zip_size = zip_bytes.len(),
         "ZIP uploaded to S3"
     );
-
-    // Set generating_pmtiles status so clients know what's happening
-    let pmtiles_status = ProgressUpdate {
-        status: "generating_pmtiles".into(),
-        last_updated: unix_now(),
-        zoom: None,
-        tiles_done: None,
-        tiles_total: None,
-        download_url: None,
-        pmtiles_url: None,
-        error: None,
-    };
-    conn.set_ex::<_, _, ()>(
-        &progress_key,
-        serde_json::to_string(&pmtiles_status)?,
-        3600u64,
-    )
-    .await?;
-
-    // PMTiles pass
-    // TODO(perf): TeeWriter to avoid double processing
-    let min_zoom = pmtiles_config.min_zoom.unwrap_or(0);
-    let max_zoom = pmtiles_config.max_zoom.unwrap_or(5);
-    let pmtiles_bytes = tokio::task::spawn_blocking(move || {
-        let tiler = Tiler::new(pmtiles_config);
-        let tmp = tempfile::NamedTempFile::new()?;
-        let file = tmp.reopen()?;
-        let mut writer = PmTilesTileWriter::new(file, min_zoom as u8, max_zoom as u8)?;
-        tiler.process_bytes(&image_bytes_for_pmtiles, &mut writer, |_| {})?;
-        std::fs::read(tmp.path()).map_err(tileforge_core::TilerError::Io)
-    })
-    .await??;
 
     bucket
         .put_object(
@@ -416,9 +395,12 @@ async fn process_job(
                 tile_count += grid * grid;
             }
 
+            let width_i32 = img_width as i32;
+            let height_i32 = img_height as i32;
+
             let result = sqlx::query(
-                "INSERT INTO tile_sets (user_id, name, slug, projection, tile_size, min_zoom, max_zoom, tile_count, size_bytes, storage_path, public)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, false)
+                "INSERT INTO tile_sets (user_id, name, slug, projection, tile_size, min_zoom, max_zoom, tile_count, size_bytes, storage_path, public, width, height)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, false, $11, $12)
                  ON CONFLICT (user_id, slug) DO NOTHING",
             )
             .bind(user_id)
@@ -431,6 +413,8 @@ async fn process_job(
             .bind(tile_count)
             .bind(total_size)
             .bind(&storage_path)
+            .bind(width_i32)
+            .bind(height_i32)
             .execute(pool)
             .await;
 

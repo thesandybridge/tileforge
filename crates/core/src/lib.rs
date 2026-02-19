@@ -7,4 +7,4 @@ pub use streaming::StreamingTiler;
 pub use tiler::{
     Projection, TileConfig, TileOutput, TileProgress, Tiler, TilerError, STREAMING_THRESHOLD,
 };
-pub use writer::{PmTilesTileWriter, TileWriter, ZipTileWriter};
+pub use writer::{PmTilesTileWriter, TeeTileWriter, TileWriter, ZipTileWriter};

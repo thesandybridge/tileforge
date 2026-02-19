@@ -265,6 +265,12 @@ const map = new maplibregl.Map({
                 <p className="text-muted-foreground text-xs uppercase tracking-wider">Size</p>
                 <p className="mt-1 font-medium">{formatBytes(tileset.size_bytes)}</p>
               </div>
+              {tileset.width && tileset.height && (
+                <div>
+                  <p className="text-muted-foreground text-xs uppercase tracking-wider">Dimensions</p>
+                  <p className="mt-1 font-medium">{tileset.width} &times; {tileset.height}</p>
+                </div>
+              )}
               <div>
                 <p className="text-muted-foreground text-xs uppercase tracking-wider">Visibility</p>
                 <p className="mt-1 font-medium">{tileset.public ? "Public" : "Private"}</p>
@@ -289,8 +295,8 @@ const map = new maplibregl.Map({
           {preview.data ? (
             <TilePreview
               zipBlob={preview.data}
-              imageWidth={tileset.tile_size * (1 << tileset.max_zoom)}
-              imageHeight={tileset.tile_size * (1 << tileset.max_zoom)}
+              imageWidth={tileset.width ?? tileset.tile_size * (1 << tileset.max_zoom)}
+              imageHeight={tileset.height ?? tileset.tile_size * (1 << tileset.max_zoom)}
               maxZoom={tileset.max_zoom}
               tileSize={tileset.tile_size}
               projection={tileset.projection as "flat" | "mercator"}
