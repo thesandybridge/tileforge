@@ -13,8 +13,10 @@ use axum::{
     Json, Router,
 };
 use jsonwebtoken::{decode, DecodingKey, Validation, Algorithm};
+use rand::Rng;
 use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
+use sha2::{Sha256, Digest};
 use sqlx::PgPool;
 use std::io::Cursor;
 use std::net::SocketAddr;
@@ -38,6 +40,7 @@ struct AppConfig {
     cors_origin: Option<String>,
     database_url: Option<String>,
     jwt_secret: Option<String>,
+    admin_secret: Option<String>,
 }
 
 impl AppConfig {
@@ -55,6 +58,7 @@ impl AppConfig {
             cors_origin: std::env::var("CORS_ORIGIN").ok(),
             database_url: std::env::var("DATABASE_URL").ok(),
             jwt_secret: std::env::var("JWT_SECRET").ok(),
+            admin_secret: std::env::var("ADMIN_SECRET").ok(),
         }
     }
 }
@@ -70,6 +74,7 @@ struct AppState {
     bucket: Option<Arc<s3::Bucket>>,
     db: Option<PgPool>,
     jwt_secret: Option<String>,
+    admin_secret: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -84,7 +89,6 @@ enum ApiError {
     Processing(String),
     NotFound,
     Unauthorized,
-    #[allow(dead_code)]
     Forbidden,
     ServiceUnavailable(String),
     Db(String),
@@ -165,6 +169,18 @@ async fn optional_auth(
             }
         }
     }
+
+    // Path 2: API key query parameter (?key=tf_...)
+    if req.extensions().get::<UserClaims>().is_none() {
+        if let Some(ref db) = state.db {
+            if let Some(api_key) = extract_api_key_from_query(req.uri()) {
+                if let Some(claims) = validate_api_key(db, &api_key).await {
+                    req.extensions_mut().insert(claims);
+                }
+            }
+        }
+    }
+
     next.run(req).await
 }
 
@@ -203,6 +219,47 @@ impl<S: Send + Sync> FromRequestParts<S> for OptionalClaims {
             Ok(OptionalClaims(parts.extensions.get::<UserClaims>().cloned()))
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// API key helpers
+// ---------------------------------------------------------------------------
+
+fn extract_api_key_from_query(uri: &axum::http::Uri) -> Option<String> {
+    let query = uri.query()?;
+    for pair in query.split('&') {
+        if let Some(val) = pair.strip_prefix("key=") {
+            if val.starts_with("tf_") && val.len() == 35 {
+                return Some(val.to_string());
+            }
+        }
+    }
+    None
+}
+
+async fn validate_api_key(db: &PgPool, raw_key: &str) -> Option<UserClaims> {
+    let hash = hex::encode(Sha256::digest(raw_key.as_bytes()));
+    let row: Option<(String, String)> = sqlx::query_as(
+        "SELECT u.id::text, u.plan
+         FROM api_keys ak JOIN users u ON u.id = ak.user_id
+         WHERE ak.key_hash = $1 AND ak.revoked_at IS NULL AND u.deactivated_at IS NULL",
+    )
+    .bind(&hash)
+    .fetch_optional(db)
+    .await
+    .ok()?;
+
+    let (user_id, plan_str) = row?;
+    let plan = match plan_str.as_str() {
+        "pro" => Plan::Pro,
+        _ => Plan::Free,
+    };
+    Some(UserClaims {
+        sub: user_id,
+        plan,
+        iat: None,
+        exp: None,
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -972,6 +1029,313 @@ async fn get_current_user(
 }
 
 // ---------------------------------------------------------------------------
+// API key management
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize, sqlx::FromRow)]
+struct ApiKeyRow {
+    id: Uuid,
+    key_prefix: String,
+    created_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Serialize)]
+struct ApiKeyCreatedResponse {
+    id: Uuid,
+    key: String,
+    key_prefix: String,
+    created_at: chrono::DateTime<chrono::Utc>,
+}
+
+async fn create_api_key(
+    State(state): State<AppState>,
+    Claims(user): Claims,
+) -> Result<Response, ApiError> {
+    if user.plan != Plan::Pro {
+        return Err(ApiError::Forbidden);
+    }
+    let db = require_db(&state)?;
+    let user_id = Uuid::parse_str(&user.sub).map_err(|_| ApiError::Unauthorized)?;
+
+    // Generate key: tf_ + 32 hex chars (16 random bytes)
+    let random_bytes: [u8; 16] = rand::thread_rng().gen();
+    let raw_key = format!("tf_{}", hex::encode(random_bytes));
+    let key_hash = hex::encode(Sha256::digest(raw_key.as_bytes()));
+    let key_prefix = raw_key[..11].to_string(); // "tf_" + 8 hex chars
+
+    let mut tx = db.begin().await.map_err(|e| ApiError::Db(e.to_string()))?;
+
+    // Revoke any existing active key
+    sqlx::query("UPDATE api_keys SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL")
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| ApiError::Db(e.to_string()))?;
+
+    // Insert new key
+    let row = sqlx::query_as::<_, ApiKeyRow>(
+        "INSERT INTO api_keys (user_id, key_hash, key_prefix)
+         VALUES ($1, $2, $3)
+         RETURNING id, key_prefix, created_at",
+    )
+    .bind(user_id)
+    .bind(&key_hash)
+    .bind(&key_prefix)
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(|e| ApiError::Db(e.to_string()))?;
+
+    tx.commit().await.map_err(|e| ApiError::Db(e.to_string()))?;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(ApiKeyCreatedResponse {
+            id: row.id,
+            key: raw_key,
+            key_prefix: row.key_prefix,
+            created_at: row.created_at,
+        }),
+    )
+        .into_response())
+}
+
+async fn get_api_key(
+    State(state): State<AppState>,
+    Claims(user): Claims,
+) -> Result<Response, ApiError> {
+    let db = require_db(&state)?;
+    let user_id = Uuid::parse_str(&user.sub).map_err(|_| ApiError::Unauthorized)?;
+
+    let row = sqlx::query_as::<_, ApiKeyRow>(
+        "SELECT id, key_prefix, created_at FROM api_keys WHERE user_id = $1 AND revoked_at IS NULL",
+    )
+    .bind(user_id)
+    .fetch_optional(&db)
+    .await
+    .map_err(|e| ApiError::Db(e.to_string()))?;
+
+    match row {
+        Some(key) => Ok(Json(key).into_response()),
+        None => Ok(StatusCode::NO_CONTENT.into_response()),
+    }
+}
+
+async fn revoke_api_key(
+    State(state): State<AppState>,
+    Claims(user): Claims,
+) -> Result<StatusCode, ApiError> {
+    let db = require_db(&state)?;
+    let user_id = Uuid::parse_str(&user.sub).map_err(|_| ApiError::Unauthorized)?;
+
+    sqlx::query("UPDATE api_keys SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL")
+        .bind(user_id)
+        .execute(&db)
+        .await
+        .map_err(|e| ApiError::Db(e.to_string()))?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+// ---------------------------------------------------------------------------
+// Notifications
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize, sqlx::FromRow)]
+struct NotificationRow {
+    id: Uuid,
+    user_id: Uuid,
+    #[sqlx(rename = "type")]
+    #[serde(rename = "type")]
+    notification_type: String,
+    title: String,
+    message: Option<String>,
+    read: bool,
+    created_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Deserialize)]
+struct CreateNotificationBody {
+    #[serde(rename = "type")]
+    notification_type: String,
+    title: String,
+    message: Option<String>,
+}
+
+async fn list_notifications(
+    State(state): State<AppState>,
+    Claims(user): Claims,
+) -> Result<Json<Vec<NotificationRow>>, ApiError> {
+    let db = require_db(&state)?;
+    let user_id = Uuid::parse_str(&user.sub).map_err(|_| ApiError::Unauthorized)?;
+
+    let rows = sqlx::query_as::<_, NotificationRow>(
+        "SELECT id, user_id, type, title, message, read, created_at
+         FROM notifications WHERE user_id = $1 ORDER BY created_at DESC LIMIT 50",
+    )
+    .bind(user_id)
+    .fetch_all(&db)
+    .await
+    .map_err(|e| ApiError::Db(e.to_string()))?;
+
+    Ok(Json(rows))
+}
+
+async fn create_notification(
+    State(state): State<AppState>,
+    Claims(user): Claims,
+    Json(body): Json<CreateNotificationBody>,
+) -> Result<Response, ApiError> {
+    let db = require_db(&state)?;
+    let user_id = Uuid::parse_str(&user.sub).map_err(|_| ApiError::Unauthorized)?;
+
+    let row = sqlx::query_as::<_, NotificationRow>(
+        "INSERT INTO notifications (user_id, type, title, message)
+         VALUES ($1, $2, $3, $4)
+         RETURNING id, user_id, type, title, message, read, created_at",
+    )
+    .bind(user_id)
+    .bind(&body.notification_type)
+    .bind(&body.title)
+    .bind(&body.message)
+    .fetch_one(&db)
+    .await
+    .map_err(|e| ApiError::Db(e.to_string()))?;
+
+    Ok((StatusCode::CREATED, Json(row)).into_response())
+}
+
+async fn mark_notifications_read(
+    State(state): State<AppState>,
+    Claims(user): Claims,
+) -> Result<StatusCode, ApiError> {
+    let db = require_db(&state)?;
+    let user_id = Uuid::parse_str(&user.sub).map_err(|_| ApiError::Unauthorized)?;
+
+    sqlx::query("UPDATE notifications SET read = true WHERE user_id = $1 AND read = false")
+        .bind(user_id)
+        .execute(&db)
+        .await
+        .map_err(|e| ApiError::Db(e.to_string()))?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn clear_notifications(
+    State(state): State<AppState>,
+    Claims(user): Claims,
+) -> Result<StatusCode, ApiError> {
+    let db = require_db(&state)?;
+    let user_id = Uuid::parse_str(&user.sub).map_err(|_| ApiError::Unauthorized)?;
+
+    sqlx::query("DELETE FROM notifications WHERE user_id = $1")
+        .bind(user_id)
+        .execute(&db)
+        .await
+        .map_err(|e| ApiError::Db(e.to_string()))?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+// ---------------------------------------------------------------------------
+// Account deactivation
+// ---------------------------------------------------------------------------
+
+async fn deactivate_user(
+    State(state): State<AppState>,
+    Claims(user): Claims,
+) -> Result<StatusCode, ApiError> {
+    let db = require_db(&state)?;
+    let user_id = Uuid::parse_str(&user.sub).map_err(|_| ApiError::Unauthorized)?;
+
+    // Revoke all API keys
+    sqlx::query("UPDATE api_keys SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL")
+        .bind(user_id)
+        .execute(&db)
+        .await
+        .map_err(|e| ApiError::Db(e.to_string()))?;
+
+    // Set deactivated_at
+    sqlx::query("UPDATE users SET deactivated_at = now() WHERE id = $1 AND deactivated_at IS NULL")
+        .bind(user_id)
+        .execute(&db)
+        .await
+        .map_err(|e| ApiError::Db(e.to_string()))?;
+
+    tracing::info!(user_id = %user_id, "user deactivated");
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Serialize)]
+struct PurgeResponse {
+    deleted: u64,
+}
+
+async fn purge_deactivated(
+    State(state): State<AppState>,
+    req: Request<axum::body::Body>,
+) -> Result<Json<PurgeResponse>, ApiError> {
+    // Verify ADMIN_SECRET
+    let admin_secret = state
+        .admin_secret
+        .as_ref()
+        .ok_or(ApiError::Forbidden)?;
+
+    let auth_header = req
+        .headers()
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .ok_or(ApiError::Unauthorized)?;
+
+    if auth_header != admin_secret {
+        return Err(ApiError::Forbidden);
+    }
+
+    let db = require_db(&state)?;
+
+    // Find users deactivated more than 30 days ago
+    let rows: Vec<(Uuid,)> = sqlx::query_as(
+        "SELECT id FROM users WHERE deactivated_at < now() - INTERVAL '30 days'",
+    )
+    .fetch_all(&db)
+    .await
+    .map_err(|e| ApiError::Db(e.to_string()))?;
+
+    let mut deleted = 0u64;
+    for (uid,) in &rows {
+        // Get all storage paths for S3 cleanup
+        let tilesets: Vec<(String,)> = sqlx::query_as(
+            "SELECT storage_path FROM tile_sets WHERE user_id = $1",
+        )
+        .bind(uid)
+        .fetch_all(&db)
+        .await
+        .map_err(|e| ApiError::Db(e.to_string()))?;
+
+        // Delete S3 objects
+        if let Some(ref bucket) = state.bucket {
+            for (storage_path,) in &tilesets {
+                let _ = bucket.delete_object(&format!("{storage_path}/tiles.zip")).await;
+                let _ = bucket.delete_object(&format!("{storage_path}/tiles.pmtiles")).await;
+                let _ = bucket.delete_object(&format!("{storage_path}/thumbnail.jpg")).await;
+            }
+        }
+
+        // CASCADE deletes tile_sets and api_keys
+        sqlx::query("DELETE FROM users WHERE id = $1")
+            .bind(uid)
+            .execute(&db)
+            .await
+            .map_err(|e| ApiError::Db(e.to_string()))?;
+
+        deleted += 1;
+        tracing::info!(user_id = %uid, "purged deactivated user");
+    }
+
+    Ok(Json(PurgeResponse { deleted }))
+}
+
+// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
@@ -1047,6 +1411,7 @@ async fn main() {
         bucket: bucket.map(Arc::from),
         db,
         jwt_secret: config.jwt_secret,
+        admin_secret: config.admin_secret,
     };
 
     let rate_limit = RateLimit { redis };
@@ -1094,6 +1459,11 @@ async fn main() {
                 .layer(middleware::from_fn_with_state(rate_limit, rate_limit_download)),
         )
         .route("/api/user", get(get_current_user))
+        .route("/api/user/deactivate", post(deactivate_user))
+        .route("/api/admin/purge-deactivated", post(purge_deactivated))
+        .route("/api/notifications", get(list_notifications).post(create_notification).delete(clear_notifications))
+        .route("/api/notifications/read", post(mark_notifications_read))
+        .route("/api/keys", post(create_api_key).get(get_api_key).delete(revoke_api_key))
         .route("/api/tilesets", post(create_tileset).get(list_tilesets))
         .route(
             "/api/tilesets/{slug}",

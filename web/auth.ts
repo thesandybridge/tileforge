@@ -36,11 +36,21 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
                  avatar_url = EXCLUDED.avatar_url,
                  email = EXCLUDED.email,
                  updated_at = now()
-           RETURNING id, plan`,
+           RETURNING id, plan, deactivated_at`,
           [githubId, username, avatarUrl, email],
         );
 
         const row = result.rows[0];
+
+        // Reactivate if within 30-day window — reset to free plan
+        if (row.deactivated_at) {
+          await pool.query(
+            "UPDATE users SET deactivated_at = NULL, plan = 'free' WHERE id = $1",
+            [row.id],
+          );
+          row.plan = "free";
+        }
+
         token.userId = row.id;
         token.plan = row.plan;
         token.username = username;
