@@ -256,6 +256,10 @@ Requires Redis and S3 to be configured. See environment variables below.
 | `JWT_SECRET`            | No       | —                      | Shared HS256 secret for API JWTs   |
 | `DATABASE_URL`          | No       | —                      | Postgres (for Auth.js user store)  |
 
+### API Documentation
+
+Interactive API documentation is available via Swagger UI at `/swagger-ui` when the API is running. The OpenAPI spec is served at `/api-docs/openapi.json`.
+
 ### API Endpoints
 
 | Method | Path                                | Auth     | Description                                 |

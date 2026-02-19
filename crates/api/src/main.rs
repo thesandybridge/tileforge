@@ -12,6 +12,8 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
+use utoipa::OpenApi;
+use utoipa_swagger_ui::SwaggerUi;
 use jsonwebtoken::{decode, DecodingKey, Validation, Algorithm};
 use rand::Rng;
 use redis::AsyncCommands;
@@ -29,6 +31,39 @@ use uuid::Uuid;
 /// 5 GB storage quota for Pro users.
 const QUOTA_PRO_BYTES: i64 = 5 * 1024 * 1024 * 1024;
 const PRESIGN_TTL_SECS: u32 = 600; // 10 minutes
+
+// ---------------------------------------------------------------------------
+// OpenAPI documentation
+// ---------------------------------------------------------------------------
+
+#[derive(OpenApi)]
+#[openapi(
+    info(
+        title = "Tileforge API",
+        description = "REST API for processing images into XYZ map tiles",
+        version = "0.1.0",
+        license(name = "MIT", url = "https://github.com/thesandybridge/tileforge/blob/main/LICENSE")
+    ),
+    tags(
+        (name = "Health", description = "Health check endpoints"),
+        (name = "Tiles", description = "Tile processing and download"),
+        (name = "Tilesets", description = "Tileset CRUD operations"),
+        (name = "User", description = "User account management"),
+        (name = "Notifications", description = "In-app notifications"),
+        (name = "API Keys", description = "API key management (Pro only)")
+    ),
+    components(schemas(
+        ErrorBody,
+        AcceptedResponse,
+        Plan,
+        UserResponse,
+        TileSetRow,
+        ApiKeyRow,
+        ApiKeyCreatedResponse,
+        NotificationRow
+    ))
+)]
+struct ApiDoc;
 
 // ---------------------------------------------------------------------------
 // Config
@@ -100,7 +135,7 @@ enum ApiError {
     QuotaExceeded,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 struct ErrorBody {
     error: String,
 }
@@ -140,7 +175,7 @@ impl IntoResponse for ApiError {
 // JWT auth
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "lowercase")]
 enum Plan {
     Free,
@@ -339,7 +374,7 @@ struct JobPayload {
     reserved_bytes: Option<i64>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 struct AcceptedResponse {
     job_id: String,
 }
@@ -1022,7 +1057,7 @@ struct UpdateTileSet {
     public: Option<bool>,
 }
 
-#[derive(Serialize, sqlx::FromRow)]
+#[derive(Serialize, sqlx::FromRow, utoipa::ToSchema)]
 struct TileSetRow {
     id: Uuid,
     user_id: Uuid,
@@ -1255,7 +1290,7 @@ async fn delete_tileset(
 // Current user
 // ---------------------------------------------------------------------------
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 struct UserResponse {
     id: String,
     plan: Plan,
@@ -1291,14 +1326,14 @@ async fn get_current_user(
 // API key management
 // ---------------------------------------------------------------------------
 
-#[derive(Serialize, sqlx::FromRow)]
+#[derive(Serialize, sqlx::FromRow, utoipa::ToSchema)]
 struct ApiKeyRow {
     id: Uuid,
     key_prefix: String,
     created_at: chrono::DateTime<chrono::Utc>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 struct ApiKeyCreatedResponse {
     id: Uuid,
     key: String,
@@ -1399,7 +1434,7 @@ async fn revoke_api_key(
 // Notifications
 // ---------------------------------------------------------------------------
 
-#[derive(Serialize, sqlx::FromRow)]
+#[derive(Serialize, sqlx::FromRow, utoipa::ToSchema)]
 struct NotificationRow {
     id: Uuid,
     user_id: Uuid,
@@ -1977,6 +2012,7 @@ async fn main() {
                 .layer(middleware::from_fn_with_state(rate_limit.clone(), rate_limit_download)),
         )
         .layer(middleware::from_fn_with_state(state.clone(), optional_auth))
+        .merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", ApiDoc::openapi()))
         .layer(cors)
         .layer(TraceLayer::new_for_http())
         .with_state(state);

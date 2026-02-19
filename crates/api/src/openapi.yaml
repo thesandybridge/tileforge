@@ -1,0 +1,638 @@
+openapi: 3.1.0
+info:
+  title: Tileforge API
+  description: |
+    REST API for processing images into XYZ map tiles.
+
+    ## Authentication
+    Most endpoints require a Bearer token (JWT) in the Authorization header.
+    Pro users can generate API keys from the settings page.
+  version: 0.1.0
+  license:
+    name: MIT
+    url: https://github.com/thesandybridge/tileforge/blob/main/LICENSE
+
+servers:
+  - url: http://localhost:8080
+    description: Local development
+  - url: https://api.tileforge.dev
+    description: Production
+
+tags:
+  - name: Health
+    description: Health check endpoints
+  - name: Tiles
+    description: Tile processing and download
+  - name: Tilesets
+    description: Tileset CRUD operations
+  - name: User
+    description: User account management
+  - name: Notifications
+    description: In-app notifications
+  - name: API Keys
+    description: API key management (Pro only)
+  - name: Admin
+    description: Admin-only operations
+
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Health check
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+
+  /api/tiles:
+    post:
+      tags: [Tiles]
+      summary: Process image into tiles
+      description: |
+        Upload an image to be processed into XYZ map tiles.
+        For large images, returns a job_id for async processing via SSE.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: tile_size
+          in: query
+          schema:
+            type: integer
+            enum: [128, 256, 512]
+            default: 256
+        - name: min_zoom
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 12
+            default: 0
+        - name: max_zoom
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 12
+        - name: projection
+          in: query
+          schema:
+            type: string
+            enum: [flat, mercator, isometric]
+            default: flat
+        - name: file_name
+          in: query
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        '200':
+          description: Tiles processed synchronously (small images)
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+        '202':
+          description: Job queued for async processing
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  job_id:
+                    type: string
+                    format: uuid
+        '400':
+          description: Invalid input
+        '401':
+          description: Unauthorized
+        '429':
+          description: Rate limit exceeded
+
+  /api/tiles/{job_id}/progress:
+    get:
+      tags: [Tiles]
+      summary: Get job progress via SSE
+      description: Server-Sent Events stream for job progress updates
+      parameters:
+        - name: job_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: SSE stream
+          content:
+            text/event-stream:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [processing, generating_pmtiles, complete, failed]
+                  tiles_done:
+                    type: integer
+                  tiles_total:
+                    type: integer
+                  zoom:
+                    type: integer
+                  download_url:
+                    type: string
+                  pmtiles_url:
+                    type: string
+                  error:
+                    type: string
+
+  /api/tiles/{job_id}/download:
+    get:
+      tags: [Tiles]
+      summary: Download tiles as ZIP
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: job_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: ZIP file
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+        '404':
+          description: Job not found
+
+  /api/tiles/{job_id}/download/pmtiles:
+    get:
+      tags: [Tiles]
+      summary: Download tiles as PMTiles
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: job_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: PMTiles file
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '404':
+          description: Job not found
+
+  /api/tiles/{job_id}/thumbnail:
+    get:
+      tags: [Tiles]
+      summary: Get tileset thumbnail
+      parameters:
+        - name: job_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: JPEG thumbnail
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+        '404':
+          description: Thumbnail not found
+
+  /api/tilesets:
+    get:
+      tags: [Tilesets]
+      summary: List tilesets
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: user
+          in: query
+          description: Filter by username
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Paginated list of tilesets
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Tileset'
+    post:
+      tags: [Tilesets]
+      summary: Create tileset
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, job_id]
+              properties:
+                name:
+                  type: string
+                job_id:
+                  type: string
+                  format: uuid
+                public:
+                  type: boolean
+                  default: false
+      responses:
+        '201':
+          description: Tileset created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tileset'
+        '401':
+          description: Unauthorized
+        '409':
+          description: Slug already exists
+
+  /api/tilesets/{slug}:
+    get:
+      tags: [Tilesets]
+      summary: Get tileset details
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Tileset details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tileset'
+        '404':
+          description: Tileset not found
+    patch:
+      tags: [Tilesets]
+      summary: Update tileset
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                public:
+                  type: boolean
+      responses:
+        '200':
+          description: Tileset updated
+        '401':
+          description: Unauthorized
+        '403':
+          description: Not owner
+        '404':
+          description: Tileset not found
+    delete:
+      tags: [Tilesets]
+      summary: Delete tileset
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Tileset deleted
+        '401':
+          description: Unauthorized
+        '403':
+          description: Not owner
+        '404':
+          description: Tileset not found
+
+  /api/tilesets/{slug}/pmtiles-url:
+    get:
+      tags: [Tilesets]
+      summary: Get presigned PMTiles URL
+      description: Returns a presigned URL for range-request access to PMTiles
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Presigned URL
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  url:
+                    type: string
+                    format: uri
+        '404':
+          description: Tileset not found
+
+  /api/user:
+    get:
+      tags: [User]
+      summary: Get current user
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Current user info
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '401':
+          description: Unauthorized
+
+  /api/user/deactivate:
+    post:
+      tags: [User]
+      summary: Deactivate account
+      description: Marks account for deletion after 30-day grace period
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Account deactivated
+        '401':
+          description: Unauthorized
+
+  /api/user/reactivate:
+    post:
+      tags: [User]
+      summary: Reactivate account
+      description: Reactivates account within 30-day grace period
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Account reactivated
+        '401':
+          description: Unauthorized
+
+  /api/notifications:
+    get:
+      tags: [Notifications]
+      summary: List notifications
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: List of notifications
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Notification'
+    post:
+      tags: [Notifications]
+      summary: Create notification
+      security:
+        - bearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [type, title, message]
+              properties:
+                type:
+                  type: string
+                title:
+                  type: string
+                message:
+                  type: string
+      responses:
+        '201':
+          description: Notification created
+    delete:
+      tags: [Notifications]
+      summary: Clear all notifications
+      security:
+        - bearerAuth: []
+      responses:
+        '204':
+          description: Notifications cleared
+
+  /api/notifications/read:
+    post:
+      tags: [Notifications]
+      summary: Mark all notifications as read
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Notifications marked as read
+
+  /api/keys:
+    get:
+      tags: [API Keys]
+      summary: Get current API key
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: API key info
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  key_prefix:
+                    type: string
+                    example: tf_a1b2c3d4
+                  created_at:
+                    type: string
+                    format: date-time
+        '404':
+          description: No API key
+    post:
+      tags: [API Keys]
+      summary: Create API key
+      description: Creates a new API key (Pro only). Returns full key once.
+      security:
+        - bearerAuth: []
+      responses:
+        '201':
+          description: API key created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  key:
+                    type: string
+                    example: tf_a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6
+        '403':
+          description: Pro subscription required
+    delete:
+      tags: [API Keys]
+      summary: Revoke API key
+      security:
+        - bearerAuth: []
+      responses:
+        '204':
+          description: API key revoked
+
+  /api/admin/purge-deactivated:
+    post:
+      tags: [Admin]
+      summary: Purge deactivated accounts
+      description: Permanently deletes accounts deactivated > 30 days ago
+      security:
+        - adminAuth: []
+      responses:
+        '200':
+          description: Accounts purged
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  purged:
+                    type: integer
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    adminAuth:
+      type: apiKey
+      in: header
+      name: X-Admin-Secret
+
+  schemas:
+    Tileset:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        slug:
+          type: string
+        name:
+          type: string
+        owner_id:
+          type: string
+          format: uuid
+        owner_username:
+          type: string
+        job_id:
+          type: string
+          format: uuid
+        public:
+          type: boolean
+        tile_count:
+          type: integer
+        min_zoom:
+          type: integer
+        max_zoom:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        username:
+          type: string
+        plan:
+          type: string
+          enum: [free, pro]
+        storage_used_bytes:
+          type: integer
+        storage_quota_bytes:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+
+    Notification:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          type: string
+        title:
+          type: string
+        message:
+          type: string
+        read:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time

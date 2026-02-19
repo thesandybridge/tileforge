@@ -23,3 +23,5 @@ sha2 = "0.10"
 hex = "0.4"
 rand = "0.8"
 async-nats = "0.38"
+utoipa = { version = "5", features = ["axum_extras", "chrono", "uuid"] }
+utoipa-swagger-ui = { version = "9", features = ["axum"] }
