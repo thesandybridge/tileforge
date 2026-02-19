@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { toast } from "sonner";
+import { copyToClipboard } from "@/lib/clipboard";
 import { useApiKey, useCreateApiKey, useRevokeApiKey } from "@/hooks/use-api-key";
 import { Button } from "@/components/ui/button";
 import {
@@ -56,10 +57,11 @@ export function ApiKeyCard() {
 
   async function handleCopy() {
     if (!newKey) return;
-    await navigator.clipboard.writeText(newKey);
-    setCopied(true);
-    toast("Copied to clipboard");
-    setTimeout(() => setCopied(false), 2000);
+    const success = await copyToClipboard(newKey, "API key");
+    if (success) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
   }
 
   if (isLoading) return null;

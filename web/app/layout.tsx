@@ -9,6 +9,8 @@ import { NotificationProvider } from "@/components/notification-context";
 import { TileforgeProvider } from "@/components/tileforge-context";
 import { Toaster } from "@/components/toaster";
 import { Footer } from "@/components/footer";
+import { ErrorBoundary } from "@/components/error-boundary";
+import { ServiceWorkerRegister } from "@/components/sw-register";
 import "./globals.css";
 
 const inter = Inter({ subsets: ["latin"] });
@@ -119,12 +121,15 @@ export default function RootLayout({
             <ThemeProvider attribute="class" defaultTheme="dark" enableSystem>
               <NotificationProvider>
                 <TileforgeProvider>
+                  <ServiceWorkerRegister />
                   <CursorGlow />
                   <Navbar />
                   <Toaster />
-                  <main className="flex flex-1 flex-col">
-                    {children}
-                  </main>
+                  <ErrorBoundary>
+                    <main className="flex flex-1 flex-col">
+                      {children}
+                    </main>
+                  </ErrorBoundary>
                   <Footer />
                 </TileforgeProvider>
               </NotificationProvider>

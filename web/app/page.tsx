@@ -4,7 +4,7 @@ import { useCallback, useReducer, useRef } from "react";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
-import { Info, LoaderCircle, Upload } from "lucide-react";
+import { Info, LoaderCircle, Upload, Save, Trash2 } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { ScrollReveal } from "@/components/scroll-reveal";
 import { TileParticles } from "@/components/tile-particles";
@@ -12,6 +12,8 @@ import { UpgradeBanner } from "@/components/upgrade-banner";
 import { useTileforge } from "@/components/tileforge-context";
 import { PLAN_PRO } from "@/lib/plans";
 import { useTileDefaults } from "@/hooks/use-tile-defaults";
+import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
+import { usePresets, type Preset } from "@/hooks/use-presets";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Card, CardContent } from "@/components/ui/card";
@@ -22,6 +24,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { DropAreaSkeleton } from "@/components/tileset-skeleton";
 
 const TilePreview = dynamic(() => import("@/components/tile-preview"), {
   ssr: false,
@@ -68,6 +71,8 @@ function calcTotalTiles(minZoom: number, maxZoom: number): number {
 
 // --- Form state reducer ---
 
+type DragState = "idle" | "hovering" | "invalid";
+
 interface FormState {
   mode: "local" | "server";
   fileName: string | null;
@@ -77,7 +82,7 @@ interface FormState {
   maxZoom: number;
   projection: "flat" | "mercator";
   hasFile: boolean;
-  dragging: boolean;
+  dragState: DragState;
 }
 
 type FormAction =
@@ -88,7 +93,8 @@ type FormAction =
   | { type: "MIN_ZOOM_CHANGED"; minZoom: number }
   | { type: "MAX_ZOOM_CHANGED"; maxZoom: number }
   | { type: "PROJECTION_CHANGED"; projection: "flat" | "mercator" }
-  | { type: "DRAG_START" }
+  | { type: "DRAG_HOVER" }
+  | { type: "DRAG_INVALID" }
   | { type: "DRAG_END" }
   | { type: "RESET" };
 
@@ -101,7 +107,7 @@ const initialFormState: FormState = {
   maxZoom: 4,
   projection: "flat",
   hasFile: false,
-  dragging: false,
+  dragState: "idle",
 };
 
 function formReducer(state: FormState, action: FormAction): FormState {
@@ -130,10 +136,12 @@ function formReducer(state: FormState, action: FormAction): FormState {
       return { ...state, maxZoom: action.maxZoom, minZoom: Math.min(state.minZoom, action.maxZoom) };
     case "PROJECTION_CHANGED":
       return { ...state, projection: action.projection };
-    case "DRAG_START":
-      return state.dragging ? state : { ...state, dragging: true };
+    case "DRAG_HOVER":
+      return state.dragState === "hovering" ? state : { ...state, dragState: "hovering" };
+    case "DRAG_INVALID":
+      return state.dragState === "invalid" ? state : { ...state, dragState: "invalid" };
     case "DRAG_END":
-      return state.dragging ? { ...state, dragging: false } : state;
+      return state.dragState === "idle" ? state : { ...state, dragState: "idle" };
     case "RESET":
       return initialFormState;
   }
@@ -151,6 +159,26 @@ export default function Home() {
     projection: d.projection,
   }));
   const fileRef = useRef<ArrayBuffer | null>(null);
+  const { presets, addPreset, deletePreset, mounted: presetsMounted } = usePresets();
+
+  const loadPreset = useCallback((preset: Preset) => {
+    dispatch({ type: "TILE_SIZE_CHANGED", tileSize: preset.tileSize });
+    dispatch({ type: "MIN_ZOOM_CHANGED", minZoom: preset.minZoom });
+    dispatch({ type: "MAX_ZOOM_CHANGED", maxZoom: preset.maxZoom });
+    dispatch({ type: "PROJECTION_CHANGED", projection: preset.projection });
+  }, []);
+
+  const saveCurrentAsPreset = useCallback(() => {
+    const name = prompt("Preset name:");
+    if (!name) return;
+    addPreset({
+      name,
+      tileSize: form.tileSize,
+      minZoom: form.minZoom,
+      maxZoom: form.maxZoom,
+      projection: form.projection,
+    });
+  }, [addPreset, form.tileSize, form.minZoom, form.maxZoom, form.projection]);
 
   const handleFile = useCallback(async (file: File) => {
     let imageInfo: ImageInfo | null = null;
@@ -222,6 +250,13 @@ export default function Home() {
     reset();
   }, [reset]);
 
+  // Keyboard shortcuts: Ctrl/Cmd+Enter to process, Escape to reset
+  useKeyboardShortcuts({
+    onSubmit: canProcess ? onProcess : undefined,
+    onEscape: onReset,
+    enabled: true,
+  });
+
   return (
     <div className="flex flex-1 flex-col py-16">
       {/* Hero */}
@@ -262,7 +297,7 @@ export default function Home() {
       <ScrollReveal className="overflow-visible">
       <main className="mx-auto mt-10 max-w-2xl px-6">
         {form.mode === "local" && (status === "idle" || status === "loading") && (
-          <p className="text-muted-foreground text-center text-sm">Loading WASM engine...</p>
+          <DropAreaSkeleton />
         )}
 
         {showCard && (
@@ -277,7 +312,11 @@ export default function Home() {
                 aria-label="Upload image — drag and drop or press Enter to browse"
                 onDragOver={(e) => {
                   e.preventDefault();
-                  dispatch({ type: "DRAG_START" });
+                  // Check if dragged items contain image files
+                  const hasImage = Array.from(e.dataTransfer.items).some(
+                    (item) => item.kind === "file" && item.type.startsWith("image/")
+                  );
+                  dispatch({ type: hasImage ? "DRAG_HOVER" : "DRAG_INVALID" });
                 }}
                 onDragLeave={() => dispatch({ type: "DRAG_END" })}
                 onDrop={onDrop}
@@ -289,14 +328,20 @@ export default function Home() {
                   }
                 }}
                 className={`cursor-pointer rounded-xl border-2 border-dashed transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
-                  form.dragging
+                  form.dragState === "hovering"
                     ? "border-primary bg-primary/5"
-                    : "border-border hover:border-muted-foreground/30"
+                    : form.dragState === "invalid"
+                      ? "border-destructive bg-destructive/5"
+                      : "border-border hover:border-muted-foreground/30"
                 }`}
               >
                 <div className="flex flex-col items-center justify-center py-12 text-center">
-                  <Upload className="text-muted-foreground mb-4 h-10 w-10" />
-                  {form.fileName ? (
+                  <Upload className={`mb-4 h-10 w-10 ${form.dragState === "invalid" ? "text-destructive" : "text-muted-foreground"}`} />
+                  {form.dragState === "hovering" ? (
+                    <p className="text-primary font-medium">Drop to upload</p>
+                  ) : form.dragState === "invalid" ? (
+                    <p className="text-destructive font-medium">Only image files allowed</p>
+                  ) : form.fileName ? (
                     <div>
                       <p className="font-medium">{form.fileName}</p>
                       {form.imageInfo && (
@@ -335,6 +380,49 @@ export default function Home() {
                   This image requires ~{Math.round(form.imageInfo.decodedMB)} MB of memory to decode.
                   Processing may fail on devices with limited RAM.
                 </p>
+              )}
+
+              {/* Presets */}
+              {presetsMounted && (
+                <div className="flex items-center gap-2">
+                  {presets.length > 0 && (
+                    <Select onValueChange={(id) => {
+                      const preset = presets.find(p => p.id === id);
+                      if (preset) loadPreset(preset);
+                    }}>
+                      <SelectTrigger className="w-[180px]">
+                        <SelectValue placeholder="Load preset..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {presets.map((p) => (
+                          <SelectItem key={p.id} value={p.id}>
+                            <div className="flex items-center justify-between gap-2 w-full">
+                              <span>{p.name}</span>
+                            </div>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                  <Button variant="outline" size="sm" onClick={saveCurrentAsPreset}>
+                    <Save className="mr-1.5 h-3.5 w-3.5" />
+                    Save preset
+                  </Button>
+                  {presets.length > 0 && (
+                    <Select onValueChange={(id) => deletePreset(id)}>
+                      <SelectTrigger className="w-10 px-2">
+                        <Trash2 className="h-3.5 w-3.5 text-muted-foreground" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {presets.map((p) => (
+                          <SelectItem key={p.id} value={p.id}>
+                            Delete &quot;{p.name}&quot;
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                </div>
               )}
 
               {/* Config */}

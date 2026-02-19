@@ -7,6 +7,7 @@ import Link from "next/link";
 import dynamic from "next/dynamic";
 import { ArrowLeft, Map, Globe, Grid3X3, Copy, Check, Eye, EyeOff, Trash2, Pencil, Loader2 } from "lucide-react";
 import { formatBytes } from "@/lib/utils";
+import { copyToClipboard } from "@/lib/clipboard";
 import { useTileset, useUpdateTileset, useDeleteTileset, usePmtilesUrl } from "@/hooks/use-tilesets";
 import { useApiKey } from "@/hooks/use-api-key";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -22,6 +23,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { TilesetDetailSkeleton } from "@/components/tileset-skeleton";
 
 const PmtilesPreview = dynamic(() => import("@/components/pmtiles-preview"), {
   ssr: false,
@@ -53,8 +55,8 @@ function CodeBlock({ code, label, lang = "typescript" }: { code: string; label: 
     });
   }, [code, lang]);
 
-  const onCopy = () => {
-    navigator.clipboard.writeText(code);
+  const onCopy = async () => {
+    await copyToClipboard(code, label);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -133,11 +135,7 @@ export default function TileSetDetailPage() {
   }
 
   if (isLoading) {
-    return (
-      <div className="mx-auto max-w-3xl px-6 py-24">
-        <p className="text-muted-foreground text-center text-sm">Loading tile set...</p>
-      </div>
-    );
+    return <TilesetDetailSkeleton />;
   }
 
   const displayError = error?.message ?? updateTileset.error?.message ?? deleteTileset.error?.message ?? pmtiles.error?.message;

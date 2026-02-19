@@ -11,6 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { UpgradeInlineBanner } from "@/components/upgrade-banner";
 import { ScrollReveal } from "@/components/scroll-reveal";
+import { TilesetGridSkeleton } from "@/components/tileset-skeleton";
 
 export default function GalleryPage() {
   const { data: session } = useSession();
@@ -39,11 +40,7 @@ export default function GalleryPage() {
       </ScrollReveal>
 
       <main className="mx-auto mt-10 max-w-4xl px-6">
-        {isLoading && (
-          <p className="text-muted-foreground text-center text-sm">
-            Loading tile sets...
-          </p>
-        )}
+        {isLoading && <TilesetGridSkeleton count={4} />}
 
         {error && (
           <p className="text-destructive text-center text-sm">{error.message}</p>
@@ -76,6 +73,8 @@ export default function GalleryPage() {
                       src={`${API_URL}/api/tiles/${encodeURIComponent(ts.slug)}/thumbnail`}
                       alt={ts.name}
                       className="h-full w-full object-cover"
+                      loading="lazy"
+                      decoding="async"
                       onError={(e) => {
                         e.currentTarget.style.display = "none";
                         e.currentTarget.nextElementSibling?.classList.remove("hidden");

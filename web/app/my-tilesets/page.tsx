@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useSession } from "next-auth/react";
-import { Map, Globe, Grid3X3, Trash2, ImageIcon, ArrowRight } from "lucide-react";
+import { Map, Globe, Grid3X3, Trash2, ImageIcon, ArrowRight, GitCompareArrows } from "lucide-react";
 import { API_URL } from "@/lib/api";
 import { PLAN_PRO } from "@/lib/plans";
 import { formatBytes, timeAgo } from "@/lib/utils";
@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { UpgradeInlineBanner } from "@/components/upgrade-banner";
 import { ScrollReveal } from "@/components/scroll-reveal";
+import { TilesetGridSkeleton } from "@/components/tileset-skeleton";
 
 export default function MyTilesetsPage() {
   const { data: session } = useSession();
@@ -44,12 +45,25 @@ export default function MyTilesetsPage() {
     <div className="flex flex-1 flex-col py-10">
       <ScrollReveal>
         <header className="mx-auto max-w-4xl px-6">
-          <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">
-            My Tilesets
-          </h1>
-          <p className="text-muted-foreground mt-2">
-            Tilesets you&apos;ve created.
-          </p>
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">
+                My Tilesets
+              </h1>
+              <p className="text-muted-foreground mt-2">
+                Tilesets you&apos;ve created.
+              </p>
+            </div>
+            {tilesets.length >= 2 && (
+              <Link
+                href="/compare"
+                className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1.5 text-sm transition-colors"
+              >
+                <GitCompareArrows className="h-4 w-4" />
+                Compare
+              </Link>
+            )}
+          </div>
         </header>
       </ScrollReveal>
 
@@ -59,11 +73,7 @@ export default function MyTilesetsPage() {
             <StorageUsage used={user.storage_used} quota={user.storage_quota} />
           </div>
         )}
-        {isLoading && (
-          <p className="text-muted-foreground text-center text-sm">
-            Loading your tilesets...
-          </p>
-        )}
+        {isLoading && <TilesetGridSkeleton count={4} />}
 
         {error && (
           <p className="text-destructive text-center text-sm">{error.message}</p>
@@ -111,6 +121,8 @@ export default function MyTilesetsPage() {
                         src={`${API_URL}/api/tiles/${encodeURIComponent(ts.slug)}/thumbnail`}
                         alt={ts.name}
                         className="h-full w-full object-cover"
+                        loading="lazy"
+                        decoding="async"
                         onError={(e) => {
                           e.currentTarget.style.display = "none";
                           e.currentTarget.nextElementSibling?.classList.remove("hidden");
