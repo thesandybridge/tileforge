@@ -62,7 +62,7 @@ export type QueueItemStatus = "queued" | "processing" | "done" | "error";
 export interface QueuedFile {
   id: string;
   fileName: string;
-  buffer: ArrayBuffer;
+  file: File; // Store File object, read buffer lazily when processing
   imageInfo: { width: number; height: number } | null;
   status: QueueItemStatus;
   progress: TileforgeProgress | null;
@@ -176,7 +176,7 @@ interface TileforgeContextValue {
   cancel: () => void;
   // Batch queue
   queue: QueuedFile[];
-  addToQueue: (file: File, imageInfo?: { width: number; height: number } | null) => Promise<string>;
+  addToQueue: (file: File, imageInfo?: { width: number; height: number } | null) => string;
   removeFromQueue: (id: string) => void;
   clearQueue: () => void;
   processQueue: (opts: ServerProcessOpts & { concurrency?: number }) => void;
@@ -198,7 +198,7 @@ const TileforgeContext = createContext<TileforgeContextValue>({
   reset: () => {},
   cancel: () => {},
   queue: [],
-  addToQueue: async () => "",
+  addToQueue: () => "",
   removeFromQueue: () => {},
   clearQueue: () => {},
   processQueue: () => {},
@@ -453,10 +453,17 @@ export function TileforgeProvider({ children }: { children: ReactNode }) {
             }
           };
 
+          let sseRetries = 0;
+          const MAX_SSE_RETRIES = 3;
+
           sse.onerror = () => {
-            sse.close();
-            sseRef.current = null;
-            dispatch({ type: "error", message: "Lost connection to server" });
+            sseRetries++;
+            if (sseRetries >= MAX_SSE_RETRIES) {
+              sse.close();
+              sseRef.current = null;
+              dispatch({ type: "error", message: "Lost connection to server after multiple retries" });
+            }
+            // Otherwise let EventSource auto-reconnect
           };
 
           return;
@@ -469,8 +476,13 @@ export function TileforgeProvider({ children }: { children: ReactNode }) {
           zipBlob: new Blob([buf], { type: "application/zip" }),
           durationMs: performance.now() - startTimeRef.current,
         });
-      } catch {
-        dispatch({ type: "error", message: "Failed to connect to server" });
+      } catch (err) {
+        // Don't show error for user-initiated cancellation
+        if (err instanceof Error && err.name === "AbortError") {
+          return;
+        }
+        const message = err instanceof Error ? err.message : "Failed to connect to server";
+        dispatch({ type: "error", message });
       }
     },
     [queryClient],
@@ -495,14 +507,13 @@ export function TileforgeProvider({ children }: { children: ReactNode }) {
   // Batch Queue Functions
   // ---------------------------------------------------------------------------
 
-  const addToQueue = useCallback(async (file: File, imageInfo?: { width: number; height: number } | null): Promise<string> => {
+  const addToQueue = useCallback((file: File, imageInfo?: { width: number; height: number } | null): string => {
     const id = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-    const buffer = await file.arrayBuffer();
 
     const queuedFile: QueuedFile = {
       id,
       fileName: file.name,
-      buffer,
+      file, // Store File object, read buffer lazily when processing
       imageInfo: imageInfo ?? null,
       status: "queued",
       progress: null,
@@ -548,13 +559,16 @@ export function TileforgeProvider({ children }: { children: ReactNode }) {
     const startTime = performance.now();
 
     try {
+      // Read buffer lazily (avoids loading all files into memory upfront)
+      const buffer = await file.file.arrayBuffer();
+
       const headers: Record<string, string> = { "content-type": "application/octet-stream" };
       if (opts.token) headers["authorization"] = `Bearer ${opts.token}`;
 
       const res = await fetch(`${API_URL}/api/tiles?${params}`, {
         method: "POST",
         headers,
-        body: file.buffer,
+        body: buffer,
         signal,
       });
 

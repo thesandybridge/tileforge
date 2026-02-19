@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useReducer, useRef } from "react";
+import { useCallback, useReducer, useRef, useState } from "react";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
@@ -27,6 +27,15 @@ import {
 import { DropAreaSkeleton } from "@/components/tileset-skeleton";
 import { RateLimitBanner } from "@/components/rate-limit-banner";
 import { BatchQueue } from "@/components/batch-queue";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 const TilePreview = dynamic(() => import("@/components/tile-preview"), {
   ssr: false,
@@ -194,6 +203,8 @@ export default function Home() {
   }));
   const fileRef = useRef<ArrayBuffer | null>(null);
   const { presets, addPreset, deletePreset, mounted: presetsMounted } = usePresets();
+  const [presetDialogOpen, setPresetDialogOpen] = useState(false);
+  const [presetName, setPresetName] = useState("");
 
   const loadPreset = useCallback((preset: Preset) => {
     dispatch({ type: "TILE_SIZE_CHANGED", tileSize: preset.tileSize });
@@ -202,17 +213,23 @@ export default function Home() {
     dispatch({ type: "PROJECTION_CHANGED", projection: preset.projection });
   }, []);
 
-  const saveCurrentAsPreset = useCallback(() => {
-    const name = prompt("Preset name:");
-    if (!name) return;
+  const openPresetDialog = useCallback(() => {
+    setPresetName("");
+    setPresetDialogOpen(true);
+  }, []);
+
+  const savePreset = useCallback(() => {
+    if (!presetName.trim()) return;
     addPreset({
-      name,
+      name: presetName.trim(),
       tileSize: form.tileSize,
       minZoom: form.minZoom,
       maxZoom: form.maxZoom,
       projection: form.projection,
     });
-  }, [addPreset, form.tileSize, form.minZoom, form.maxZoom, form.projection]);
+    setPresetDialogOpen(false);
+    setPresetName("");
+  }, [addPreset, presetName, form.tileSize, form.minZoom, form.maxZoom, form.projection]);
 
   const handleFile = useCallback(async (file: File) => {
     let imageInfo: ImageInfo | null = null;
@@ -502,7 +519,7 @@ export default function Home() {
                       </SelectContent>
                     </Select>
                   )}
-                  <Button variant="outline" size="sm" onClick={saveCurrentAsPreset}>
+                  <Button variant="outline" size="sm" onClick={openPresetDialog}>
                     <Save className="mr-1.5 h-3.5 w-3.5" />
                     Save preset
                   </Button>
@@ -1001,6 +1018,35 @@ export default function Home() {
           />
         </div>
       )}
+
+      {/* Save Preset Dialog */}
+      <Dialog open={presetDialogOpen} onOpenChange={setPresetDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Save Preset</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="preset-name">Preset name</Label>
+              <Input
+                id="preset-name"
+                value={presetName}
+                onChange={(e) => setPresetName(e.target.value)}
+                placeholder="My preset"
+                onKeyDown={(e) => e.key === "Enter" && savePreset()}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPresetDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={savePreset} disabled={!presetName.trim()}>
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

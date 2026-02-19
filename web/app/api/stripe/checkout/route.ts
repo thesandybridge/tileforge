@@ -47,5 +47,12 @@ export async function POST() {
     },
   });
 
+  if (!checkoutSession.url) {
+    return NextResponse.json(
+      { error: "Failed to create checkout session" },
+      { status: 500 },
+    );
+  }
+
   return NextResponse.json({ url: checkoutSession.url });
 }
