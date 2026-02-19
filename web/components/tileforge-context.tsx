@@ -282,6 +282,7 @@ export function TileforgeProvider({ children }: { children: ReactNode }) {
       if (opts.minZoom != null) params.set("min_zoom", String(opts.minZoom));
       if (opts.maxZoom != null) params.set("max_zoom", String(opts.maxZoom));
       if (opts.projection) params.set("projection", opts.projection);
+      if (opts.fileName) params.set("file_name", opts.fileName);
 
       try {
         const headers: Record<string, string> = { "content-type": "application/octet-stream" };

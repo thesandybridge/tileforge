@@ -275,6 +275,7 @@ struct TileParams {
     min_zoom: Option<u32>,
     max_zoom: Option<u32>,
     projection: Option<String>,
+    file_name: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -290,6 +291,8 @@ struct JobPayload {
     projection: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     user_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    file_name: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -428,6 +431,19 @@ async fn rate_limit_download(
     next.run(req).await
 }
 
+async fn rate_limit_mutations(
+    State(rl): State<RateLimit>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    req: Request<axum::body::Body>,
+    next: Next,
+) -> Response {
+    let ip = extract_client_ip(&req, Some(addr));
+    if let Err(resp) = rl.check(&ip, "mutations", 30, 60).await {
+        return resp;
+    }
+    next.run(req).await
+}
+
 // ---------------------------------------------------------------------------
 // Routes
 // ---------------------------------------------------------------------------
@@ -545,6 +561,7 @@ async fn process_tiles(
             max_zoom,
             projection: projection_str.to_string(),
             user_id: claims.0.as_ref().map(|c| c.sub.clone()),
+            file_name: params.file_name.clone(),
         };
         let _: redis::RedisResult<()> = redis
             .lpush("tileforge:jobs", serde_json::to_string(&job).unwrap())
@@ -711,21 +728,14 @@ async fn job_download(
         .ok_or_else(|| ApiError::ServiceUnavailable("S3 not configured".into()))?;
 
     let s3_key = format!("tiles/{job_id}/tiles.zip");
-    let resp = bucket
-        .get_object(&s3_key)
+    let url = bucket
+        .presign_get(&s3_key, 600, None)
         .await
         .map_err(|_| ApiError::NotFound)?;
 
     Ok((
-        StatusCode::OK,
-        [
-            (header::CONTENT_TYPE, "application/zip"),
-            (
-                header::CONTENT_DISPOSITION,
-                "attachment; filename=\"tiles.zip\"",
-            ),
-        ],
-        resp.to_vec(),
+        StatusCode::TEMPORARY_REDIRECT,
+        [(header::LOCATION, url)],
     )
         .into_response())
 }
@@ -745,13 +755,15 @@ async fn job_thumbnail(
         .await
         .map_err(|_| ApiError::NotFound)?;
 
+    let bytes = resp.to_vec();
     Ok((
         StatusCode::OK,
         [
             (header::CONTENT_TYPE, HeaderValue::from_static("image/jpeg")),
             (header::CACHE_CONTROL, HeaderValue::from_static("public, max-age=86400")),
+            (header::CONTENT_LENGTH, HeaderValue::from_str(&bytes.len().to_string()).unwrap()),
         ],
-        resp.to_vec(),
+        bytes,
     )
         .into_response())
 }
@@ -771,21 +783,14 @@ async fn job_download_pmtiles(
         .ok_or_else(|| ApiError::ServiceUnavailable("S3 not configured".into()))?;
 
     let s3_key = format!("tiles/{job_id}/tiles.pmtiles");
-    let resp = bucket
-        .get_object(&s3_key)
+    let url = bucket
+        .presign_get(&s3_key, 600, None)
         .await
         .map_err(|_| ApiError::NotFound)?;
 
     Ok((
-        StatusCode::OK,
-        [
-            (header::CONTENT_TYPE, "application/octet-stream"),
-            (
-                header::CONTENT_DISPOSITION,
-                "attachment; filename=\"tiles.pmtiles\"",
-            ),
-        ],
-        resp.to_vec(),
+        StatusCode::TEMPORARY_REDIRECT,
+        [(header::LOCATION, url)],
     )
         .into_response())
 }
@@ -1350,6 +1355,41 @@ async fn deactivate_user(
     Ok(StatusCode::NO_CONTENT)
 }
 
+async fn reactivate_user(
+    State(state): State<AppState>,
+    Claims(user): Claims,
+) -> Result<StatusCode, ApiError> {
+    let db = require_db(&state)?;
+    let user_id = Uuid::parse_str(&user.sub).map_err(|_| ApiError::Unauthorized)?;
+
+    let result = sqlx::query_scalar::<_, Option<chrono::DateTime<chrono::Utc>>>(
+        "SELECT deactivated_at FROM users WHERE id = $1",
+    )
+    .bind(user_id)
+    .fetch_optional(&db)
+    .await
+    .map_err(|e| ApiError::Db(e.to_string()))?;
+
+    match result {
+        Some(Some(deactivated_at)) => {
+            let days_since = (chrono::Utc::now() - deactivated_at).num_days();
+            if days_since > 30 {
+                return Err(ApiError::InvalidField(
+                    "reactivation window has expired (30 days)".into(),
+                ));
+            }
+            sqlx::query("UPDATE users SET deactivated_at = NULL WHERE id = $1")
+                .bind(user_id)
+                .execute(&db)
+                .await
+                .map_err(|e| ApiError::Db(e.to_string()))?;
+            tracing::info!(user_id = %user_id, "user reactivated");
+            Ok(StatusCode::NO_CONTENT)
+        }
+        _ => Err(ApiError::InvalidField("account is not deactivated".into())),
+    }
+}
+
 #[derive(Serialize)]
 struct PurgeResponse {
     deleted: u64,
@@ -1541,18 +1581,44 @@ async fn main() {
         .route(
             "/api/tiles/{job_id}/download/pmtiles",
             get(job_download_pmtiles)
-                .layer(middleware::from_fn_with_state(rate_limit, rate_limit_download)),
+                .layer(middleware::from_fn_with_state(rate_limit.clone(), rate_limit_download)),
         )
         .route("/api/user", get(get_current_user))
-        .route("/api/user/deactivate", post(deactivate_user))
+        .route(
+            "/api/user/deactivate",
+            post(deactivate_user)
+                .layer(middleware::from_fn_with_state(rate_limit.clone(), rate_limit_mutations)),
+        )
+        .route(
+            "/api/user/reactivate",
+            post(reactivate_user)
+                .layer(middleware::from_fn_with_state(rate_limit.clone(), rate_limit_mutations)),
+        )
         .route("/api/admin/purge-deactivated", post(purge_deactivated))
-        .route("/api/notifications", get(list_notifications).post(create_notification).delete(clear_notifications))
-        .route("/api/notifications/read", post(mark_notifications_read))
-        .route("/api/keys", post(create_api_key).get(get_api_key).delete(revoke_api_key))
-        .route("/api/tilesets", post(create_tileset).get(list_tilesets))
+        .route(
+            "/api/notifications",
+            get(list_notifications).post(create_notification).delete(clear_notifications)
+                .layer(middleware::from_fn_with_state(rate_limit.clone(), rate_limit_mutations)),
+        )
+        .route(
+            "/api/notifications/read",
+            post(mark_notifications_read)
+                .layer(middleware::from_fn_with_state(rate_limit.clone(), rate_limit_mutations)),
+        )
+        .route(
+            "/api/keys",
+            post(create_api_key).get(get_api_key).delete(revoke_api_key)
+                .layer(middleware::from_fn_with_state(rate_limit.clone(), rate_limit_mutations)),
+        )
+        .route(
+            "/api/tilesets",
+            post(create_tileset).get(list_tilesets)
+                .layer(middleware::from_fn_with_state(rate_limit.clone(), rate_limit_mutations)),
+        )
         .route(
             "/api/tilesets/{slug}",
-            get(get_tileset).patch(update_tileset).delete(delete_tileset),
+            get(get_tileset).patch(update_tileset).delete(delete_tileset)
+                .layer(middleware::from_fn_with_state(rate_limit.clone(), rate_limit_mutations)),
         )
         .layer(middleware::from_fn_with_state(state.clone(), optional_auth))
         .layer(cors)

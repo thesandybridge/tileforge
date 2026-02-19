@@ -28,6 +28,7 @@ struct Job {
     max_zoom: Option<u32>,
     projection: Option<String>,
     user_id: Option<String>,
+    file_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -143,7 +144,15 @@ async fn main() {
 
         tracing::info!(job_id = %job.job_id, "processing job");
 
-        if let Err(e) = process_job(&job, &bucket, &mut conn, db.as_ref()).await {
+        let result = process_job(&job, &bucket, &mut conn, db.as_ref()).await;
+
+        // Always clean up the upload from S3, regardless of success or failure
+        bucket
+            .delete_object(&format!("uploads/{}.bin", job.job_id))
+            .await
+            .ok();
+
+        if let Err(e) = result {
             tracing::error!(job_id = %job.job_id, "job failed: {e}");
             let progress = ProgressUpdate {
                 status: "failed".into(),
@@ -386,17 +395,24 @@ async fn process_job(
             let tile_size_i32 = tile_size as i32;
             let min_zoom_i32 = job.min_zoom.unwrap_or(0) as i32;
             let max_zoom_i32 = job.max_zoom.unwrap_or(5) as i32;
-            let short_id = &job.job_id[..8.min(job.job_id.len())];
-            let name = format!("Tileset {short_id}");
+            let name = job.file_name.as_ref()
+                .map(|f| f.rsplit('/').next().unwrap_or(f))
+                .map(|f| f.rsplit_once('.').map(|(n, _)| n).unwrap_or(f))
+                .filter(|n| !n.is_empty())
+                .map(|n| n.to_string())
+                .unwrap_or_else(|| {
+                    let short_id = &job.job_id[..8.min(job.job_id.len())];
+                    format!("Tileset {short_id}")
+                });
             let slug = &job.job_id;
             let projection = job.projection.as_deref().unwrap_or("flat");
             let storage_path = format!("tiles/{}", job.job_id);
             let total_size = (zip_bytes.len() + pmtiles_bytes.len()) as i64;
 
-            // Calculate tile count from zoom levels
-            let mut tile_count: i32 = 0;
+            // Calculate tile count from zoom levels (i64 to avoid overflow at high zoom)
+            let mut tile_count: i64 = 0;
             for z in min_zoom_i32..=max_zoom_i32 {
-                let grid = 1i32 << z;
+                let grid = 1i64 << z;
                 tile_count += grid * grid;
             }
 
@@ -424,12 +440,6 @@ async fn process_job(
             }
         }
     }
-
-    // Cleanup: delete upload from S3
-    bucket
-        .delete_object(&format!("uploads/{}.bin", job.job_id))
-        .await
-        .ok();
 
     tracing::info!(job_id = %job.job_id, "job complete");
 

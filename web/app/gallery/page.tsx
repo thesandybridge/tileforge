@@ -8,12 +8,21 @@ import { PLAN_PRO } from "@/lib/plans";
 import { formatBytes, timeAgo } from "@/lib/utils";
 import { usePublicTilesets } from "@/hooks/use-tilesets";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { UpgradeInlineBanner } from "@/components/upgrade-banner";
 import { ScrollReveal } from "@/components/scroll-reveal";
 
 export default function GalleryPage() {
   const { data: session } = useSession();
-  const { data: tilesets = [], isLoading, error } = usePublicTilesets();
+  const {
+    data,
+    isLoading,
+    error,
+    hasNextPage,
+    fetchNextPage,
+    isFetchingNextPage,
+  } = usePublicTilesets();
+  const tilesets = data?.pages.flat() ?? [];
   const isFree = session?.user && session.user.plan !== PLAN_PRO;
 
   return (
@@ -105,6 +114,17 @@ export default function GalleryPage() {
               </Link>
             ))}
           </div>
+          {hasNextPage && (
+            <div className="mt-6 text-center">
+              <Button
+                variant="outline"
+                onClick={() => fetchNextPage()}
+                disabled={isFetchingNextPage}
+              >
+                {isFetchingNextPage ? "Loading..." : "Load more"}
+              </Button>
+            </div>
+          )}
           </ScrollReveal>
         )}
       </main>

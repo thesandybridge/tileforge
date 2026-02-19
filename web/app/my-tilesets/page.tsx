@@ -27,11 +27,18 @@ import { ScrollReveal } from "@/components/scroll-reveal";
 
 export default function MyTilesetsPage() {
   const { data: session } = useSession();
-  const { data: tilesets, isLoading, error } = useTilesets();
+  const {
+    data,
+    isLoading,
+    error,
+    hasNextPage,
+    fetchNextPage,
+    isFetchingNextPage,
+  } = useTilesets();
+  const tilesets = data?.pages.flat() ?? [];
   const { data: user } = useCurrentUser();
   const deleteTileset = useDeleteTileset();
   const isFree = session?.user && session.user.plan !== PLAN_PRO;
-
 
   return (
     <div className="py-10">
@@ -62,7 +69,7 @@ export default function MyTilesetsPage() {
           <p className="text-destructive text-center text-sm">{error.message}</p>
         )}
 
-        {!isLoading && !error && (!tilesets || tilesets.length === 0) && (
+        {!isLoading && !error && tilesets.length === 0 && (
           <div className="text-muted-foreground py-16 text-center">
             <Map className="mx-auto mb-4 h-12 w-12 opacity-50" />
             <p>No tilesets yet.</p>
@@ -88,7 +95,7 @@ export default function MyTilesetsPage() {
           </div>
         )}
 
-        {tilesets && tilesets.length > 0 && (
+        {tilesets.length > 0 && (
           <ScrollReveal>
           <div className="space-y-6">
             {isFree && (
@@ -175,6 +182,17 @@ export default function MyTilesetsPage() {
               </AlertDialog>
             ))}
           </div>
+          {hasNextPage && (
+            <div className="mt-6 text-center">
+              <Button
+                variant="outline"
+                onClick={() => fetchNextPage()}
+                disabled={isFetchingNextPage}
+              >
+                {isFetchingNextPage ? "Loading..." : "Load more"}
+              </Button>
+            </div>
+          )}
           </div>
           </ScrollReveal>
         )}
