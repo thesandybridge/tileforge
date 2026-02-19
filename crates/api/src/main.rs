@@ -118,7 +118,10 @@ impl IntoResponse for ApiError {
             ApiError::Unauthorized => (StatusCode::UNAUTHORIZED, "authentication required".into()),
             ApiError::Forbidden => (StatusCode::FORBIDDEN, "forbidden".into()),
             ApiError::ServiceUnavailable(msg) => (StatusCode::SERVICE_UNAVAILABLE, msg),
-            ApiError::Db(msg) => (StatusCode::INTERNAL_SERVER_ERROR, format!("database error: {msg}")),
+            ApiError::Db(msg) => {
+                tracing::error!("database error: {msg}");
+                (StatusCode::INTERNAL_SERVER_ERROR, "internal server error".into())
+            }
             ApiError::Conflict(msg) => (StatusCode::CONFLICT, msg),
             ApiError::QuotaExceeded => (
                 StatusCode::PAYLOAD_TOO_LARGE,
@@ -469,6 +472,16 @@ async fn process_tiles(
     let min_zoom = params.min_zoom;
     let max_zoom = params.max_zoom;
 
+    // Cap max_zoom to prevent DoS (z=12 → ~16M tiles max)
+    const MAX_ZOOM_LIMIT: u32 = 12;
+    if let Some(mz) = max_zoom {
+        if mz > MAX_ZOOM_LIMIT {
+            return Err(ApiError::InvalidField(
+                format!("max_zoom cannot exceed {MAX_ZOOM_LIMIT}"),
+            ));
+        }
+    }
+
     // Authenticated users (pro/server mode) always use async path;
     // anonymous users only go async for large images.
     let is_pro = claims.0.as_ref().is_some_and(|c| c.plan == Plan::Pro);
@@ -514,6 +527,7 @@ async fn process_tiles(
         let initial_progress = serde_json::json!({
             "status": "queued",
             "last_updated": now,
+            "user_id": claims.0.as_ref().map(|c| &c.sub),
         });
         let _: redis::RedisResult<()> = redis
             .set_ex(
@@ -666,11 +680,31 @@ async fn job_progress(
 // Download endpoint
 // ---------------------------------------------------------------------------
 
+/// Verify the authenticated user owns this job (via the user_id stored in Redis progress).
+async fn verify_job_owner(redis: &mut redis::aio::MultiplexedConnection, job_id: &str, user: &UserClaims) -> Result<(), ApiError> {
+    let key = format!("tileforge:progress:{job_id}");
+    let val: Option<String> = redis.get(&key).await.ok().flatten();
+    if let Some(json) = val {
+        if let Ok(data) = serde_json::from_str::<serde_json::Value>(&json) {
+            if let Some(owner_id) = data.get("user_id").and_then(|v| v.as_str()) {
+                if owner_id != user.sub {
+                    return Err(ApiError::NotFound);
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 async fn job_download(
-    Claims(_user): Claims,
+    Claims(user): Claims,
     State(state): State<AppState>,
     Path(job_id): Path<String>,
 ) -> Result<Response, ApiError> {
+    if let Some(ref redis) = state.redis {
+        verify_job_owner(&mut redis.clone(), &job_id, &user).await?;
+    }
+
     let bucket = state
         .bucket
         .as_ref()
@@ -723,10 +757,14 @@ async fn job_thumbnail(
 }
 
 async fn job_download_pmtiles(
-    Claims(_user): Claims,
+    Claims(user): Claims,
     State(state): State<AppState>,
     Path(job_id): Path<String>,
 ) -> Result<Response, ApiError> {
+    if let Some(ref redis) = state.redis {
+        verify_job_owner(&mut redis.clone(), &job_id, &user).await?;
+    }
+
     let bucket = state
         .bucket
         .as_ref()
@@ -813,6 +851,15 @@ struct TileSetRow {
 #[derive(Deserialize)]
 struct ListTileSetsQuery {
     user_id: Option<Uuid>,
+    page: Option<i64>,
+    per_page: Option<i64>,
+}
+
+fn pagination(page: Option<i64>, per_page: Option<i64>) -> (i64, i64) {
+    let per_page = per_page.unwrap_or(50).clamp(1, 100);
+    let page = page.unwrap_or(1).max(1);
+    let offset = (page - 1) * per_page;
+    (per_page, offset)
 }
 
 async fn create_tileset(
@@ -820,6 +867,13 @@ async fn create_tileset(
     Claims(user): Claims,
     Json(body): Json<CreateTileSet>,
 ) -> Result<Response, ApiError> {
+    if body.name.is_empty() || body.name.len() > 200 {
+        return Err(ApiError::InvalidField("name must be 1-200 characters".into()));
+    }
+    if body.slug.is_empty() || body.slug.len() > 100 {
+        return Err(ApiError::InvalidField("slug must be 1-100 characters".into()));
+    }
+
     let db = require_db(&state)?;
     let user_id = Uuid::parse_str(&user.sub).map_err(|_| ApiError::Unauthorized)?;
 
@@ -865,25 +919,44 @@ async fn list_tilesets(
 ) -> Result<Json<Vec<TileSetRow>>, ApiError> {
     let db = require_db(&state)?;
 
-    // If authenticated and no explicit user_id filter, show the caller's tilesets
-    let user_id = params
-        .user_id
-        .or_else(|| claims.0.as_ref().and_then(|c| Uuid::parse_str(&c.sub).ok()));
+    // Determine whose tilesets to show and whether to include private ones
+    let caller_id = claims.0.as_ref().and_then(|c| Uuid::parse_str(&c.sub).ok());
+    let target_user_id = params.user_id.or(caller_id);
 
-    let rows = if let Some(user_id) = user_id {
-        sqlx::query_as::<_, TileSetRow>(
-            "SELECT id, user_id, name, slug, projection, tile_size, min_zoom, max_zoom, tile_count, size_bytes, storage_path, public, created_at
-             FROM tile_sets WHERE user_id = $1 ORDER BY created_at DESC",
-        )
-        .bind(user_id)
-        .fetch_all(&db)
-        .await
-        .map_err(|e| ApiError::Db(e.to_string()))?
+    let (limit, offset) = pagination(params.page, params.per_page);
+
+    let rows = if let Some(user_id) = target_user_id {
+        let is_owner = caller_id.map(|c| c == user_id).unwrap_or(false);
+        if is_owner {
+            sqlx::query_as::<_, TileSetRow>(
+                "SELECT id, user_id, name, slug, projection, tile_size, min_zoom, max_zoom, tile_count, size_bytes, storage_path, public, created_at
+                 FROM tile_sets WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3",
+            )
+            .bind(user_id)
+            .bind(limit)
+            .bind(offset)
+            .fetch_all(&db)
+            .await
+            .map_err(|e| ApiError::Db(e.to_string()))?
+        } else {
+            sqlx::query_as::<_, TileSetRow>(
+                "SELECT id, user_id, name, slug, projection, tile_size, min_zoom, max_zoom, tile_count, size_bytes, storage_path, public, created_at
+                 FROM tile_sets WHERE user_id = $1 AND public = true ORDER BY created_at DESC LIMIT $2 OFFSET $3",
+            )
+            .bind(user_id)
+            .bind(limit)
+            .bind(offset)
+            .fetch_all(&db)
+            .await
+            .map_err(|e| ApiError::Db(e.to_string()))?
+        }
     } else {
         sqlx::query_as::<_, TileSetRow>(
             "SELECT id, user_id, name, slug, projection, tile_size, min_zoom, max_zoom, tile_count, size_bytes, storage_path, public, created_at
-             FROM tile_sets WHERE public = true ORDER BY created_at DESC",
+             FROM tile_sets WHERE public = true ORDER BY created_at DESC LIMIT $1 OFFSET $2",
         )
+        .bind(limit)
+        .bind(offset)
         .fetch_all(&db)
         .await
         .map_err(|e| ApiError::Db(e.to_string()))?
@@ -1185,6 +1258,16 @@ async fn create_notification(
     Claims(user): Claims,
     Json(body): Json<CreateNotificationBody>,
 ) -> Result<Response, ApiError> {
+    if body.notification_type.len() > 50 {
+        return Err(ApiError::InvalidField("type must be 50 characters or fewer".into()));
+    }
+    if body.title.len() > 200 {
+        return Err(ApiError::InvalidField("title must be 200 characters or fewer".into()));
+    }
+    if body.message.as_ref().is_some_and(|m| m.len() > 1000) {
+        return Err(ApiError::InvalidField("message must be 1000 characters or fewer".into()));
+    }
+
     let db = require_db(&state)?;
     let user_id = Uuid::parse_str(&user.sub).map_err(|_| ApiError::Unauthorized)?;
 
@@ -1247,19 +1330,21 @@ async fn deactivate_user(
     let db = require_db(&state)?;
     let user_id = Uuid::parse_str(&user.sub).map_err(|_| ApiError::Unauthorized)?;
 
-    // Revoke all API keys
+    let mut tx = db.begin().await.map_err(|e| ApiError::Db(e.to_string()))?;
+
     sqlx::query("UPDATE api_keys SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL")
         .bind(user_id)
-        .execute(&db)
+        .execute(&mut *tx)
         .await
         .map_err(|e| ApiError::Db(e.to_string()))?;
 
-    // Set deactivated_at
     sqlx::query("UPDATE users SET deactivated_at = now() WHERE id = $1 AND deactivated_at IS NULL")
         .bind(user_id)
-        .execute(&db)
+        .execute(&mut *tx)
         .await
         .map_err(|e| ApiError::Db(e.to_string()))?;
+
+    tx.commit().await.map_err(|e| ApiError::Db(e.to_string()))?;
 
     tracing::info!(user_id = %user_id, "user deactivated");
     Ok(StatusCode::NO_CONTENT)
@@ -1425,7 +1510,7 @@ async fn main() {
                 .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION])
         }
         None => {
-            tracing::info!("CORS_ORIGIN not set — allowing all origins");
+            tracing::warn!("CORS_ORIGIN not set — allowing all origins (set CORS_ORIGIN in production!)");
             CorsLayer::permissive()
         }
     };
