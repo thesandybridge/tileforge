@@ -118,3 +118,107 @@ export async function getCurrentUser(token: string): Promise<CurrentUser> {
   });
   return handleResponse<CurrentUser>(res);
 }
+
+// ---------------------------------------------------------------------------
+// API keys
+// ---------------------------------------------------------------------------
+
+export interface ApiKey {
+  id: string;
+  key_prefix: string;
+  created_at: string;
+}
+
+export interface ApiKeyCreated extends ApiKey {
+  key: string;
+}
+
+export async function getApiKey(token: string): Promise<ApiKey | null> {
+  const res = await fetch(`${API_URL}/api/keys`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (res.status === 204) return null;
+  return handleResponse<ApiKey>(res);
+}
+
+export async function createApiKey(token: string): Promise<ApiKeyCreated> {
+  const res = await fetch(`${API_URL}/api/keys`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return handleResponse<ApiKeyCreated>(res);
+}
+
+export async function revokeApiKey(token: string): Promise<void> {
+  const res = await fetch(`${API_URL}/api/keys`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok && res.status !== 204) {
+    const body = await res.json().catch(() => ({ error: "Unknown error" }));
+    throw new ApiError(res.status, body.error ?? `HTTP ${res.status}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Notifications
+// ---------------------------------------------------------------------------
+
+import type { Notification } from "@/lib/notifications";
+
+export async function fetchNotifications(token: string): Promise<Notification[]> {
+  const res = await fetch(`${API_URL}/api/notifications`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return handleResponse<Notification[]>(res);
+}
+
+export async function createServerNotification(
+  token: string,
+  body: { type: string; title: string; message?: string },
+): Promise<void> {
+  const res = await fetch(`${API_URL}/api/notifications`, {
+    method: "POST",
+    headers: authHeaders(token),
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const b = await res.json().catch(() => ({ error: "Unknown error" }));
+    throw new ApiError(res.status, b.error ?? `HTTP ${res.status}`);
+  }
+}
+
+export async function markNotificationsRead(token: string): Promise<void> {
+  const res = await fetch(`${API_URL}/api/notifications/read`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    const b = await res.json().catch(() => ({ error: "Unknown error" }));
+    throw new ApiError(res.status, b.error ?? `HTTP ${res.status}`);
+  }
+}
+
+export async function clearNotifications(token: string): Promise<void> {
+  const res = await fetch(`${API_URL}/api/notifications`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok && res.status !== 204) {
+    const b = await res.json().catch(() => ({ error: "Unknown error" }));
+    throw new ApiError(res.status, b.error ?? `HTTP ${res.status}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Account deactivation
+// ---------------------------------------------------------------------------
+
+export async function deactivateAccount(): Promise<{ deactivated: boolean }> {
+  const res = await fetch("/api/account/deactivate", { method: "POST" });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ error: "Unknown error" }));
+    throw new ApiError(res.status, body.error ?? `HTTP ${res.status}`);
+  }
+  return res.json();
+}

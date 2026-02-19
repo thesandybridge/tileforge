@@ -1,10 +1,24 @@
 "use client";
 
-import { useCallback, useEffect, useReducer, useRef } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  type ReactNode,
+} from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import type { WorkerRequest, WorkerResponse } from "./worker-protocol";
+import { useNotifications } from "@/components/notification-context";
+import type { WorkerRequest, WorkerResponse } from "@/lib/worker-protocol";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
+
+// ---------------------------------------------------------------------------
+// Types (re-exported for consumers)
+// ---------------------------------------------------------------------------
 
 export type TileforgeStatus = "idle" | "loading" | "ready" | "waking" | "processing" | "done" | "error";
 
@@ -14,6 +28,22 @@ export interface TileforgeProgress {
   zoom: number;
   percent: number;
 }
+
+export interface ProcessOpts {
+  tileSize?: number;
+  minZoom?: number;
+  maxZoom?: number;
+  projection?: "flat" | "mercator";
+  fileName?: string;
+}
+
+export interface ServerProcessOpts extends ProcessOpts {
+  token?: string;
+}
+
+// ---------------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------------
 
 interface TileforgeState {
   status: TileforgeStatus;
@@ -93,13 +123,78 @@ async function waitForHealth(signal?: AbortSignal): Promise<boolean> {
   return false;
 }
 
-export function useTileforge() {
+// ---------------------------------------------------------------------------
+// Context
+// ---------------------------------------------------------------------------
+
+interface TileforgeContextValue {
+  status: TileforgeStatus;
+  progress: TileforgeProgress | null;
+  zipBlob: Blob | null;
+  pmtilesUrl: string | null;
+  error: string | null;
+  durationMs: number | null;
+  processing: boolean;
+  process: (imageBytes: ArrayBuffer, opts?: ProcessOpts) => void;
+  processServer: (imageBytes: ArrayBuffer, opts?: ServerProcessOpts) => void;
+  reset: () => void;
+}
+
+const TileforgeContext = createContext<TileforgeContextValue>({
+  status: "idle",
+  progress: null,
+  zipBlob: null,
+  pmtilesUrl: null,
+  error: null,
+  durationMs: null,
+  processing: false,
+  process: () => {},
+  processServer: () => {},
+  reset: () => {},
+});
+
+// ---------------------------------------------------------------------------
+// Provider
+// ---------------------------------------------------------------------------
+
+export function TileforgeProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
+  const { add } = useNotifications();
   const workerRef = useRef<Worker | null>(null);
   const startTimeRef = useRef<number>(0);
   const sseRef = useRef<EventSource | null>(null);
+  const fileNameRef = useRef<string | null>(null);
   const [state, dispatch] = useReducer(reducer, initialState);
 
+  // Track previous status for notifications
+  const prevStatusRef = useRef(state.status);
+
+  useEffect(() => {
+    const prev = prevStatusRef.current;
+    const curr = state.status;
+    prevStatusRef.current = curr;
+
+    if (prev === "processing" && curr === "done" && state.zipBlob) {
+      const zipUrl = URL.createObjectURL(state.zipBlob);
+      add({
+        type: "processing_complete",
+        title: "Processing complete!",
+        message: "Your tiles are ready to download.",
+        zipUrl,
+        pmtilesUrl: state.pmtilesUrl ?? undefined,
+        fileName: fileNameRef.current ?? undefined,
+      });
+    }
+    if (prev === "processing" && curr === "error" && state.error) {
+      add({
+        type: "processing_failed",
+        title: "Processing failed",
+        message: state.error,
+      });
+    }
+  }, [state.status, state.zipBlob, state.pmtilesUrl, state.error, add]);
+
+  // Boot WASM worker once
   useEffect(() => {
     const worker = new Worker("/tileforge.worker.js");
     workerRef.current = worker;
@@ -149,16 +244,9 @@ export function useTileforge() {
   }, []);
 
   const process = useCallback(
-    (
-      imageBytes: ArrayBuffer,
-      opts: {
-        tileSize?: number;
-        minZoom?: number;
-        maxZoom?: number;
-        projection?: "flat" | "mercator";
-      } = {},
-    ) => {
+    (imageBytes: ArrayBuffer, opts: ProcessOpts = {}) => {
       if (!workerRef.current) return;
+      fileNameRef.current = opts.fileName ?? null;
       startTimeRef.current = performance.now();
       dispatch({ type: "processing" });
 
@@ -176,19 +264,10 @@ export function useTileforge() {
   );
 
   const processServer = useCallback(
-    async (
-      imageBytes: ArrayBuffer,
-      opts: {
-        tileSize?: number;
-        minZoom?: number;
-        maxZoom?: number;
-        projection?: "flat" | "mercator";
-        token?: string;
-      } = {},
-    ) => {
+    async (imageBytes: ArrayBuffer, opts: ServerProcessOpts = {}) => {
+      fileNameRef.current = opts.fileName ?? null;
       startTimeRef.current = performance.now();
 
-      // Wake up server if it's sleeping (Railway Serverless)
       dispatch({ type: "waking" });
       const healthy = await waitForHealth();
       if (!healthy) {
@@ -220,10 +299,8 @@ export function useTileforge() {
         }
 
         if (res.status === 202) {
-          // Async path: open SSE for progress
           const { job_id } = (await res.json()) as { job_id: string };
 
-          // Close any existing SSE connection
           sseRef.current?.close();
 
           const sse = new EventSource(`${API_URL}/api/tiles/${job_id}/progress`);
@@ -306,12 +383,33 @@ export function useTileforge() {
         dispatch({ type: "error", message: "Failed to connect to server" });
       }
     },
-    [],
+    [queryClient],
   );
 
   const reset = useCallback(() => {
     dispatch({ type: "reset", workerReady: !!workerRef.current });
   }, []);
 
-  return { ...state, process, processServer, reset };
+  const processing = state.status === "processing" || state.status === "waking";
+
+  const value = useMemo<TileforgeContextValue>(
+    () => ({
+      ...state,
+      processing,
+      process,
+      processServer,
+      reset,
+    }),
+    [state, processing, process, processServer, reset],
+  );
+
+  return (
+    <TileforgeContext.Provider value={value}>
+      {children}
+    </TileforgeContext.Provider>
+  );
+}
+
+export function useTileforge() {
+  return useContext(TileforgeContext);
 }

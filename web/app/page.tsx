@@ -1,14 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useReducer, useRef } from "react";
+import { useCallback, useReducer, useRef } from "react";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { LoaderCircle, Upload } from "lucide-react";
 import { ScrollReveal } from "@/components/scroll-reveal";
-import { useProcessing } from "@/components/processing-context";
-import { useTileforge } from "@/lib/use-tileforge";
+import { useTileforge } from "@/components/tileforge-context";
 import { PLAN_PRO } from "@/lib/plans";
+import { useTileDefaults } from "@/hooks/use-tile-defaults";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Card, CardContent } from "@/components/ui/card";
@@ -132,13 +132,14 @@ function formReducer(state: FormState, action: FormAction): FormState {
 export default function Home() {
   const { status, progress, zipBlob, pmtilesUrl, error, durationMs, process, processServer, reset } = useTileforge();
   const { data: session } = useSession();
-  const { setProcessing } = useProcessing();
-  const [form, dispatch] = useReducer(formReducer, initialFormState);
+  const { defaults } = useTileDefaults();
+  const [form, dispatch] = useReducer(formReducer, defaults, (d) => ({
+    ...initialFormState,
+    tileSize: d.tileSize,
+    maxZoom: d.maxZoom,
+    projection: d.projection,
+  }));
   const fileRef = useRef<ArrayBuffer | null>(null);
-
-  useEffect(() => {
-    setProcessing(status === "processing" || status === "waking");
-  }, [status, setProcessing]);
 
   const handleFile = useCallback(async (file: File) => {
     let imageInfo: ImageInfo | null = null;
@@ -176,11 +177,11 @@ export default function Home() {
     if (!fileRef.current) return;
     const copy = fileRef.current.slice(0);
     if (form.mode === "server") {
-      processServer(copy, { tileSize: form.tileSize, maxZoom: form.maxZoom, projection: form.projection, token: session?.accessToken });
+      processServer(copy, { tileSize: form.tileSize, maxZoom: form.maxZoom, projection: form.projection, token: session?.accessToken, fileName: form.fileName ?? undefined });
     } else {
-      process(copy, { tileSize: form.tileSize, maxZoom: form.maxZoom, projection: form.projection });
+      process(copy, { tileSize: form.tileSize, maxZoom: form.maxZoom, projection: form.projection, fileName: form.fileName ?? undefined });
     }
-  }, [process, processServer, form.tileSize, form.maxZoom, form.projection, form.mode, session?.accessToken]);
+  }, [process, processServer, form.tileSize, form.maxZoom, form.projection, form.mode, form.fileName, session?.accessToken]);
 
   const onDownload = useCallback(() => {
     if (!zipBlob) return;

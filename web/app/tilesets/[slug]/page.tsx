@@ -7,6 +7,7 @@ import Link from "next/link";
 import dynamic from "next/dynamic";
 import { ArrowLeft, Map, Globe, Grid3X3, Copy, Check, Eye, EyeOff, Trash2, Pencil, Loader2 } from "lucide-react";
 import { useTileset, useUpdateTileset, useDeleteTileset, useTilesetPreview } from "@/hooks/use-tilesets";
+import { useApiKey } from "@/hooks/use-api-key";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 
@@ -90,6 +91,7 @@ export default function TileSetDetailPage() {
   const updateTileset = useUpdateTileset(params.slug);
   const deleteTileset = useDeleteTileset();
   const preview = useTilesetPreview(params.slug);
+  const { data: apiKey } = useApiKey();
 
   const isOwner = !!(session?.user?.id && tileset?.user_id === session.user.id);
   const backHref = isOwner || session?.user ? "/my-tilesets" : "/gallery";
@@ -154,7 +156,8 @@ export default function TileSetDetailPage() {
   }
 
   const origin = typeof window !== "undefined" ? window.location.origin : "";
-  const tileUrl = `${origin}/api/tiles/${tileset.slug}/download/pmtiles`;
+  const keyParam = apiKey ? "?key=YOUR_API_KEY" : "";
+  const tileUrl = `${origin}/api/tiles/${tileset.slug}/download/pmtiles${keyParam}`;
 
   const leafletSnippet = `import "pmtiles";
 import * as protomapsL from "protomaps-leaflet";
@@ -307,6 +310,23 @@ const map = new maplibregl.Map({
         {isOwner && (
           <div className="mt-8 space-y-6">
             <h2 className="text-lg font-semibold">Use this tile set</h2>
+
+            {apiKey ? (
+              <p className="text-muted-foreground text-sm">
+                Replace <code className="rounded bg-muted px-1 py-0.5 text-xs font-mono">YOUR_API_KEY</code> with
+                your full API key.{" "}
+                <Link href="/settings" className="text-primary hover:underline">
+                  Manage keys
+                </Link>
+              </p>
+            ) : (
+              <p className="text-muted-foreground text-sm">
+                <Link href="/settings" className="text-primary hover:underline">
+                  Generate an API key
+                </Link>{" "}
+                to use this tileset in external applications.
+              </p>
+            )}
 
             <CodeBlock label="Tile URL" code={tileUrl} />
             <CodeBlock label="Leaflet" code={leafletSnippet} />

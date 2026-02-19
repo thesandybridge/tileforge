@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { CreditCard, ExternalLink, Check, Loader2 } from "lucide-react";
 import { useCurrentUser } from "@/hooks/use-user";
 import { StorageUsage } from "@/components/storage-usage";
+import { ApiKeyCard } from "@/components/api-key-card";
 
 function BillingContent() {
   const { data: session } = useSession();
@@ -84,6 +85,12 @@ function BillingContent() {
           </div>
         )}
       </div>
+
+      {isPro && (
+        <div className="mt-6">
+          <ApiKeyCard />
+        </div>
+      )}
     </div>
   );
 }

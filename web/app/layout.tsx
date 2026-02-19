@@ -5,7 +5,9 @@ import { SessionProvider } from "@/components/session-provider";
 import { QueryProvider } from "@/components/query-provider";
 import { Navbar } from "@/components/navbar";
 import { CursorGlow } from "@/components/cursor-glow";
-import { ProcessingProvider } from "@/components/processing-context";
+import { NotificationProvider } from "@/components/notification-context";
+import { TileforgeProvider } from "@/components/tileforge-context";
+import { Toaster } from "@/components/toaster";
 import "./globals.css";
 
 const inter = Inter({ subsets: ["latin"] });
@@ -114,11 +116,14 @@ export default function RootLayout({
         <SessionProvider>
           <QueryProvider>
             <ThemeProvider attribute="class" defaultTheme="dark" enableSystem>
-              <ProcessingProvider>
-                <CursorGlow />
-                <Navbar />
-                {children}
-              </ProcessingProvider>
+              <NotificationProvider>
+                <TileforgeProvider>
+                  <CursorGlow />
+                  <Navbar />
+                  <Toaster />
+                  {children}
+                </TileforgeProvider>
+              </NotificationProvider>
             </ThemeProvider>
           </QueryProvider>
         </SessionProvider>

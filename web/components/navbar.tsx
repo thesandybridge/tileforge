@@ -3,6 +3,9 @@
 import Link from "next/link";
 import { useSession } from "next-auth/react";
 import { UserMenu } from "@/components/user-menu";
+import { ThemeToggle } from "@/components/theme-toggle";
+import { NotificationPanel } from "@/components/notification-panel";
+import { StandaloneProcessingIndicator } from "@/components/processing-indicator";
 
 export function Navbar() {
   const { data: session } = useSession();
@@ -27,7 +30,12 @@ export function Navbar() {
             )}
           </div>
         </div>
-        <UserMenu />
+        <div className="flex items-center gap-2">
+          <ThemeToggle />
+          <NotificationPanel />
+          {!session && <StandaloneProcessingIndicator />}
+          <UserMenu />
+        </div>
       </div>
     </nav>
   );
