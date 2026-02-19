@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { UpgradeInlineBanner } from "@/components/upgrade-banner";
 import { ScrollReveal } from "@/components/scroll-reveal";
+import { Footer } from "@/components/footer";
 
 export default function MyTilesetsPage() {
   const { data: session } = useSession();
@@ -41,7 +42,7 @@ export default function MyTilesetsPage() {
   const isFree = session?.user && session.user.plan !== PLAN_PRO;
 
   return (
-    <div className="py-10">
+    <div className="flex flex-1 flex-col py-10">
       <ScrollReveal>
         <header className="mx-auto max-w-4xl px-6">
           <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">
@@ -199,10 +200,7 @@ export default function MyTilesetsPage() {
         )}
       </main>
 
-      <footer className="text-muted-foreground mt-16 pb-8 text-center text-sm">
-        &copy; {new Date().getFullYear()} &mdash; made with &hearts; by{" "}
-        <a href="https://sandybridge.io" className="hover:text-foreground underline underline-offset-4 transition-colors">sandybridge</a>
-      </footer>
+      <Footer />
     </div>
   );
 }

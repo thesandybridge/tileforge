@@ -14,7 +14,6 @@ import {
   SheetContent,
   SheetHeader,
   SheetTitle,
-  SheetBody,
 } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 
@@ -120,7 +119,7 @@ export function Navbar() {
               <SheetHeader>
                 <SheetTitle>Menu</SheetTitle>
               </SheetHeader>
-              <SheetBody className="flex flex-col gap-6 pt-6">
+              <div className="flex flex-1 flex-col gap-6 overflow-auto px-4 pt-2">
                 {/* Navigation links */}
                 <nav className="text-muted-foreground flex flex-col gap-4 text-base">
                   <NavLinks onClick={() => setMobileMenuOpen(false)} />
@@ -135,11 +134,11 @@ export function Navbar() {
                 </div>
 
                 {/* Footer links */}
-                <div className="mt-auto flex items-center gap-4 pt-4">
+                <div className="mt-auto flex items-center gap-4 pb-4 pt-4">
                   <GitHubLink className="text-muted-foreground hover:text-foreground transition-colors" />
                   {!session && <StandaloneProcessingIndicator />}
                 </div>
-              </SheetBody>
+              </div>
             </SheetContent>
           </Sheet>
         </div>

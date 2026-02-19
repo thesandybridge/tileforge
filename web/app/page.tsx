@@ -7,6 +7,7 @@ import dynamic from "next/dynamic";
 import { Info, LoaderCircle, Upload } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { ScrollReveal } from "@/components/scroll-reveal";
+import { Footer } from "@/components/footer";
 import { TileParticles } from "@/components/tile-particles";
 import { UpgradeBanner } from "@/components/upgrade-banner";
 import { useTileforge } from "@/components/tileforge-context";
@@ -223,7 +224,7 @@ export default function Home() {
   }, [reset]);
 
   return (
-    <div className="py-16">
+    <div className="flex flex-1 flex-col py-16">
       {/* Hero */}
       <ScrollReveal>
         <header className="mx-auto max-w-2xl px-6 text-center">
@@ -579,18 +580,7 @@ export default function Home() {
           />
         </div>
       )}
-      {/* Footer */}
-      <footer className="text-muted-foreground mt-16 pb-8 text-center text-sm">
-        <Link href="/gallery" className="hover:text-foreground underline underline-offset-4 transition-colors">
-          Gallery
-        </Link>
-        <span className="mx-2">&middot;</span>
-        <a href="https://github.com/thesandybridge/tileforge" target="_blank" rel="noopener noreferrer" className="hover:text-foreground underline underline-offset-4 transition-colors">
-          GitHub
-        </a>
-        <span className="mx-2">&middot;</span>
-        &copy; {new Date().getFullYear()} &mdash; made with &hearts; by <a href="https://sandybridge.io" className="hover:text-foreground underline underline-offset-4 transition-colors">sandybridge</a>
-      </footer>
+      <Footer />
     </div>
   );
 }

@@ -112,7 +112,7 @@ export default function RootLayout({
           }}
         />
       </head>
-      <body className={`${inter.className} ${geistMono.variable} min-h-screen antialiased`}>
+      <body className={`${inter.className} ${geistMono.variable} flex min-h-dvh flex-col antialiased`}>
         <SessionProvider>
           <QueryProvider>
             <ThemeProvider attribute="class" defaultTheme="dark" enableSystem>
@@ -121,7 +121,9 @@ export default function RootLayout({
                   <CursorGlow />
                   <Navbar />
                   <Toaster />
-                  {children}
+                  <main className="flex flex-1 flex-col">
+                    {children}
+                  </main>
                 </TileforgeProvider>
               </NotificationProvider>
             </ThemeProvider>
