@@ -8,10 +8,12 @@ import {
   useMemo,
   useReducer,
   useRef,
+  useState,
   type ReactNode,
 } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNotifications } from "@/components/notification-context";
+import { useRateLimit } from "@/hooks/use-rate-limit";
 import type { WorkerRequest, WorkerResponse } from "@/lib/worker-protocol";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
@@ -39,6 +41,25 @@ export interface ProcessOpts {
 
 export interface ServerProcessOpts extends ProcessOpts {
   token?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Batch Queue Types
+// ---------------------------------------------------------------------------
+
+export type QueueItemStatus = "queued" | "processing" | "done" | "error";
+
+export interface QueuedFile {
+  id: string;
+  fileName: string;
+  buffer: ArrayBuffer;
+  imageInfo: { width: number; height: number } | null;
+  status: QueueItemStatus;
+  progress: TileforgeProgress | null;
+  zipBlob: Blob | null;
+  pmtilesUrl: string | null;
+  error: string | null;
+  durationMs: number | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -138,6 +159,13 @@ interface TileforgeContextValue {
   process: (imageBytes: ArrayBuffer, opts?: ProcessOpts) => void;
   processServer: (imageBytes: ArrayBuffer, opts?: ServerProcessOpts) => void;
   reset: () => void;
+  // Batch queue
+  queue: QueuedFile[];
+  addToQueue: (file: File, imageInfo?: { width: number; height: number } | null) => Promise<string>;
+  removeFromQueue: (id: string) => void;
+  clearQueue: () => void;
+  processQueue: (opts: ServerProcessOpts) => void;
+  isProcessingQueue: boolean;
 }
 
 const TileforgeContext = createContext<TileforgeContextValue>({
@@ -151,6 +179,12 @@ const TileforgeContext = createContext<TileforgeContextValue>({
   process: () => {},
   processServer: () => {},
   reset: () => {},
+  queue: [],
+  addToQueue: async () => "",
+  removeFromQueue: () => {},
+  clearQueue: () => {},
+  processQueue: () => {},
+  isProcessingQueue: false,
 });
 
 // ---------------------------------------------------------------------------
@@ -160,11 +194,17 @@ const TileforgeContext = createContext<TileforgeContextValue>({
 export function TileforgeProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
   const { add } = useNotifications();
+  const { updateFromHeaders } = useRateLimit();
   const workerRef = useRef<Worker | null>(null);
   const startTimeRef = useRef<number>(0);
   const sseRef = useRef<EventSource | null>(null);
   const fileNameRef = useRef<string | null>(null);
   const [state, dispatch] = useReducer(reducer, initialState);
+
+  // Batch queue state
+  const [queue, setQueue] = useState<QueuedFile[]>([]);
+  const [isProcessingQueue, setIsProcessingQueue] = useState(false);
+  const queueAbortRef = useRef<AbortController | null>(null);
 
   // Track previous status for notifications
   const prevStatusRef = useRef(state.status);
@@ -293,6 +333,9 @@ export function TileforgeProvider({ children }: { children: ReactNode }) {
           body: imageBytes,
         });
 
+        // Track rate limit headers
+        updateFromHeaders(res.headers, "tiles");
+
         if (!res.ok && res.status !== 202) {
           const body = await res.json().catch(() => ({ error: "Server error" }));
           dispatch({ type: "error", message: body.error ?? `Server error (${res.status})` });
@@ -391,6 +434,196 @@ export function TileforgeProvider({ children }: { children: ReactNode }) {
     dispatch({ type: "reset", workerReady: !!workerRef.current });
   }, []);
 
+  // ---------------------------------------------------------------------------
+  // Batch Queue Functions
+  // ---------------------------------------------------------------------------
+
+  const addToQueue = useCallback(async (file: File, imageInfo?: { width: number; height: number } | null): Promise<string> => {
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+    const buffer = await file.arrayBuffer();
+
+    const queuedFile: QueuedFile = {
+      id,
+      fileName: file.name,
+      buffer,
+      imageInfo: imageInfo ?? null,
+      status: "queued",
+      progress: null,
+      zipBlob: null,
+      pmtilesUrl: null,
+      error: null,
+      durationMs: null,
+    };
+
+    setQueue((prev) => [...prev, queuedFile]);
+    return id;
+  }, []);
+
+  const removeFromQueue = useCallback((id: string) => {
+    setQueue((prev) => prev.filter((f) => f.id !== id));
+  }, []);
+
+  const clearQueue = useCallback(() => {
+    queueAbortRef.current?.abort();
+    setQueue([]);
+    setIsProcessingQueue(false);
+  }, []);
+
+  const updateQueueItem = useCallback((id: string, updates: Partial<QueuedFile>) => {
+    setQueue((prev) => prev.map((f) => (f.id === id ? { ...f, ...updates } : f)));
+  }, []);
+
+  const processQueue = useCallback(async (opts: ServerProcessOpts) => {
+    if (isProcessingQueue) return;
+
+    const pendingFiles = queue.filter((f) => f.status === "queued");
+    if (pendingFiles.length === 0) return;
+
+    setIsProcessingQueue(true);
+    queueAbortRef.current = new AbortController();
+
+    // Wait for server to be healthy
+    const healthy = await waitForHealth(queueAbortRef.current.signal);
+    if (!healthy) {
+      setIsProcessingQueue(false);
+      return;
+    }
+
+    for (const file of pendingFiles) {
+      if (queueAbortRef.current.signal.aborted) break;
+
+      updateQueueItem(file.id, { status: "processing", progress: null });
+
+      const params = new URLSearchParams();
+      params.set("tile_size", String(opts.tileSize ?? 256));
+      if (opts.minZoom != null) params.set("min_zoom", String(opts.minZoom));
+      if (opts.maxZoom != null) params.set("max_zoom", String(opts.maxZoom));
+      if (opts.projection) params.set("projection", opts.projection);
+      params.set("file_name", file.fileName);
+
+      const startTime = performance.now();
+
+      try {
+        const headers: Record<string, string> = { "content-type": "application/octet-stream" };
+        if (opts.token) headers["authorization"] = `Bearer ${opts.token}`;
+
+        const res = await fetch(`${API_URL}/api/tiles?${params}`, {
+          method: "POST",
+          headers,
+          body: file.buffer,
+          signal: queueAbortRef.current.signal,
+        });
+
+        updateFromHeaders(res.headers, "tiles");
+
+        if (!res.ok && res.status !== 202) {
+          const body = await res.json().catch(() => ({ error: "Server error" }));
+          updateQueueItem(file.id, { status: "error", error: body.error ?? `Server error (${res.status})` });
+          continue;
+        }
+
+        if (res.status === 202) {
+          const { job_id } = (await res.json()) as { job_id: string };
+
+          // Poll for progress via SSE
+          await new Promise<void>((resolve) => {
+            const sse = new EventSource(`${API_URL}/api/tiles/${job_id}/progress`);
+
+            const cleanup = () => {
+              sse.close();
+              resolve();
+            };
+
+            queueAbortRef.current?.signal.addEventListener("abort", cleanup);
+
+            sse.onmessage = async (e) => {
+              try {
+                const data = JSON.parse(e.data) as {
+                  status: string;
+                  zoom?: number;
+                  tiles_done?: number;
+                  tiles_total?: number;
+                  download_url?: string;
+                  pmtiles_url?: string;
+                  error?: string;
+                };
+
+                if (data.status === "processing" && data.tiles_done != null && data.tiles_total != null) {
+                  updateQueueItem(file.id, {
+                    progress: {
+                      tilesDone: data.tiles_done,
+                      tilesTotal: data.tiles_total,
+                      zoom: data.zoom ?? 0,
+                      percent: data.tiles_total > 0 ? (data.tiles_done / data.tiles_total) * 100 : 0,
+                    },
+                  });
+                } else if (data.status === "complete" && data.download_url) {
+                  cleanup();
+                  try {
+                    const dlHeaders: Record<string, string> = {};
+                    if (opts.token) dlHeaders["authorization"] = `Bearer ${opts.token}`;
+                    const dlRes = await fetch(`${API_URL}${data.download_url}`, { headers: dlHeaders });
+                    if (!dlRes.ok) throw new Error(`Download failed (${dlRes.status})`);
+                    const buf = await dlRes.arrayBuffer();
+                    updateQueueItem(file.id, {
+                      status: "done",
+                      zipBlob: new Blob([buf], { type: "application/zip" }),
+                      pmtilesUrl: data.pmtiles_url ? `${API_URL}${data.pmtiles_url}` : null,
+                      durationMs: performance.now() - startTime,
+                      progress: null,
+                    });
+                  } catch (dlErr) {
+                    updateQueueItem(file.id, {
+                      status: "error",
+                      error: dlErr instanceof Error ? dlErr.message : "Download failed",
+                    });
+                  }
+                } else if (data.status === "failed") {
+                  cleanup();
+                  updateQueueItem(file.id, { status: "error", error: data.error ?? "Processing failed" });
+                }
+              } catch {
+                // Ignore parse errors
+              }
+            };
+
+            sse.onerror = () => {
+              cleanup();
+              updateQueueItem(file.id, { status: "error", error: "Lost connection to server" });
+            };
+          });
+        } else {
+          // Sync response
+          const buf = await res.arrayBuffer();
+          updateQueueItem(file.id, {
+            status: "done",
+            zipBlob: new Blob([buf], { type: "application/zip" }),
+            durationMs: performance.now() - startTime,
+          });
+        }
+      } catch (err) {
+        if ((err as Error).name !== "AbortError") {
+          updateQueueItem(file.id, { status: "error", error: "Failed to connect to server" });
+        }
+      }
+    }
+
+    setIsProcessingQueue(false);
+    queryClient.invalidateQueries({ queryKey: ["user"] });
+    queryClient.invalidateQueries({ queryKey: ["tilesets"] });
+
+    // Notify completion
+    const completed = queue.filter((f) => f.status === "done").length;
+    const failed = queue.filter((f) => f.status === "error").length;
+    if (completed > 0 || failed > 0) {
+      add({
+        type: completed > 0 ? "processing_complete" : "processing_failed",
+        title: "Batch processing complete",
+        message: `${completed} succeeded, ${failed} failed`,
+      });
+    }
+  }, [queue, isProcessingQueue, updateFromHeaders, queryClient, add, updateQueueItem]);
+
   const processing = state.status === "processing" || state.status === "waking";
 
   const value = useMemo<TileforgeContextValue>(
@@ -400,8 +633,14 @@ export function TileforgeProvider({ children }: { children: ReactNode }) {
       process,
       processServer,
       reset,
+      queue,
+      addToQueue,
+      removeFromQueue,
+      clearQueue,
+      processQueue,
+      isProcessingQueue,
     }),
-    [state, processing, process, processServer, reset],
+    [state, processing, process, processServer, reset, queue, addToQueue, removeFromQueue, clearQueue, processQueue, isProcessingQueue],
   );
 
   return (

@@ -11,6 +11,7 @@ import { Toaster } from "@/components/toaster";
 import { Footer } from "@/components/footer";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { ServiceWorkerRegister } from "@/components/sw-register";
+import { RateLimitProvider } from "@/hooks/use-rate-limit";
 import "./globals.css";
 
 const inter = Inter({ subsets: ["latin"] });
@@ -119,6 +120,7 @@ export default function RootLayout({
         <SessionProvider>
           <QueryProvider>
             <ThemeProvider attribute="class" defaultTheme="dark" enableSystem>
+              <RateLimitProvider>
               <NotificationProvider>
                 <TileforgeProvider>
                   <ServiceWorkerRegister />
@@ -133,6 +135,7 @@ export default function RootLayout({
                   <Footer />
                 </TileforgeProvider>
               </NotificationProvider>
+              </RateLimitProvider>
             </ThemeProvider>
           </QueryProvider>
         </SessionProvider>

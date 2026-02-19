@@ -25,6 +25,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { DropAreaSkeleton } from "@/components/tileset-skeleton";
+import { RateLimitBanner } from "@/components/rate-limit-banner";
+import { BatchQueue } from "@/components/batch-queue";
 
 const TilePreview = dynamic(() => import("@/components/tile-preview"), {
   ssr: false,
@@ -148,7 +150,7 @@ function formReducer(state: FormState, action: FormAction): FormState {
 }
 
 export default function Home() {
-  const { status, progress, zipBlob, pmtilesUrl, error, durationMs, process, processServer, reset } = useTileforge();
+  const { status, progress, zipBlob, pmtilesUrl, error, durationMs, process, processServer, reset, queue, addToQueue, processQueue, isProcessingQueue } = useTileforge();
   const { data: session } = useSession();
   const { defaults } = useTileDefaults();
   const [form, dispatch] = useReducer(formReducer, defaults, (d) => ({
@@ -193,14 +195,38 @@ export default function Home() {
     dispatch({ type: "FILE_BUFFERED" });
   }, [form.tileSize]);
 
+  const handleFiles = useCallback(async (files: FileList) => {
+    const imageFiles = Array.from(files).filter((f) => f.type.startsWith("image/"));
+    if (imageFiles.length === 0) return;
+
+    // Single file: use existing flow
+    if (imageFiles.length === 1) {
+      handleFile(imageFiles[0]);
+      return;
+    }
+
+    // Multiple files: add to queue
+    for (const file of imageFiles) {
+      let imageInfo: { width: number; height: number } | null = null;
+      try {
+        const info = await readImageDimensions(file);
+        imageInfo = { width: info.width, height: info.height };
+      } catch {
+        // imageInfo stays null
+      }
+      await addToQueue(file, imageInfo);
+    }
+  }, [handleFile, addToQueue]);
+
   const onDrop = useCallback(
     (e: React.DragEvent) => {
       e.preventDefault();
       dispatch({ type: "DRAG_END" });
-      const file = e.dataTransfer.files[0];
-      if (file) handleFile(file);
+      if (e.dataTransfer.files.length > 0) {
+        handleFiles(e.dataTransfer.files);
+      }
     },
-    [handleFile],
+    [handleFiles],
   );
 
   // Derived values (not stored in state)
@@ -243,6 +269,16 @@ export default function Home() {
       : "tiles.pmtiles";
     a.click();
   }, [pmtilesUrl, form.fileName]);
+
+  const onProcessQueue = useCallback(() => {
+    processQueue({
+      tileSize: form.tileSize,
+      minZoom: form.minZoom,
+      maxZoom: form.maxZoom,
+      projection: form.projection,
+      token: session?.accessToken,
+    });
+  }, [processQueue, form.tileSize, form.minZoom, form.maxZoom, form.projection, session?.accessToken]);
 
   const onReset = useCallback(() => {
     fileRef.current = null;
@@ -295,7 +331,8 @@ export default function Home() {
 
       {/* Main tool card */}
       <ScrollReveal className="overflow-visible">
-      <main className="mx-auto mt-10 max-w-2xl px-6">
+      <main className="mx-auto mt-10 max-w-2xl px-6 space-y-4">
+        <RateLimitBanner />
         {form.mode === "local" && (status === "idle" || status === "loading") && (
           <DropAreaSkeleton />
         )}
@@ -353,22 +390,24 @@ export default function Home() {
                   ) : (
                     <div>
                       <p className="text-muted-foreground">
-                        Drop an image here or{" "}
+                        Drop images here or{" "}
                         <label className="text-primary cursor-pointer underline underline-offset-4">
                           browse
                           <input
                             type="file"
                             accept="image/*"
+                            multiple
                             onChange={(e) => {
-                              const file = e.target.files?.[0];
-                              if (file) handleFile(file);
+                              if (e.target.files && e.target.files.length > 0) {
+                                handleFiles(e.target.files);
+                              }
                             }}
                             className="hidden"
                           />
                         </label>
                       </p>
                       <p className="text-muted-foreground/60 mt-1 text-sm">
-                        PNG, JPEG, WebP supported
+                        PNG, JPEG, WebP supported — select multiple for batch processing
                       </p>
                     </div>
                   )}
@@ -603,12 +642,20 @@ export default function Home() {
                 </div>
               )}
 
+              {/* Batch Queue */}
+              {queue.length > 0 && (
+                <BatchQueue
+                  onProcessAll={onProcessQueue}
+                  disabled={form.mode === "local" || !session?.user}
+                />
+              )}
+
               {/* Actions */}
               <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-3">
                 <Button
                   size="lg"
                   onClick={onProcess}
-                  disabled={!canProcess}
+                  disabled={!canProcess || isProcessingQueue}
                   className="w-full sm:w-auto"
                 >
                   Process

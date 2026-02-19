@@ -354,6 +354,14 @@ struct RateLimitBody {
     retry_after: u64,
 }
 
+/// Rate limit info returned on successful check
+#[derive(Clone, Copy)]
+struct RateLimitInfo {
+    limit: u64,
+    remaining: u64,
+    reset: u64,
+}
+
 fn extract_client_ip<B>(req: &Request<B>, peer: Option<SocketAddr>) -> String {
     // Prefer CF-Connecting-IP (Cloudflare), then X-Forwarded-For (leftmost), then peer
     if let Some(cf_ip) = req.headers().get("cf-connecting-ip") {
@@ -372,23 +380,39 @@ fn extract_client_ip<B>(req: &Request<B>, peer: Option<SocketAddr>) -> String {
 }
 
 impl RateLimit {
-    /// Check rate limit. Returns Ok(()) if allowed, or an error response if exceeded.
-    async fn check(&self, ip: &str, endpoint: &str, max_requests: u64, window_secs: u64) -> Result<(), Response> {
-        let mut conn = match self.redis {
-            Some(ref c) => c.clone(),
-            None => return Ok(()), // No Redis = no rate limiting
-        };
-
+    /// Check rate limit. Returns Ok(RateLimitInfo) if allowed, or an error response if exceeded.
+    async fn check(&self, ip: &str, endpoint: &str, max_requests: u64, window_secs: u64) -> Result<RateLimitInfo, Response> {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
         let window = now / window_secs;
+        let reset = (window + 1) * window_secs;
+
+        let mut conn = match self.redis {
+            Some(ref c) => c.clone(),
+            None => {
+                // No Redis = no rate limiting, return unlimited
+                return Ok(RateLimitInfo {
+                    limit: max_requests,
+                    remaining: max_requests,
+                    reset,
+                });
+            }
+        };
+
         let key = format!("ratelimit:{ip}:{endpoint}:{window}");
 
         let count: u64 = match conn.incr(&key, 1u64).await {
             Ok(c) => c,
-            Err(_) => return Ok(()), // Redis error = fail open
+            Err(_) => {
+                // Redis error = fail open
+                return Ok(RateLimitInfo {
+                    limit: max_requests,
+                    remaining: max_requests,
+                    reset,
+                });
+            }
         };
 
         // Set expiry on first increment
@@ -404,14 +428,38 @@ impl RateLimit {
             };
             return Err((
                 StatusCode::TOO_MANY_REQUESTS,
-                [(header::RETRY_AFTER, retry_after.to_string().parse::<HeaderValue>().unwrap())],
+                [
+                    (header::RETRY_AFTER, retry_after.to_string().parse::<HeaderValue>().unwrap()),
+                    ("X-RateLimit-Limit".parse().unwrap(), max_requests.to_string().parse().unwrap()),
+                    ("X-RateLimit-Remaining".parse().unwrap(), "0".parse().unwrap()),
+                    ("X-RateLimit-Reset".parse().unwrap(), reset.to_string().parse().unwrap()),
+                ],
                 Json(body),
             )
                 .into_response());
         }
 
-        Ok(())
+        Ok(RateLimitInfo {
+            limit: max_requests,
+            remaining: max_requests.saturating_sub(count),
+            reset,
+        })
     }
+}
+
+/// Helper to inject rate limit headers into a response
+fn inject_rate_limit_headers(mut response: Response, info: RateLimitInfo) -> Response {
+    let headers = response.headers_mut();
+    if let Ok(v) = info.limit.to_string().parse() {
+        headers.insert("X-RateLimit-Limit", v);
+    }
+    if let Ok(v) = info.remaining.to_string().parse() {
+        headers.insert("X-RateLimit-Remaining", v);
+    }
+    if let Ok(v) = info.reset.to_string().parse() {
+        headers.insert("X-RateLimit-Reset", v);
+    }
+    response
 }
 
 async fn rate_limit_tiles(
@@ -421,10 +469,11 @@ async fn rate_limit_tiles(
     next: Next,
 ) -> Response {
     let ip = extract_client_ip(&req, Some(addr));
-    if let Err(resp) = rl.check(&ip, "post_tiles", 10, 60).await {
-        return resp;
-    }
-    next.run(req).await
+    let info = match rl.check(&ip, "post_tiles", 10, 60).await {
+        Ok(info) => info,
+        Err(resp) => return resp,
+    };
+    inject_rate_limit_headers(next.run(req).await, info)
 }
 
 async fn rate_limit_progress(
@@ -434,10 +483,11 @@ async fn rate_limit_progress(
     next: Next,
 ) -> Response {
     let ip = extract_client_ip(&req, Some(addr));
-    if let Err(resp) = rl.check(&ip, "progress", 60, 60).await {
-        return resp;
-    }
-    next.run(req).await
+    let info = match rl.check(&ip, "progress", 60, 60).await {
+        Ok(info) => info,
+        Err(resp) => return resp,
+    };
+    inject_rate_limit_headers(next.run(req).await, info)
 }
 
 async fn rate_limit_download(
@@ -447,10 +497,11 @@ async fn rate_limit_download(
     next: Next,
 ) -> Response {
     let ip = extract_client_ip(&req, Some(addr));
-    if let Err(resp) = rl.check(&ip, "download", 30, 60).await {
-        return resp;
-    }
-    next.run(req).await
+    let info = match rl.check(&ip, "download", 30, 60).await {
+        Ok(info) => info,
+        Err(resp) => return resp,
+    };
+    inject_rate_limit_headers(next.run(req).await, info)
 }
 
 async fn rate_limit_mutations(
@@ -460,10 +511,11 @@ async fn rate_limit_mutations(
     next: Next,
 ) -> Response {
     let ip = extract_client_ip(&req, Some(addr));
-    if let Err(resp) = rl.check(&ip, "mutations", 30, 60).await {
-        return resp;
-    }
-    next.run(req).await
+    let info = match rl.check(&ip, "mutations", 30, 60).await {
+        Ok(info) => info,
+        Err(resp) => return resp,
+    };
+    inject_rate_limit_headers(next.run(req).await, info)
 }
 
 // ---------------------------------------------------------------------------
