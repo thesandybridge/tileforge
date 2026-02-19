@@ -9,6 +9,7 @@ import {
   listTileSets,
   updateTileSet,
   deleteTileSet,
+  getPmtilesUrl,
   type TileSet,
   type UpdateTileSetInput,
 } from "@/lib/api";
@@ -95,5 +96,12 @@ export function useTilesetPreview(slug: string) {
       if (!res.ok) throw new Error("Download failed");
       return res.blob();
     },
+  });
+}
+
+export function usePmtilesUrl(slug: string) {
+  const { data: session } = useSession();
+  return useMutation({
+    mutationFn: () => getPmtilesUrl(slug, session?.accessToken),
   });
 }

@@ -39,10 +39,16 @@ There's also a native CLI for batch processing and scripting.
   | **Strip extraction** | Large JPEG/WebP | Full decode, but no per-zoom resized copies |
 - **Flat and Mercator projections** — flat/equirectangular for fictional maps and artwork; Web Mercator (EPSG:3857) for real-world geographic maps from equirectangular sources.
 - **ZIP and PMTiles output** — download tiles as ZIP or as a single [PMTiles](https://protomaps.com/docs/pmtiles) archive for efficient web serving.
+- **Single-pass processing** — TeeWriter generates ZIP + PMTiles simultaneously in one pass over the tiles.
+- **PMTiles preview** — tileset detail page streams only visible tiles via HTTP range requests instead of downloading the full archive.
 - **Thumbnail generation** — worker auto-generates a 480px JPEG thumbnail for each tileset.
-- **Interactive tile preview** — rendered with Leaflet directly from the in-memory ZIP, no file I/O. Available on both the home page (after processing) and tileset detail pages.
+- **Interactive tile preview** — rendered with Leaflet directly from in-memory tiles. Available on both the home page (after processing) and tileset detail pages.
 - **Tileset gallery** — browse public tilesets with thumbnail previews. Manage your own tilesets with rename, visibility toggle, and delete.
 - **GitHub OAuth** — sign in with GitHub. JWT-based auth shared between Next.js and the Rust API.
+- **API keys** — Pro users can generate `tf_...` bearer tokens for programmatic access to their tilesets.
+- **Notifications** — in-app notification system with DB-backed storage for Pro users.
+- **Rate limiting** — per-IP rate limits on all API endpoints via Redis.
+- **Account management** — deactivation with 30-day grace period and admin purge.
 - **Configurable** — tile size (128/256/512), min/max zoom, projection type.
 - **Pyramid builder** — lower zoom levels are built by merging 4 tiles into 1, cascading from max zoom down to zoom 0.
 - **CLI tool** — native binary for scripting and batch jobs.
@@ -54,42 +60,55 @@ There's also a native CLI for batch processing and scripting.
 
 ```
 tileforge/
-├── Cargo.toml                   # Workspace root
+├── Cargo.toml                       # Workspace root
 ├── crates/
-│   ├── core/src/                # Tiling engine (Tiler, ZipTileWriter, PmTilesTileWriter)
-│   ├── api/src/main.rs          # HTTP API (axum) — tile processing, downloads, tileset CRUD
-│   ├── worker/src/main.rs       # Background worker — async jobs, thumbnail generation
-│   └── wasm/src/lib.rs          # WASM bindings for crates/core
-├── cli/src/main.rs              # Native CLI binary
-└── web/                         # Next.js 16 + Tailwind v4 + shadcn/ui
+│   ├── core/src/                    # Tiling engine (Tiler, ZipTileWriter, PmTilesTileWriter, TeeTileWriter)
+│   ├── api/src/main.rs              # HTTP API (axum) — tiles, downloads, CRUD, auth, notifications, API keys
+│   ├── worker/src/main.rs           # Background worker — async jobs, thumbnail generation
+│   └── wasm/src/lib.rs              # WASM bindings for crates/core
+├── cli/src/main.rs                  # Native CLI binary
+└── web/                             # Next.js 16 + Tailwind v4 + shadcn/ui
     ├── app/
-    │   ├── layout.tsx           # Root layout, navbar, SEO metadata
-    │   ├── page.tsx             # Main UI: drop zone, config, progress, download
-    │   ├── gallery/page.tsx     # Public tileset gallery with thumbnails
-    │   ├── my-tilesets/page.tsx # Authenticated user's tilesets
-    │   └── tilesets/[slug]/     # Tileset detail: metadata, Leaflet preview, code snippets
+    │   ├── layout.tsx               # Root layout, navbar, SEO metadata
+    │   ├── page.tsx                 # Main UI: drop zone, config, progress, download
+    │   ├── gallery/page.tsx         # Public tileset gallery with thumbnails
+    │   ├── my-tilesets/page.tsx     # Authenticated user's tilesets
+    │   ├── tilesets/[slug]/         # Tileset detail: metadata, PMTiles preview, code snippets
+    │   ├── settings/page.tsx        # User settings: API keys, notifications, account
+    │   └── billing/page.tsx         # Stripe billing portal
     ├── components/
-    │   ├── tile-preview.tsx     # Leaflet-based in-memory tile viewer
-    │   ├── navbar.tsx           # Site navigation with auth
-    │   └── user-menu.tsx        # GitHub OAuth sign in/out
+    │   ├── tile-preview.tsx         # Leaflet-based in-memory tile viewer (ZIP)
+    │   ├── pmtiles-preview.tsx      # Leaflet tile layer backed by PMTiles range requests
+    │   ├── api-key-card.tsx         # API key generation and display
+    │   ├── notification-panel.tsx   # Notification dropdown panel
+    │   ├── notification-context.tsx # Notification state provider
+    │   ├── upgrade-banner.tsx       # Pro upgrade prompt
+    │   ├── navbar.tsx               # Site navigation with auth
+    │   └── user-menu.tsx            # GitHub OAuth sign in/out
+    ├── hooks/
+    │   ├── use-tilesets.ts          # Tileset CRUD + PMTiles preview hooks
+    │   ├── use-api-key.ts           # API key management hook
+    │   ├── use-user.ts              # Current user hook
+    │   └── use-deactivate.ts        # Account deactivation hook
     ├── lib/
-    │   ├── api.ts               # Tileset CRUD API client
-    │   └── use-tileforge.ts     # React hook: worker lifecycle, progress, state machine
+    │   ├── api.ts                   # API client (tilesets, keys, notifications, user)
+    │   ├── notifications.ts         # Notification types and helpers
+    │   └── plans.ts                 # Plan definitions and limits
     └── public/
-        ├── tileforge.worker.js  # Standalone Web Worker (importScripts, no bundler)
-        └── wasm/                # wasm-pack output (--target no-modules)
+        ├── tileforge.worker.js      # Standalone Web Worker (importScripts, no bundler)
+        └── wasm/                    # wasm-pack output (--target no-modules)
 ```
 
 ### Services
 
-| Service  | Purpose                                          |
-|----------|--------------------------------------------------|
-| **web**  | Next.js 16 — UI, auth (Auth.js v5), SSR          |
-| **api**  | Rust (axum) — tile processing, downloads, CRUD    |
-| **worker** | Rust — async job consumer, thumbnail generation |
-| Redis    | Job queue (`tileforge:jobs`) + progress cache     |
-| Postgres | Users, tile sets                                  |
-| S3       | Tile storage (ZIP, PMTiles, thumbnails, uploads)  |
+| Service    | Purpose                                                       |
+|------------|---------------------------------------------------------------|
+| **web**    | Next.js 16 — UI, auth (Auth.js v5), SSR                      |
+| **api**    | Rust (axum) — tile processing, downloads, CRUD, auth, rate limiting |
+| **worker** | Rust — async job consumer, thumbnail generation               |
+| Redis      | Job queue (`tileforge:jobs`) + progress cache + rate limiting  |
+| Postgres   | Users, tile sets, notifications, API keys                     |
+| S3         | Tile storage (ZIP, PMTiles, thumbnails, uploads)              |
 
 ### S3 Key Layout
 
@@ -208,6 +227,7 @@ Requires Redis and S3 to be configured. See environment variables below.
 | `S3_ACCESS_KEY`   | No       | —                      | S3 access key                     |
 | `S3_SECRET_KEY`   | No       | —                      | S3 secret key                     |
 | `S3_REGION`       | No       | `us-east-1`            | S3 region                         |
+| `ADMIN_SECRET`    | No       | —                      | Secret for admin-only endpoints (purge) |
 
 #### Worker (`crates/worker`)
 
@@ -234,20 +254,31 @@ Requires Redis and S3 to be configured. See environment variables below.
 
 ### API Endpoints
 
-| Method | Path                                | Auth     | Description                      |
-|--------|-------------------------------------|----------|----------------------------------|
-| GET    | `/health`                           | No       | Health check                     |
-| POST   | `/api/tiles`                        | Optional | Process image into tiles         |
-| GET    | `/api/tiles/{id}/progress`          | No       | SSE progress stream              |
-| GET    | `/api/tiles/{id}/download`          | No       | Download tiles as ZIP            |
-| GET    | `/api/tiles/{id}/download/pmtiles`  | No       | Download tiles as PMTiles        |
-| GET    | `/api/tiles/{id}/thumbnail`         | No       | Tileset thumbnail (JPEG)         |
-| GET    | `/api/tilesets`                     | Optional | List tilesets                    |
-| POST   | `/api/tilesets`                     | Required | Create tileset                   |
-| GET    | `/api/tilesets/{slug}`              | Optional | Get tileset details              |
-| PATCH  | `/api/tilesets/{slug}`              | Required | Update tileset                   |
-| DELETE | `/api/tilesets/{slug}`              | Required | Delete tileset + S3 cleanup      |
-| GET    | `/api/user`                         | Required | Current user info                |
+| Method | Path                                | Auth     | Description                                 |
+|--------|-------------------------------------|----------|---------------------------------------------|
+| GET    | `/health`                           | No       | Health check                                |
+| POST   | `/api/tiles`                        | Optional | Process image into tiles                    |
+| GET    | `/api/tiles/{id}/progress`          | No       | SSE progress stream                         |
+| GET    | `/api/tiles/{id}/download`          | Required | Download tiles as ZIP (presigned redirect)  |
+| GET    | `/api/tiles/{id}/download/pmtiles`  | Required | Download tiles as PMTiles (presigned redirect) |
+| GET    | `/api/tiles/{id}/thumbnail`         | No       | Tileset thumbnail (JPEG)                    |
+| GET    | `/api/tilesets`                     | Optional | List tilesets (paginated)                   |
+| POST   | `/api/tilesets`                     | Required | Create tileset                              |
+| GET    | `/api/tilesets/{slug}`              | Optional | Get tileset details                         |
+| PATCH  | `/api/tilesets/{slug}`              | Required | Update tileset                              |
+| DELETE | `/api/tilesets/{slug}`              | Required | Delete tileset + S3 cleanup                 |
+| GET    | `/api/tilesets/{slug}/pmtiles-url`  | Optional | Presigned PMTiles URL for range requests    |
+| GET    | `/api/user`                         | Required | Current user info + storage usage           |
+| POST   | `/api/user/deactivate`              | Required | Deactivate account                          |
+| POST   | `/api/user/reactivate`              | Required | Reactivate within 30-day grace period       |
+| POST   | `/api/admin/purge-deactivated`      | Admin    | Purge accounts deactivated > 30 days        |
+| GET    | `/api/notifications`                | Required | List notifications                          |
+| POST   | `/api/notifications`                | Required | Create notification                         |
+| POST   | `/api/notifications/read`           | Required | Mark all notifications as read              |
+| DELETE | `/api/notifications`                | Required | Clear all notifications                     |
+| POST   | `/api/keys`                         | Required | Create API key (Pro only)                   |
+| GET    | `/api/keys`                         | Required | Get current API key                         |
+| DELETE | `/api/keys`                         | Required | Revoke API key                              |
 
 ---
 
@@ -374,7 +405,7 @@ A GitHub Actions workflow (`.github/workflows/wasm-build.yml`) automatically reb
 | Web framework | Next.js 16 (App Router, Turbopack) |
 | Auth | Auth.js v5 (GitHub OAuth), HS256 JWT |
 | Styling | Tailwind CSS v4 + shadcn/ui |
-| Map preview | Leaflet + react-leaflet |
+| Map preview | Leaflet + react-leaflet + pmtiles |
 | ZIP (browser) | fflate |
 | Database | PostgreSQL + sqlx migrations |
 | Queue | Redis (BRPOP job queue) |
