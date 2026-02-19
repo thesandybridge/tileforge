@@ -11,7 +11,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { UpgradeInlineBanner } from "@/components/upgrade-banner";
 import { ScrollReveal } from "@/components/scroll-reveal";
-import { Footer } from "@/components/footer";
 
 export default function GalleryPage() {
   const { data: session } = useSession();
@@ -129,8 +128,6 @@ export default function GalleryPage() {
           </ScrollReveal>
         )}
       </main>
-
-      <Footer />
     </div>
   );
 }

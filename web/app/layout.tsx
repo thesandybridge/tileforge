@@ -8,6 +8,7 @@ import { CursorGlow } from "@/components/cursor-glow";
 import { NotificationProvider } from "@/components/notification-context";
 import { TileforgeProvider } from "@/components/tileforge-context";
 import { Toaster } from "@/components/toaster";
+import { Footer } from "@/components/footer";
 import "./globals.css";
 
 const inter = Inter({ subsets: ["latin"] });
@@ -121,9 +122,10 @@ export default function RootLayout({
                   <CursorGlow />
                   <Navbar />
                   <Toaster />
-                  <div className="flex flex-1 flex-col pb-16 sm:pb-24">
+                  <main className="flex flex-1 flex-col">
                     {children}
-                  </div>
+                  </main>
+                  <Footer />
                 </TileforgeProvider>
               </NotificationProvider>
             </ThemeProvider>

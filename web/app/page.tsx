@@ -7,7 +7,6 @@ import dynamic from "next/dynamic";
 import { Info, LoaderCircle, Upload } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { ScrollReveal } from "@/components/scroll-reveal";
-import { Footer } from "@/components/footer";
 import { TileParticles } from "@/components/tile-particles";
 import { UpgradeBanner } from "@/components/upgrade-banner";
 import { useTileforge } from "@/components/tileforge-context";
@@ -580,7 +579,6 @@ export default function Home() {
           />
         </div>
       )}
-      <Footer />
     </div>
   );
 }

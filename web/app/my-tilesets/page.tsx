@@ -24,7 +24,6 @@ import {
 } from "@/components/ui/alert-dialog";
 import { UpgradeInlineBanner } from "@/components/upgrade-banner";
 import { ScrollReveal } from "@/components/scroll-reveal";
-import { Footer } from "@/components/footer";
 
 export default function MyTilesetsPage() {
   const { data: session } = useSession();
@@ -199,8 +198,6 @@ export default function MyTilesetsPage() {
           </ScrollReveal>
         )}
       </main>
-
-      <Footer />
     </div>
   );
 }
