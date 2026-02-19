@@ -122,14 +122,17 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
         pmtilesUrl: n.pmtilesUrl,
         fileName: n.fileName,
       };
-      setLocalNotifications((prev) => [notification, ...prev]);
 
+      // For Pro users, only sync to server (avoid duplicate in local + server)
+      // For free users, store locally
       if (isPro) {
         createMutation.mutate({
           type: n.type,
           title: n.title,
           message: n.message,
         });
+      } else {
+        setLocalNotifications((prev) => [notification, ...prev]);
       }
 
       toastForType(n.type, n.title);

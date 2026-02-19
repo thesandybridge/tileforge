@@ -77,7 +77,7 @@ interface BatchQueueProps {
 }
 
 export function BatchQueue({ onProcessAll, disabled }: BatchQueueProps) {
-  const { queue, removeFromQueue, clearQueue, isProcessingQueue } = useTileforge();
+  const { queue, removeFromQueue, clearQueue, cancelQueue, isProcessingQueue } = useTileforge();
 
   if (queue.length === 0) return null;
 
@@ -97,21 +97,24 @@ export function BatchQueue({ onProcessAll, disabled }: BatchQueueProps) {
           </span>
         </h3>
         <div className="flex items-center gap-2">
-          {pendingCount > 0 && (
+          {isProcessingQueue ? (
             <Button
               size="sm"
-              onClick={onProcessAll}
-              disabled={disabled || isProcessingQueue}
+              variant="destructive"
+              onClick={cancelQueue}
             >
-              {isProcessingQueue ? (
-                <>
-                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                  Processing...
-                </>
-              ) : (
-                `Process All (${pendingCount})`
-              )}
+              Cancel
             </Button>
+          ) : (
+            pendingCount > 0 && (
+              <Button
+                size="sm"
+                onClick={onProcessAll}
+                disabled={disabled}
+              >
+                Process All ({pendingCount})
+              </Button>
+            )
           )}
           <Button
             size="sm"

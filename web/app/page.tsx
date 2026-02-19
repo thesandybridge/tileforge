@@ -150,7 +150,7 @@ function formReducer(state: FormState, action: FormAction): FormState {
 }
 
 export default function Home() {
-  const { status, progress, zipBlob, pmtilesUrl, error, durationMs, process, processServer, reset, queue, addToQueue, processQueue, isProcessingQueue } = useTileforge();
+  const { status, progress, zipBlob, pmtilesUrl, error, durationMs, process, processServer, reset, cancel, queue, addToQueue, processQueue, cancelQueue, isProcessingQueue } = useTileforge();
   const { data: session } = useSession();
   const { defaults } = useTileDefaults();
   const [form, dispatch] = useReducer(formReducer, defaults, (d) => ({
@@ -655,14 +655,25 @@ export default function Home() {
 
               {/* Actions */}
               <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-3">
-                <Button
-                  size="lg"
-                  onClick={onProcess}
-                  disabled={!canProcess || isProcessingQueue}
-                  className="w-full sm:w-auto"
-                >
-                  Process
-                </Button>
+                {(status === "processing" || status === "waking") && !isProcessingQueue ? (
+                  <Button
+                    size="lg"
+                    variant="destructive"
+                    onClick={cancel}
+                    className="w-full sm:w-auto"
+                  >
+                    Cancel
+                  </Button>
+                ) : (
+                  <Button
+                    size="lg"
+                    onClick={onProcess}
+                    disabled={!canProcess || isProcessingQueue}
+                    className="w-full sm:w-auto"
+                  >
+                    Process
+                  </Button>
+                )}
                 {status === "done" && zipBlob && (
                   <Button size="lg" variant="secondary" onClick={onDownload} className="flex-1 sm:flex-none">
                     Download ZIP ({(zipBlob.size / (1024 * 1024)).toFixed(1)} MB)

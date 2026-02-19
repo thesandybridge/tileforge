@@ -159,12 +159,14 @@ interface TileforgeContextValue {
   process: (imageBytes: ArrayBuffer, opts?: ProcessOpts) => void;
   processServer: (imageBytes: ArrayBuffer, opts?: ServerProcessOpts) => void;
   reset: () => void;
+  cancel: () => void;
   // Batch queue
   queue: QueuedFile[];
   addToQueue: (file: File, imageInfo?: { width: number; height: number } | null) => Promise<string>;
   removeFromQueue: (id: string) => void;
   clearQueue: () => void;
   processQueue: (opts: ServerProcessOpts & { concurrency?: number }) => void;
+  cancelQueue: () => void;
   isProcessingQueue: boolean;
 }
 
@@ -179,11 +181,13 @@ const TileforgeContext = createContext<TileforgeContextValue>({
   process: () => {},
   processServer: () => {},
   reset: () => {},
+  cancel: () => {},
   queue: [],
   addToQueue: async () => "",
   removeFromQueue: () => {},
   clearQueue: () => {},
   processQueue: () => {},
+  cancelQueue: () => {},
   isProcessingQueue: false,
 });
 
@@ -198,13 +202,20 @@ export function TileforgeProvider({ children }: { children: ReactNode }) {
   const workerRef = useRef<Worker | null>(null);
   const startTimeRef = useRef<number>(0);
   const sseRef = useRef<EventSource | null>(null);
+  const serverAbortRef = useRef<AbortController | null>(null);
   const fileNameRef = useRef<string | null>(null);
   const [state, dispatch] = useReducer(reducer, initialState);
 
   // Batch queue state
   const [queue, setQueue] = useState<QueuedFile[]>([]);
+  const queueRef = useRef<QueuedFile[]>([]);
   const [isProcessingQueue, setIsProcessingQueue] = useState(false);
   const queueAbortRef = useRef<AbortController | null>(null);
+
+  // Keep ref in sync with state
+  useEffect(() => {
+    queueRef.current = queue;
+  }, [queue]);
 
   // Track previous status for notifications
   const prevStatusRef = useRef(state.status);
@@ -311,13 +322,21 @@ export function TileforgeProvider({ children }: { children: ReactNode }) {
       fileNameRef.current = opts.fileName ?? null;
       startTimeRef.current = performance.now();
 
+      // Create abort controller for this request
+      serverAbortRef.current?.abort();
+      serverAbortRef.current = new AbortController();
+      const signal = serverAbortRef.current.signal;
+
       dispatch({ type: "waking" });
-      const healthy = await waitForHealth();
+      const healthy = await waitForHealth(signal);
       if (!healthy) {
-        dispatch({ type: "error", message: "Server is unavailable. Try local WASM processing instead." });
+        if (!signal.aborted) {
+          dispatch({ type: "error", message: "Server is unavailable. Try local WASM processing instead." });
+        }
         return;
       }
 
+      if (signal.aborted) return;
       dispatch({ type: "processing" });
 
       const params = new URLSearchParams();
@@ -334,6 +353,7 @@ export function TileforgeProvider({ children }: { children: ReactNode }) {
           method: "POST",
           headers,
           body: imageBytes,
+          signal,
         });
 
         // Track rate limit headers
@@ -434,6 +454,17 @@ export function TileforgeProvider({ children }: { children: ReactNode }) {
   );
 
   const reset = useCallback(() => {
+    dispatch({ type: "reset", workerReady: !!workerRef.current });
+  }, []);
+
+  const cancel = useCallback(() => {
+    // Abort any in-flight server request
+    serverAbortRef.current?.abort();
+    serverAbortRef.current = null;
+    // Close SSE connection
+    sseRef.current?.close();
+    sseRef.current = null;
+    // Reset state
     dispatch({ type: "reset", workerReady: !!workerRef.current });
   }, []);
 
@@ -647,20 +678,28 @@ export function TileforgeProvider({ children }: { children: ReactNode }) {
     queryClient.invalidateQueries({ queryKey: ["user"] });
     queryClient.invalidateQueries({ queryKey: ["tilesets"] });
 
-    // Notify completion - use functional update to get latest queue state
-    setQueue((currentQueue) => {
-      const completed = currentQueue.filter((f) => f.status === "done").length;
-      const failed = currentQueue.filter((f) => f.status === "error").length;
-      if (completed > 0 || failed > 0) {
-        add({
-          type: completed > 0 ? "processing_complete" : "processing_failed",
-          title: "Batch processing complete",
-          message: `${completed} succeeded, ${failed} failed`,
-        });
-      }
-      return currentQueue; // Return unchanged
-    });
+    // Notify completion - read from ref to get latest queue state
+    const currentQueue = queueRef.current;
+    const completed = currentQueue.filter((f) => f.status === "done").length;
+    const failed = currentQueue.filter((f) => f.status === "error").length;
+    if (completed > 0 || failed > 0) {
+      add({
+        type: completed > 0 ? "processing_complete" : "processing_failed",
+        title: "Batch processing complete",
+        message: `${completed} succeeded, ${failed} failed`,
+      });
+    }
   }, [queue, isProcessingQueue, queryClient, add, processSingleFile]);
+
+  const cancelQueue = useCallback(() => {
+    queueAbortRef.current?.abort();
+    queueAbortRef.current = null;
+    setIsProcessingQueue(false);
+    // Mark any processing items as queued so they can be retried
+    setQueue((prev) =>
+      prev.map((f) => (f.status === "processing" ? { ...f, status: "queued" as const, progress: null } : f))
+    );
+  }, []);
 
   const processing = state.status === "processing" || state.status === "waking";
 
@@ -671,14 +710,16 @@ export function TileforgeProvider({ children }: { children: ReactNode }) {
       process,
       processServer,
       reset,
+      cancel,
       queue,
       addToQueue,
       removeFromQueue,
       clearQueue,
       processQueue,
+      cancelQueue,
       isProcessingQueue,
     }),
-    [state, processing, process, processServer, reset, queue, addToQueue, removeFromQueue, clearQueue, processQueue, isProcessingQueue],
+    [state, processing, process, processServer, reset, cancel, queue, addToQueue, removeFromQueue, clearQueue, processQueue, cancelQueue, isProcessingQueue],
   );
 
   return (
