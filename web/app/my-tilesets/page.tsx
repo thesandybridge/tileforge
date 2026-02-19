@@ -21,7 +21,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { UpgradeBanner } from "@/components/upgrade-banner";
+import { UpgradeInlineBanner } from "@/components/upgrade-banner";
 import { ScrollReveal } from "@/components/scroll-reveal";
 
 function formatBytes(bytes: number): string {
@@ -109,7 +109,7 @@ export default function MyTilesetsPage() {
           <ScrollReveal>
           <div className="space-y-6">
             {isFree && (
-              <UpgradeBanner message="Upgrade to Pro for server-side processing and persistent storage." />
+              <UpgradeInlineBanner message="Upgrade to Pro for server-side processing and persistent storage." />
             )}
           <div className="grid gap-4 sm:grid-cols-2">
             {tilesets.map((ts) => (

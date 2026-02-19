@@ -45,7 +45,7 @@ export function ProcessingRing() {
       className={`absolute inset-[-3px] rounded-full border-2 border-transparent ${
         isError
           ? "border-destructive"
-          : "animate-spin border-t-primary"
+          : "motion-safe:animate-spin border-t-primary motion-reduce:border-primary/40"
       }`}
     />
   );
@@ -96,8 +96,8 @@ export function StandaloneProcessingIndicator() {
           <div className="relative flex h-8 w-8 items-center justify-center">
             {isActive && (
               <>
-                <span className="absolute inset-0 animate-spin rounded-full border-2 border-transparent border-t-primary" />
-                <LoaderCircle className="text-primary h-4 w-4 animate-spin" />
+                <span className="absolute inset-0 motion-safe:animate-spin rounded-full border-2 border-transparent border-t-primary motion-reduce:border-primary/40" />
+                <LoaderCircle className="text-primary h-4 w-4 motion-safe:animate-spin" />
               </>
             )}
             {isError && (
