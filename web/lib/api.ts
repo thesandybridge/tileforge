@@ -63,16 +63,24 @@ async function handleResponse<T>(res: Response): Promise<T> {
 export async function listTileSets(
   userId?: string,
   token?: string,
-  opts?: { page?: number; perPage?: number },
+  opts?: { page?: number; perPage?: number; search?: string },
 ): Promise<TileSet[]> {
   const params = new URLSearchParams();
   if (userId) params.set("user_id", userId);
   if (opts?.page) params.set("page", String(opts.page));
   if (opts?.perPage) params.set("per_page", String(opts.perPage));
+  if (opts?.search) params.set("search", opts.search);
   const headers: Record<string, string> = {};
   if (token) headers["Authorization"] = `Bearer ${token}`;
   const res = await fetch(`${API_URL}/api/tilesets?${params}`, { headers });
   return handleResponse<TileSet[]>(res);
+}
+
+export async function searchTileSets(
+  query: string,
+  token?: string,
+): Promise<TileSet[]> {
+  return listTileSets(undefined, token, { search: query, perPage: 10 });
 }
 
 export async function getTileSet(slug: string, token?: string): Promise<TileSet> {

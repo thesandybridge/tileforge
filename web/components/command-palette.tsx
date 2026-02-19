@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
 import {
@@ -11,6 +11,7 @@ import {
   CommandItem,
   CommandList,
   CommandSeparator,
+  CommandLoading,
 } from "@/components/ui/command";
 import {
   Upload,
@@ -26,8 +27,11 @@ import {
   FileText,
   GitCompare,
   DollarSign,
+  Map,
+  Loader2,
 } from "lucide-react";
 import { signOut, useSession } from "next-auth/react";
+import { searchTileSets, type TileSet } from "@/lib/api";
 
 interface CommandPaletteContextValue {
   open: boolean;
@@ -43,11 +47,28 @@ export function useCommandPalette() {
   return useContext(CommandPaletteContext);
 }
 
+function useDebounce<T>(value: T, delay: number): T {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedValue(value), delay);
+    return () => clearTimeout(timer);
+  }, [value, delay]);
+
+  return debouncedValue;
+}
+
 export function CommandPaletteProvider({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const [searchResults, setSearchResults] = useState<TileSet[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
   const router = useRouter();
   const { setTheme } = useTheme();
   const { data: session } = useSession();
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  const debouncedSearch = useDebounce(search, 300);
 
   // Keyboard shortcut: Cmd+K or Ctrl+K
   useEffect(() => {
@@ -61,6 +82,43 @@ export function CommandPaletteProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
+  // Reset search when dialog closes
+  useEffect(() => {
+    if (!open) {
+      setSearch("");
+      setSearchResults([]);
+    }
+  }, [open]);
+
+  // Debounced search for tilesets
+  useEffect(() => {
+    if (debouncedSearch.length < 3) {
+      setSearchResults([]);
+      setIsSearching(false);
+      return;
+    }
+
+    // Abort previous request
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = new AbortController();
+
+    const doSearch = async () => {
+      setIsSearching(true);
+      try {
+        const results = await searchTileSets(debouncedSearch, session?.accessToken);
+        setSearchResults(results);
+      } catch (err) {
+        if ((err as Error).name !== "AbortError") {
+          console.error("Search failed:", err);
+        }
+      } finally {
+        setIsSearching(false);
+      }
+    };
+
+    doSearch();
+  }, [debouncedSearch, session?.accessToken]);
+
   const runCommand = useCallback((command: () => void) => {
     setOpen(false);
     command();
@@ -69,10 +127,50 @@ export function CommandPaletteProvider({ children }: { children: ReactNode }) {
   return (
     <CommandPaletteContext.Provider value={{ open, setOpen }}>
       {children}
-      <CommandDialog open={open} onOpenChange={setOpen}>
-        <CommandInput placeholder="Type a command or search..." />
+      <CommandDialog open={open} onOpenChange={setOpen} shouldFilter={debouncedSearch.length < 3}>
+        <CommandInput
+          placeholder="Type a command or search tilesets..."
+          value={search}
+          onValueChange={setSearch}
+        />
         <CommandList>
-          <CommandEmpty>No results found.</CommandEmpty>
+          <CommandEmpty>
+            {search.length > 0 && search.length < 3
+              ? "Type at least 3 characters to search tilesets..."
+              : "No results found."}
+          </CommandEmpty>
+
+          {isSearching && (
+            <CommandLoading>
+              <div className="flex items-center gap-2 px-4 py-3 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Searching tilesets...
+              </div>
+            </CommandLoading>
+          )}
+
+          {searchResults.length > 0 && (
+            <>
+              <CommandGroup heading="Tilesets">
+                {searchResults.map((tileset) => (
+                  <CommandItem
+                    key={tileset.id}
+                    value={`tileset-${tileset.slug}`}
+                    onSelect={() => runCommand(() => router.push(`/tilesets/${tileset.slug}`))}
+                  >
+                    <Map className="mr-2 h-4 w-4" />
+                    <div className="flex flex-col">
+                      <span>{tileset.name}</span>
+                      <span className="text-xs text-muted-foreground">
+                        {tileset.tile_count} tiles · z{tileset.min_zoom}-{tileset.max_zoom}
+                      </span>
+                    </div>
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+              <CommandSeparator />
+            </>
+          )}
 
           <CommandGroup heading="Navigation">
             <CommandItem onSelect={() => runCommand(() => router.push("/"))}>

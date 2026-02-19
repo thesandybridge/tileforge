@@ -995,6 +995,7 @@ struct ListTileSetsQuery {
     user_id: Option<Uuid>,
     page: Option<i64>,
     per_page: Option<i64>,
+    search: Option<String>,
 }
 
 fn pagination(page: Option<i64>, per_page: Option<i64>) -> (i64, i64) {
@@ -1066,42 +1067,84 @@ async fn list_tilesets(
     let target_user_id = params.user_id.or(caller_id);
 
     let (limit, offset) = pagination(params.page, params.per_page);
+    let search_pattern = params.search.as_ref().map(|s| format!("%{}%", s));
 
     let rows = if let Some(user_id) = target_user_id {
         let is_owner = caller_id.map(|c| c == user_id).unwrap_or(false);
         if is_owner {
+            if let Some(ref pattern) = search_pattern {
+                sqlx::query_as::<_, TileSetRow>(
+                    "SELECT id, user_id, name, slug, projection, tile_size, min_zoom, max_zoom, tile_count, size_bytes, storage_path, public, created_at, width, height
+                     FROM tile_sets WHERE user_id = $1 AND name ILIKE $4 ORDER BY created_at DESC LIMIT $2 OFFSET $3",
+                )
+                .bind(user_id)
+                .bind(limit)
+                .bind(offset)
+                .bind(pattern)
+                .fetch_all(&db)
+                .await
+                .map_err(|e| ApiError::Db(e.to_string()))?
+            } else {
+                sqlx::query_as::<_, TileSetRow>(
+                    "SELECT id, user_id, name, slug, projection, tile_size, min_zoom, max_zoom, tile_count, size_bytes, storage_path, public, created_at, width, height
+                     FROM tile_sets WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3",
+                )
+                .bind(user_id)
+                .bind(limit)
+                .bind(offset)
+                .fetch_all(&db)
+                .await
+                .map_err(|e| ApiError::Db(e.to_string()))?
+            }
+        } else {
+            if let Some(ref pattern) = search_pattern {
+                sqlx::query_as::<_, TileSetRow>(
+                    "SELECT id, user_id, name, slug, projection, tile_size, min_zoom, max_zoom, tile_count, size_bytes, storage_path, public, created_at, width, height
+                     FROM tile_sets WHERE user_id = $1 AND public = true AND name ILIKE $4 ORDER BY created_at DESC LIMIT $2 OFFSET $3",
+                )
+                .bind(user_id)
+                .bind(limit)
+                .bind(offset)
+                .bind(pattern)
+                .fetch_all(&db)
+                .await
+                .map_err(|e| ApiError::Db(e.to_string()))?
+            } else {
+                sqlx::query_as::<_, TileSetRow>(
+                    "SELECT id, user_id, name, slug, projection, tile_size, min_zoom, max_zoom, tile_count, size_bytes, storage_path, public, created_at, width, height
+                     FROM tile_sets WHERE user_id = $1 AND public = true ORDER BY created_at DESC LIMIT $2 OFFSET $3",
+                )
+                .bind(user_id)
+                .bind(limit)
+                .bind(offset)
+                .fetch_all(&db)
+                .await
+                .map_err(|e| ApiError::Db(e.to_string()))?
+            }
+        }
+    } else {
+        if let Some(ref pattern) = search_pattern {
             sqlx::query_as::<_, TileSetRow>(
                 "SELECT id, user_id, name, slug, projection, tile_size, min_zoom, max_zoom, tile_count, size_bytes, storage_path, public, created_at, width, height
-                 FROM tile_sets WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3",
+                 FROM tile_sets WHERE public = true AND name ILIKE $3 ORDER BY created_at DESC LIMIT $1 OFFSET $2",
             )
-            .bind(user_id)
             .bind(limit)
             .bind(offset)
+            .bind(pattern)
             .fetch_all(&db)
             .await
             .map_err(|e| ApiError::Db(e.to_string()))?
         } else {
             sqlx::query_as::<_, TileSetRow>(
                 "SELECT id, user_id, name, slug, projection, tile_size, min_zoom, max_zoom, tile_count, size_bytes, storage_path, public, created_at, width, height
-                 FROM tile_sets WHERE user_id = $1 AND public = true ORDER BY created_at DESC LIMIT $2 OFFSET $3",
+                 FROM tile_sets WHERE public = true ORDER BY created_at DESC LIMIT $1 OFFSET $2",
             )
-            .bind(user_id)
             .bind(limit)
             .bind(offset)
             .fetch_all(&db)
             .await
             .map_err(|e| ApiError::Db(e.to_string()))?
         }
-    } else {
-        sqlx::query_as::<_, TileSetRow>(
-            "SELECT id, user_id, name, slug, projection, tile_size, min_zoom, max_zoom, tile_count, size_bytes, storage_path, public, created_at, width, height
-             FROM tile_sets WHERE public = true ORDER BY created_at DESC LIMIT $1 OFFSET $2",
-        )
-        .bind(limit)
-        .bind(offset)
-        .fetch_all(&db)
-        .await
-        .map_err(|e| ApiError::Db(e.to_string()))?
     };
 
     Ok(Json(rows))
