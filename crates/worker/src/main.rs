@@ -6,6 +6,7 @@ use futures::StreamExt;
 use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
+use uuid::Uuid;
 use std::cell::Cell;
 use std::io::Cursor;
 use std::sync::{Arc, Mutex};
@@ -35,6 +36,7 @@ struct Job {
     projection: Option<String>,
     user_id: Option<String>,
     file_name: Option<String>,
+    reserved_bytes: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -247,6 +249,18 @@ async fn run_nats_loop(
                         .delete_object(&format!("uploads/{}.bin", job.job_id))
                         .await
                         .ok();
+                    // Release storage reservation on permanent failure
+                    if let (Some(pool), Some(uid), Some(reserved)) =
+                        (db, &job.user_id, job.reserved_bytes)
+                    {
+                        if let Ok(user_id) = Uuid::parse_str(uid) {
+                            let _ = sqlx::query("SELECT release_storage_reservation($1, $2)")
+                                .bind(user_id)
+                                .bind(reserved)
+                                .execute(pool)
+                                .await;
+                        }
+                    }
                 } else {
                     let delay = match delivery_count {
                         1 => Duration::from_secs(30),
@@ -328,6 +342,18 @@ async fn run_redis_loop(
                     3600,
                 )
                 .await;
+            // Release storage reservation on failure
+            if let (Some(pool), Some(uid), Some(reserved)) =
+                (db, &job.user_id, job.reserved_bytes)
+            {
+                if let Ok(user_id) = Uuid::parse_str(uid) {
+                    let _ = sqlx::query("SELECT release_storage_reservation($1, $2)")
+                        .bind(user_id)
+                        .bind(reserved)
+                        .execute(pool)
+                        .await;
+                }
+            }
         }
     }
 }
@@ -599,6 +625,15 @@ async fn process_job(
             match result {
                 Ok(_) => tracing::info!(job_id = %job.job_id, "tile_set row inserted"),
                 Err(e) => tracing::warn!(job_id = %job.job_id, "failed to insert tile_set row: {e}"),
+            }
+
+            // Release storage reservation (storage_used is updated via trigger on INSERT)
+            if let Some(reserved) = job.reserved_bytes {
+                let _ = sqlx::query("SELECT release_storage_reservation($1, $2)")
+                    .bind(user_id)
+                    .bind(reserved)
+                    .execute(pool)
+                    .await;
             }
         }
     }

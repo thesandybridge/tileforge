@@ -31,5 +31,5 @@ export const proxy = auth((req) => {
 });
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|icon.svg|wasm/|tileforge\\.worker\\.js).*)"],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|icon.svg|wasm/|.*\\.worker\\.js).*)"],
 };

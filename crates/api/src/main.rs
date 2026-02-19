@@ -334,6 +334,8 @@ struct JobPayload {
     user_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     file_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reserved_bytes: Option<i64>,
 }
 
 #[derive(Serialize)]
@@ -643,17 +645,33 @@ async fn process_tiles(
     let is_pro = claims.0.as_ref().is_some_and(|c| c.plan == Plan::Pro);
     let is_large = should_use_streaming(&body, STREAMING_THRESHOLD);
 
-    // Quota check for Pro users before enqueue
-    if is_pro {
+    // Atomic storage reservation for Pro users (prevents TOCTOU race)
+    // Estimate output size as 2x input size (conservative for tiles + PMTiles)
+    let reserved_bytes: Option<i64> = if is_pro {
         if let Some(ref db) = state.db {
             let user_id = Uuid::parse_str(&claims.0.as_ref().unwrap().sub)
                 .map_err(|_| ApiError::Unauthorized)?;
-            let used = get_storage_used(db, user_id).await?;
-            if used >= QUOTA_PRO_BYTES {
+            let estimate = (body.len() as i64) * 2;
+            let reserved: Option<(bool,)> = sqlx::query_as(
+                "SELECT reserve_storage($1, $2, $3)",
+            )
+            .bind(user_id)
+            .bind(estimate)
+            .bind(QUOTA_PRO_BYTES)
+            .fetch_optional(db)
+            .await
+            .map_err(|e| ApiError::Db(e.to_string()))?;
+            if reserved.map(|r| r.0).unwrap_or(false) {
+                Some(estimate)
+            } else {
                 return Err(ApiError::QuotaExceeded);
             }
+        } else {
+            None
         }
-    }
+    } else {
+        None
+    };
 
     if is_pro || is_large {
         // Async path: upload to S3, enqueue via NATS JetStream (or Redis fallback)
@@ -702,6 +720,7 @@ async fn process_tiles(
             projection: projection_str.to_string(),
             user_id: claims.0.as_ref().map(|c| c.sub.clone()),
             file_name: params.file_name.clone(),
+            reserved_bytes,
         };
         let job_json = serde_json::to_string(&job).unwrap();
 
@@ -881,14 +900,20 @@ async fn job_download(
         .ok_or_else(|| ApiError::ServiceUnavailable("S3 not configured".into()))?;
 
     let s3_key = format!("tiles/{job_id}/tiles.zip");
-    let url = bucket
-        .presign_get(&s3_key, 600, None)
+
+    // Proxy S3 response instead of redirecting (avoids leaking presigned URLs)
+    let response = bucket
+        .get_object(&s3_key)
         .await
         .map_err(|_| ApiError::NotFound)?;
 
     Ok((
-        StatusCode::TEMPORARY_REDIRECT,
-        [(header::LOCATION, url)],
+        StatusCode::OK,
+        [
+            (header::CONTENT_TYPE, "application/zip"),
+            (header::CONTENT_DISPOSITION, "attachment; filename=\"tiles.zip\""),
+        ],
+        response.to_vec(),
     )
         .into_response())
 }
@@ -936,14 +961,20 @@ async fn job_download_pmtiles(
         .ok_or_else(|| ApiError::ServiceUnavailable("S3 not configured".into()))?;
 
     let s3_key = format!("tiles/{job_id}/tiles.pmtiles");
-    let url = bucket
-        .presign_get(&s3_key, 600, None)
+
+    // Proxy S3 response instead of redirecting (avoids leaking presigned URLs)
+    let response = bucket
+        .get_object(&s3_key)
         .await
         .map_err(|_| ApiError::NotFound)?;
 
     Ok((
-        StatusCode::TEMPORARY_REDIRECT,
-        [(header::LOCATION, url)],
+        StatusCode::OK,
+        [
+            (header::CONTENT_TYPE, "application/octet-stream"),
+            (header::CONTENT_DISPOSITION, "attachment; filename=\"tiles.pmtiles\""),
+        ],
+        response.to_vec(),
     )
         .into_response())
 }
@@ -1092,83 +1123,29 @@ async fn list_tilesets(
         format!("%{}%", escaped)
     });
 
-    let rows = if let Some(user_id) = target_user_id {
-        let is_owner = caller_id.map(|c| c == user_id).unwrap_or(false);
-        if is_owner {
-            if let Some(ref pattern) = search_pattern {
-                sqlx::query_as::<_, TileSetRow>(
-                    "SELECT id, user_id, name, slug, projection, tile_size, min_zoom, max_zoom, tile_count, size_bytes, storage_path, public, created_at, width, height
-                     FROM tile_sets WHERE user_id = $1 AND name ILIKE $4 ORDER BY created_at DESC LIMIT $2 OFFSET $3",
-                )
-                .bind(user_id)
-                .bind(limit)
-                .bind(offset)
-                .bind(pattern)
-                .fetch_all(&db)
-                .await
-                .map_err(|e| ApiError::Db(e.to_string()))?
-            } else {
-                sqlx::query_as::<_, TileSetRow>(
-                    "SELECT id, user_id, name, slug, projection, tile_size, min_zoom, max_zoom, tile_count, size_bytes, storage_path, public, created_at, width, height
-                     FROM tile_sets WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3",
-                )
-                .bind(user_id)
-                .bind(limit)
-                .bind(offset)
-                .fetch_all(&db)
-                .await
-                .map_err(|e| ApiError::Db(e.to_string()))?
-            }
-        } else {
-            if let Some(ref pattern) = search_pattern {
-                sqlx::query_as::<_, TileSetRow>(
-                    "SELECT id, user_id, name, slug, projection, tile_size, min_zoom, max_zoom, tile_count, size_bytes, storage_path, public, created_at, width, height
-                     FROM tile_sets WHERE user_id = $1 AND public = true AND name ILIKE $4 ORDER BY created_at DESC LIMIT $2 OFFSET $3",
-                )
-                .bind(user_id)
-                .bind(limit)
-                .bind(offset)
-                .bind(pattern)
-                .fetch_all(&db)
-                .await
-                .map_err(|e| ApiError::Db(e.to_string()))?
-            } else {
-                sqlx::query_as::<_, TileSetRow>(
-                    "SELECT id, user_id, name, slug, projection, tile_size, min_zoom, max_zoom, tile_count, size_bytes, storage_path, public, created_at, width, height
-                     FROM tile_sets WHERE user_id = $1 AND public = true ORDER BY created_at DESC LIMIT $2 OFFSET $3",
-                )
-                .bind(user_id)
-                .bind(limit)
-                .bind(offset)
-                .fetch_all(&db)
-                .await
-                .map_err(|e| ApiError::Db(e.to_string()))?
-            }
-        }
-    } else {
-        if let Some(ref pattern) = search_pattern {
-            sqlx::query_as::<_, TileSetRow>(
-                "SELECT id, user_id, name, slug, projection, tile_size, min_zoom, max_zoom, tile_count, size_bytes, storage_path, public, created_at, width, height
-                 FROM tile_sets WHERE public = true AND name ILIKE $3 ORDER BY created_at DESC LIMIT $1 OFFSET $2",
-            )
-            .bind(limit)
-            .bind(offset)
-            .bind(pattern)
-            .fetch_all(&db)
-            .await
-            .map_err(|e| ApiError::Db(e.to_string()))?
-        } else {
-            sqlx::query_as::<_, TileSetRow>(
-                "SELECT id, user_id, name, slug, projection, tile_size, min_zoom, max_zoom, tile_count, size_bytes, storage_path, public, created_at, width, height
-                 FROM tile_sets WHERE public = true ORDER BY created_at DESC LIMIT $1 OFFSET $2",
-            )
-            .bind(limit)
-            .bind(offset)
-            .fetch_all(&db)
-            .await
-            .map_err(|e| ApiError::Db(e.to_string()))?
-        }
-    };
+    // Build dynamic query to avoid duplicating 8 SQL variants
+    let is_owner = target_user_id
+        .map(|uid| caller_id.map(|c| c == uid).unwrap_or(false))
+        .unwrap_or(false);
+
+    let rows: Vec<TileSetRow> = sqlx::query_as(
+        r#"SELECT id, user_id, name, slug, projection, tile_size, min_zoom, max_zoom,
+                  tile_count, size_bytes, storage_path, public, created_at, width, height
+           FROM tile_sets
+           WHERE ($1::uuid IS NULL OR user_id = $1)
+             AND ($2 OR public = true)
+             AND ($3::text IS NULL OR name ILIKE $3)
+           ORDER BY created_at DESC
+           LIMIT $4 OFFSET $5"#,
+    )
+    .bind(target_user_id)
+    .bind(is_owner)
+    .bind(search_pattern)
+    .bind(limit)
+    .bind(offset)
+    .fetch_all(&db)
+    .await
+    .map_err(|e| ApiError::Db(e.to_string()))?;
 
     Ok(Json(rows))
 }
