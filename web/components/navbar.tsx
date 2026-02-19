@@ -3,11 +3,12 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useSession } from "next-auth/react";
-import { MenuIcon, GalleryHorizontalEnd, FolderOpen, Newspaper, Github } from "lucide-react";
+import { MenuIcon, GalleryHorizontalEnd, FolderOpen, Newspaper, Github, Search } from "lucide-react";
 import { UserMenu } from "@/components/user-menu";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { NotificationPanel } from "@/components/notification-panel";
 import { StandaloneProcessingIndicator } from "@/components/processing-indicator";
+import { useCommandPalette } from "@/components/command-palette";
 import {
   Sheet,
   SheetTrigger,
@@ -83,6 +84,7 @@ function NavLinks({ onClick }: { onClick?: () => void }) {
 export function Navbar() {
   const { data: session } = useSession();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const { setOpen: setCommandPaletteOpen } = useCommandPalette();
 
   return (
     <nav className="border-border/50 border-b">
@@ -97,6 +99,18 @@ export function Navbar() {
 
         {/* Desktop right side */}
         <div className="hidden items-center gap-2 md:flex">
+          <Button
+            variant="outline"
+            size="sm"
+            className="text-muted-foreground h-8 gap-2 px-2 text-xs"
+            onClick={() => setCommandPaletteOpen(true)}
+          >
+            <Search className="h-3.5 w-3.5" />
+            <span className="hidden lg:inline">Search</span>
+            <kbd className="bg-muted text-muted-foreground pointer-events-none hidden h-5 select-none items-center gap-1 rounded border px-1.5 font-mono text-[10px] font-medium lg:inline-flex">
+              <span className="text-xs">⌘</span>K
+            </kbd>
+          </Button>
           <GitHubLink className="text-muted-foreground hover:text-foreground transition-colors" />
           <ThemeToggle />
           <NotificationPanel />
