@@ -6,7 +6,7 @@ export interface TileDefaults {
   tileSize: number;
   minZoom: number;
   maxZoom: number;
-  projection: "flat" | "mercator";
+  projection: "flat" | "mercator" | "isometric";
   defaultPublic: boolean;
 }
 

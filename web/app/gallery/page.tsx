@@ -72,6 +72,8 @@ export default function GalleryPage() {
                     <img
                       src={`${API_URL}/api/tiles/${encodeURIComponent(ts.slug)}/thumbnail`}
                       alt={ts.name}
+                      width={640}
+                      height={360}
                       className="h-full w-full object-cover"
                       loading="lazy"
                       decoding="async"

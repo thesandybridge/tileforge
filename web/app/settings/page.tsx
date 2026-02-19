@@ -228,7 +228,7 @@ function SettingsContent() {
             </label>
             <Select
               value={defaults.projection}
-              onValueChange={(v) => update({ projection: v as "flat" | "mercator" })}
+              onValueChange={(v) => update({ projection: v as "flat" | "mercator" | "isometric" })}
             >
               <SelectTrigger>
                 <SelectValue />
@@ -236,6 +236,7 @@ function SettingsContent() {
               <SelectContent>
                 <SelectItem value="flat">Flat</SelectItem>
                 <SelectItem value="mercator">Mercator</SelectItem>
+                <SelectItem value="isometric">Isometric</SelectItem>
               </SelectContent>
             </Select>
           </div>

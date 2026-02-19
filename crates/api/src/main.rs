@@ -28,6 +28,7 @@ use uuid::Uuid;
 
 /// 5 GB storage quota for Pro users.
 const QUOTA_PRO_BYTES: i64 = 5 * 1024 * 1024 * 1024;
+const PRESIGN_TTL_SECS: u32 = 600; // 10 minutes
 
 // ---------------------------------------------------------------------------
 // Config
@@ -1619,7 +1620,7 @@ async fn tileset_pmtiles_url(
 
     let s3_key = format!("{}/tiles.pmtiles", row.storage_path);
     let url = bucket
-        .presign_get(&s3_key, 600, None)
+        .presign_get(&s3_key, PRESIGN_TTL_SECS, None)
         .await
         .map_err(|_| ApiError::NotFound)?;
 
