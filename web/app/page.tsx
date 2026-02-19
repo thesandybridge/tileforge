@@ -263,13 +263,23 @@ export default function Home() {
             <CardContent className="space-y-6 p-6 sm:p-8">
               {/* Drop zone */}
               <div
+                role="button"
+                tabIndex={0}
+                aria-label="Upload image — drag and drop or press Enter to browse"
                 onDragOver={(e) => {
                   e.preventDefault();
                   dispatch({ type: "DRAG_START" });
                 }}
                 onDragLeave={() => dispatch({ type: "DRAG_END" })}
                 onDrop={onDrop}
-                className={`cursor-pointer rounded-xl border-2 border-dashed transition-colors ${
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    const input = e.currentTarget.querySelector<HTMLInputElement>("input[type=file]");
+                    input?.click();
+                  }
+                }}
+                className={`cursor-pointer rounded-xl border-2 border-dashed transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
                   form.dragging
                     ? "border-primary bg-primary/5"
                     : "border-border hover:border-muted-foreground/30"

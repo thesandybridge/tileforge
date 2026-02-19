@@ -6,10 +6,22 @@ import { useSession } from "next-auth/react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { ArrowLeft, Map, Globe, Grid3X3, Copy, Check, Eye, EyeOff, Trash2, Pencil, Loader2 } from "lucide-react";
+import { formatBytes } from "@/lib/utils";
 import { useTileset, useUpdateTileset, useDeleteTileset, useTilesetPreview } from "@/hooks/use-tilesets";
 import { useApiKey } from "@/hooks/use-api-key";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 
 const TilePreview = dynamic(() => import("@/components/tile-preview"), {
   ssr: false,
@@ -17,13 +29,6 @@ const TilePreview = dynamic(() => import("@/components/tile-preview"), {
     <p className="text-muted-foreground mt-4 text-sm">Loading map preview...</p>
   ),
 });
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
-}
 
 import type { Highlighter } from "shiki";
 import { useEffect } from "react";
@@ -118,7 +123,6 @@ export default function TileSetDetailPage() {
 
   function handleDelete() {
     if (!tileset) return;
-    if (!confirm("Delete this tileset? This cannot be undone.")) return;
     deleteTileset.mutate(tileset.slug, {
       onSuccess: () => router.push("/my-tilesets"),
     });
@@ -197,6 +201,7 @@ const map = new maplibregl.Map({
               <div className="flex items-center gap-2">
                 <input
                   autoFocus
+                  aria-label="Tileset name"
                   value={editState.name}
                   onChange={(e) => setEditState({ editing: true, name: e.target.value })}
                   onKeyDown={(e) => {
@@ -345,9 +350,31 @@ const map = new maplibregl.Map({
                   <><Eye className="mr-2 h-4 w-4" /> Publish</>
                 )}
               </Button>
-              <Button variant="destructive" onClick={handleDelete}>
-                <Trash2 className="mr-2 h-4 w-4" /> Delete
-              </Button>
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button variant="destructive">
+                    <Trash2 className="mr-2 h-4 w-4" /> Delete
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Delete tileset</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      Are you sure you want to delete &ldquo;{tileset.name}&rdquo;?
+                      This action cannot be undone.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction
+                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                      onClick={handleDelete}
+                    >
+                      Delete
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
             </>
           )}
         </div>
