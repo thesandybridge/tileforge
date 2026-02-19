@@ -5,28 +5,11 @@ import { useSession } from "next-auth/react";
 import { Map, Globe, Grid3X3, ImageIcon } from "lucide-react";
 import { API_URL } from "@/lib/api";
 import { PLAN_PRO } from "@/lib/plans";
+import { formatBytes, timeAgo } from "@/lib/utils";
 import { usePublicTilesets } from "@/hooks/use-tilesets";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { UpgradeInlineBanner } from "@/components/upgrade-banner";
 import { ScrollReveal } from "@/components/scroll-reveal";
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function timeAgo(dateStr: string): string {
-  const seconds = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000);
-  if (seconds < 60) return "just now";
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  if (days < 30) return `${days}d ago`;
-  return new Date(dateStr).toLocaleDateString();
-}
 
 export default function GalleryPage() {
   const { data: session } = useSession();
@@ -89,7 +72,7 @@ export default function GalleryPage() {
                         e.currentTarget.nextElementSibling?.classList.remove("hidden");
                       }}
                     />
-                    <div className="hidden absolute inset-0 flex items-center justify-center">
+                    <div className="absolute inset-0 hidden items-center justify-center">
                       <ImageIcon className="text-muted-foreground/40 h-10 w-10" />
                     </div>
                   </div>

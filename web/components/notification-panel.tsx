@@ -1,6 +1,7 @@
 "use client";
 
 import { Bell, CheckCircle, XCircle, Info, AlertTriangle, Download } from "lucide-react";
+import { timeAgo } from "@/lib/utils";
 import { useNotifications } from "@/components/notification-context";
 import { Button } from "@/components/ui/button";
 import {
@@ -11,17 +12,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import type { Notification } from "@/lib/notifications";
-
-function timeAgo(iso: string): string {
-  const seconds = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
-  if (seconds < 60) return "just now";
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
-}
 
 function NotificationIcon({ type }: { type: Notification["type"] }) {
   switch (type) {
@@ -87,7 +77,7 @@ export function NotificationPanel() {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon" className="relative h-8 w-8">
+        <Button variant="ghost" size="icon" className="relative h-8 w-8" aria-label="Notifications">
           <Bell className="h-4 w-4" />
           {unreadCount > 0 && (
             <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-medium text-destructive-foreground">

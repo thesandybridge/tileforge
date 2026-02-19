@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense } from "react";
+import Link from "next/link";
 import { useSession } from "next-auth/react";
 import { PLAN_PRO } from "@/lib/plans";
 import { useCheckout, usePortalSession, usePlanRefresh } from "@/hooks/use-billing";
@@ -28,7 +29,22 @@ function BillingContent() {
     portal.mutate();
   }
 
-  if (!session) return null;
+  if (!session) {
+    return (
+      <div className="mx-auto max-w-lg px-4 py-16">
+        <h1 className="mb-8 text-2xl font-bold">Billing</h1>
+        <div className="rounded-lg border p-6 text-center">
+          <CreditCard className="text-muted-foreground mx-auto mb-4 h-10 w-10" />
+          <p className="text-muted-foreground mb-4 text-sm">
+            Sign in to manage your plan and billing.
+          </p>
+          <Link href="/api/auth/signin">
+            <Button>Sign In</Button>
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto max-w-lg px-4 py-16">
