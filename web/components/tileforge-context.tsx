@@ -14,7 +14,7 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { useNotifications } from "@/components/notification-context";
 import { useRateLimit } from "@/hooks/use-rate-limit";
-import type { WorkerRequest, WorkerResponse } from "@/lib/worker-protocol";
+import type { WorkerRequest, WorkerResponse, ScaleMetadata } from "@/lib/worker-protocol";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
 
@@ -37,7 +37,17 @@ export interface ProcessOpts {
   maxZoom?: number;
   projection?: "flat" | "mercator";
   fileName?: string;
+  /** Pre-scale factor (e.g., 0.5 = half size, 2.0 = double) */
+  scale?: number;
+  /** Background color hex string (e.g., "#ffffff") */
+  backgroundColor?: string;
+  /** Scale metadata for measurements */
+  scaleMetadata?: ScaleMetadata;
+  /** Whether to also generate PMTiles output (WASM only) */
+  includePmtiles?: boolean;
 }
+
+export type { ScaleMetadata };
 
 export interface ServerProcessOpts extends ProcessOpts {
   token?: string;
@@ -70,7 +80,8 @@ interface TileforgeState {
   status: TileforgeStatus;
   progress: TileforgeProgress | null;
   zipBlob: Blob | null;
-  pmtilesUrl: string | null;
+  pmtilesBlob: Blob | null; // For local WASM PMTiles output
+  pmtilesUrl: string | null; // For server PMTiles URL
   error: string | null;
   durationMs: number | null;
 }
@@ -82,7 +93,7 @@ type TileforgeAction =
   | { type: "processing" }
   | { type: "progress"; progress: TileforgeProgress }
   | { type: "clear_progress" }
-  | { type: "complete"; zipBlob: Blob; durationMs: number; pmtilesUrl?: string }
+  | { type: "complete"; zipBlob: Blob; durationMs: number; pmtilesUrl?: string; pmtilesBlob?: Blob }
   | { type: "error"; message: string }
   | { type: "set_pmtiles_url"; url: string }
   | { type: "reset"; workerReady: boolean };
@@ -91,6 +102,7 @@ const initialState: TileforgeState = {
   status: "idle",
   progress: null,
   zipBlob: null,
+  pmtilesBlob: null,
   pmtilesUrl: null,
   error: null,
   durationMs: null,
@@ -115,6 +127,7 @@ function reducer(state: TileforgeState, action: TileforgeAction): TileforgeState
         ...state,
         status: "done",
         zipBlob: action.zipBlob,
+        pmtilesBlob: action.pmtilesBlob ?? null,
         durationMs: action.durationMs,
         pmtilesUrl: action.pmtilesUrl ?? state.pmtilesUrl,
         progress: null,
@@ -152,6 +165,7 @@ interface TileforgeContextValue {
   status: TileforgeStatus;
   progress: TileforgeProgress | null;
   zipBlob: Blob | null;
+  pmtilesBlob: Blob | null;
   pmtilesUrl: string | null;
   error: string | null;
   durationMs: number | null;
@@ -174,6 +188,7 @@ const TileforgeContext = createContext<TileforgeContextValue>({
   status: "idle",
   progress: null,
   zipBlob: null,
+  pmtilesBlob: null,
   pmtilesUrl: null,
   error: null,
   durationMs: null,
@@ -271,10 +286,14 @@ export function TileforgeProvider({ children }: { children: ReactNode }) {
           });
           break;
         case "complete": {
-          const blob = new Blob([msg.zipBytes], { type: "application/zip" });
+          const zipBlob = new Blob([msg.zipBytes], { type: "application/zip" });
+          const pmtilesBlob = msg.pmtilesBytes
+            ? new Blob([msg.pmtilesBytes], { type: "application/octet-stream" })
+            : undefined;
           dispatch({
             type: "complete",
-            zipBlob: blob,
+            zipBlob,
+            pmtilesBlob,
             durationMs: performance.now() - startTimeRef.current,
           });
           break;
@@ -311,6 +330,10 @@ export function TileforgeProvider({ children }: { children: ReactNode }) {
         minZoom: opts.minZoom,
         maxZoom: opts.maxZoom,
         projection: opts.projection,
+        scale: opts.scale,
+        backgroundColor: opts.backgroundColor,
+        scaleMetadata: opts.scaleMetadata,
+        includePmtiles: opts.includePmtiles,
       };
       workerRef.current.postMessage(msg, [imageBytes]);
     },

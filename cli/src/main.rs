@@ -70,6 +70,9 @@ fn main() {
         min_zoom: args.min_zoom,
         max_zoom: args.max_zoom,
         projection,
+        scale: None,
+        background: None,
+        scale_metadata: None,
     };
 
     let file = fs::File::create(&args.output).unwrap_or_else(|e| {

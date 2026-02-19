@@ -4,7 +4,7 @@ import { useCallback, useReducer, useRef } from "react";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
-import { Info, LoaderCircle, Upload, Save, Trash2 } from "lucide-react";
+import { Info, LoaderCircle, Upload, Save, Trash2, ChevronDown, Palette } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { ScrollReveal } from "@/components/scroll-reveal";
 import { TileParticles } from "@/components/tile-particles";
@@ -85,6 +85,10 @@ interface FormState {
   projection: "flat" | "mercator";
   hasFile: boolean;
   dragState: DragState;
+  // Advanced options
+  scale: number | null;
+  backgroundColor: string | null;
+  includePmtiles: boolean;
 }
 
 type FormAction =
@@ -95,6 +99,9 @@ type FormAction =
   | { type: "MIN_ZOOM_CHANGED"; minZoom: number }
   | { type: "MAX_ZOOM_CHANGED"; maxZoom: number }
   | { type: "PROJECTION_CHANGED"; projection: "flat" | "mercator" }
+  | { type: "SCALE_CHANGED"; scale: number | null }
+  | { type: "BACKGROUND_COLOR_CHANGED"; backgroundColor: string | null }
+  | { type: "INCLUDE_PMTILES_CHANGED"; includePmtiles: boolean }
   | { type: "DRAG_HOVER" }
   | { type: "DRAG_INVALID" }
   | { type: "DRAG_END" }
@@ -110,6 +117,9 @@ const initialFormState: FormState = {
   projection: "flat",
   hasFile: false,
   dragState: "idle",
+  scale: null,
+  backgroundColor: null,
+  includePmtiles: true,
 };
 
 function formReducer(state: FormState, action: FormAction): FormState {
@@ -138,6 +148,12 @@ function formReducer(state: FormState, action: FormAction): FormState {
       return { ...state, maxZoom: action.maxZoom, minZoom: Math.min(state.minZoom, action.maxZoom) };
     case "PROJECTION_CHANGED":
       return { ...state, projection: action.projection };
+    case "SCALE_CHANGED":
+      return { ...state, scale: action.scale };
+    case "BACKGROUND_COLOR_CHANGED":
+      return { ...state, backgroundColor: action.backgroundColor };
+    case "INCLUDE_PMTILES_CHANGED":
+      return { ...state, includePmtiles: action.includePmtiles };
     case "DRAG_HOVER":
       return state.dragState === "hovering" ? state : { ...state, dragState: "hovering" };
     case "DRAG_INVALID":
@@ -150,7 +166,7 @@ function formReducer(state: FormState, action: FormAction): FormState {
 }
 
 export default function Home() {
-  const { status, progress, zipBlob, pmtilesUrl, error, durationMs, process, processServer, reset, cancel, queue, addToQueue, processQueue, cancelQueue, isProcessingQueue } = useTileforge();
+  const { status, progress, zipBlob, pmtilesBlob, pmtilesUrl, error, durationMs, process, processServer, reset, cancel, queue, addToQueue, processQueue, cancelQueue, isProcessingQueue } = useTileforge();
   const { data: session } = useSession();
   const { defaults } = useTileDefaults();
   const [form, dispatch] = useReducer(formReducer, defaults, (d) => ({
@@ -241,12 +257,21 @@ export default function Home() {
   const onProcess = useCallback(() => {
     if (!fileRef.current) return;
     const copy = fileRef.current.slice(0);
+    const baseOpts = {
+      tileSize: form.tileSize,
+      minZoom: form.minZoom,
+      maxZoom: form.maxZoom,
+      projection: form.projection,
+      fileName: form.fileName ?? undefined,
+      scale: form.scale ?? undefined,
+      backgroundColor: form.backgroundColor ?? undefined,
+    };
     if (form.mode === "server") {
-      processServer(copy, { tileSize: form.tileSize, minZoom: form.minZoom, maxZoom: form.maxZoom, projection: form.projection, token: session?.accessToken, fileName: form.fileName ?? undefined });
+      processServer(copy, { ...baseOpts, token: session?.accessToken });
     } else {
-      process(copy, { tileSize: form.tileSize, minZoom: form.minZoom, maxZoom: form.maxZoom, projection: form.projection, fileName: form.fileName ?? undefined });
+      process(copy, { ...baseOpts, includePmtiles: form.includePmtiles });
     }
-  }, [process, processServer, form.tileSize, form.minZoom, form.maxZoom, form.projection, form.mode, form.fileName, session?.accessToken]);
+  }, [process, processServer, form.tileSize, form.minZoom, form.maxZoom, form.projection, form.mode, form.fileName, form.scale, form.backgroundColor, form.includePmtiles, session?.accessToken]);
 
   const onDownload = useCallback(() => {
     if (!zipBlob) return;
@@ -261,14 +286,23 @@ export default function Home() {
   }, [zipBlob, form.fileName]);
 
   const onDownloadPmtiles = useCallback(() => {
-    if (!pmtilesUrl) return;
     const a = document.createElement("a");
-    a.href = pmtilesUrl;
     a.download = form.fileName
       ? form.fileName.replace(/\.[^.]+$/, "_tiles.pmtiles")
       : "tiles.pmtiles";
-    a.click();
-  }, [pmtilesUrl, form.fileName]);
+
+    if (pmtilesBlob) {
+      // Local WASM processing - use blob
+      const url = URL.createObjectURL(pmtilesBlob);
+      a.href = url;
+      a.click();
+      URL.revokeObjectURL(url);
+    } else if (pmtilesUrl) {
+      // Server processing - use URL
+      a.href = pmtilesUrl;
+      a.click();
+    }
+  }, [pmtilesBlob, pmtilesUrl, form.fileName]);
 
   const onProcessQueue = useCallback(() => {
     // Pro users get higher concurrency (3 parallel), free users get 1 (sequential)
@@ -610,6 +644,115 @@ export default function Home() {
                 </div>
               </div>
 
+              {/* Advanced Options */}
+              <details className="group">
+                <summary className="flex cursor-pointer items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground">
+                  <ChevronDown className="h-4 w-4 transition-transform group-open:rotate-180" />
+                  Advanced Options
+                </summary>
+                <div className="mt-4 grid gap-4 sm:grid-cols-3">
+                  {/* Pre-scale */}
+                  <div className="space-y-2">
+                    <label className="text-muted-foreground flex items-center gap-1 text-xs font-medium uppercase tracking-wider">
+                      Pre-scale
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Info className="size-3 cursor-help" />
+                          </TooltipTrigger>
+                          <TooltipContent side="top" sideOffset={4} className="max-w-60">
+                            <p>Scale the image before tiling. Use 0.5 to halve the size, 2 to double it.</p>
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    </label>
+                    <Select
+                      value={form.scale?.toString() ?? "none"}
+                      onValueChange={(v) => dispatch({ type: "SCALE_CHANGED", scale: v === "none" ? null : parseFloat(v) })}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">None (1x)</SelectItem>
+                        <SelectItem value="0.25">0.25x (quarter)</SelectItem>
+                        <SelectItem value="0.5">0.5x (half)</SelectItem>
+                        <SelectItem value="2">2x (double)</SelectItem>
+                        <SelectItem value="4">4x (quadruple)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* Background Color */}
+                  <div className="space-y-2">
+                    <label className="text-muted-foreground flex items-center gap-1 text-xs font-medium uppercase tracking-wider">
+                      Background
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Info className="size-3 cursor-help" />
+                          </TooltipTrigger>
+                          <TooltipContent side="top" sideOffset={4} className="max-w-60">
+                            <p>Fill transparent areas with a solid color. Leave empty for transparent.</p>
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="color"
+                        value={form.backgroundColor ?? "#ffffff"}
+                        onChange={(e) => dispatch({ type: "BACKGROUND_COLOR_CHANGED", backgroundColor: e.target.value })}
+                        className="h-9 w-9 cursor-pointer rounded border border-input bg-transparent p-0.5"
+                        disabled={!form.backgroundColor}
+                      />
+                      <Button
+                        type="button"
+                        variant={form.backgroundColor ? "secondary" : "outline"}
+                        size="sm"
+                        className="flex-1"
+                        onClick={() => dispatch({
+                          type: "BACKGROUND_COLOR_CHANGED",
+                          backgroundColor: form.backgroundColor ? null : "#ffffff"
+                        })}
+                      >
+                        {form.backgroundColor ? (
+                          <>
+                            <Palette className="mr-1.5 h-3.5 w-3.5" />
+                            {form.backgroundColor}
+                          </>
+                        ) : (
+                          "Transparent"
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* PMTiles (local mode only) */}
+                  {form.mode === "local" && (
+                    <div className="space-y-2">
+                      <label className="text-muted-foreground flex items-center gap-1 text-xs font-medium uppercase tracking-wider">
+                        Output Format
+                      </label>
+                      <div className="flex items-center gap-3">
+                        <label className="flex cursor-pointer items-center gap-2 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={form.includePmtiles}
+                            onChange={(e) => dispatch({ type: "INCLUDE_PMTILES_CHANGED", includePmtiles: e.target.checked })}
+                            className="h-4 w-4 rounded border-input"
+                          />
+                          Include PMTiles
+                        </label>
+                      </div>
+                      <p className="text-muted-foreground text-xs">
+                        Always includes ZIP. PMTiles is a single-file format for web maps.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </details>
+
               {form.imageInfo && (
                 <p className="text-muted-foreground text-center text-sm">
                   {totalTiles} tiles &mdash; ~{Math.round(form.imageInfo.decodedMB)} MB peak memory
@@ -679,7 +822,7 @@ export default function Home() {
                     Download ZIP ({(zipBlob.size / (1024 * 1024)).toFixed(1)} MB)
                   </Button>
                 )}
-                {status === "done" && pmtilesUrl && (
+                {status === "done" && (pmtilesUrl || pmtilesBlob) && (
                   <Button size="lg" variant="secondary" onClick={onDownloadPmtiles} className="flex-1 sm:flex-none">
                     Download PMTiles
                   </Button>

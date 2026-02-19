@@ -38,12 +38,82 @@ pub enum Projection {
     Mercator,
 }
 
+/// Scale metadata for accurate measurements on the output tileset.
+#[derive(Debug, Clone, Default)]
+pub struct ScaleMetadata {
+    /// How scale is defined: "pixels_per_unit" or "units_per_tile"
+    pub mode: Option<String>,
+    /// The numeric scale value (e.g., 10 for "10 pixels = 1 unit")
+    pub value: Option<f64>,
+    /// The unit name (e.g., "meters", "feet", "km")
+    pub unit: Option<String>,
+    /// Geographic bounds [west, south, east, north] for Mercator maps
+    pub bounds: Option<[f64; 4]>,
+}
+
+/// RGBA background color (0-255 per channel).
+#[derive(Debug, Clone, Copy)]
+pub struct BackgroundColor {
+    pub r: u8,
+    pub g: u8,
+    pub b: u8,
+    pub a: u8,
+}
+
+impl Default for BackgroundColor {
+    fn default() -> Self {
+        Self { r: 0, g: 0, b: 0, a: 0 } // Transparent
+    }
+}
+
+impl BackgroundColor {
+    pub fn transparent() -> Self {
+        Self::default()
+    }
+
+    pub fn from_rgba(r: u8, g: u8, b: u8, a: u8) -> Self {
+        Self { r, g, b, a }
+    }
+
+    pub fn from_hex(hex: &str) -> Option<Self> {
+        let hex = hex.trim_start_matches('#');
+        if hex.len() == 6 {
+            let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
+            let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
+            let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
+            Some(Self { r, g, b, a: 255 })
+        } else if hex.len() == 8 {
+            let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
+            let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
+            let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
+            let a = u8::from_str_radix(&hex[6..8], 16).ok()?;
+            Some(Self { r, g, b, a })
+        } else {
+            None
+        }
+    }
+
+    pub fn is_transparent(&self) -> bool {
+        self.a == 0
+    }
+
+    pub fn to_rgba(&self) -> [u8; 4] {
+        [self.r, self.g, self.b, self.a]
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct TileConfig {
     pub tile_size: u32,
     pub min_zoom: Option<u32>,
     pub max_zoom: Option<u32>,
     pub projection: Projection,
+    /// Pre-scale factor applied to the image before tiling (e.g., 0.5 = half size, 2.0 = double)
+    pub scale: Option<f64>,
+    /// Background color to fill transparent areas
+    pub background: Option<BackgroundColor>,
+    /// Scale metadata for measurements
+    pub scale_metadata: Option<ScaleMetadata>,
 }
 
 impl Default for TileConfig {
@@ -53,6 +123,9 @@ impl Default for TileConfig {
             min_zoom: None,
             max_zoom: None,
             projection: Projection::default(),
+            scale: None,
+            background: None,
+            scale_metadata: None,
         }
     }
 }
@@ -163,6 +236,20 @@ impl Tiler {
         TW: TileWriter,
         F: Fn(TileProgress),
     {
+        // Apply pre-scaling if configured
+        let img = if let Some(scale) = self.config.scale {
+            if (scale - 1.0).abs() > 0.001 {
+                let (w, h) = img.dimensions();
+                let new_w = ((w as f64 * scale) as u32).max(1);
+                let new_h = ((h as f64 * scale) as u32).max(1);
+                std::borrow::Cow::Owned(img.resize_exact(new_w, new_h, FilterType::CatmullRom))
+            } else {
+                std::borrow::Cow::Borrowed(img)
+            }
+        } else {
+            std::borrow::Cow::Borrowed(img)
+        };
+
         let (width, height) = img.dimensions();
         if width == 0 || height == 0 {
             return Err(TilerError::ZeroDimensions);
@@ -178,6 +265,10 @@ impl Tiler {
         let total_tiles = Self::calc_total_tiles(min_zoom, max_zoom);
         let mut tiles_done = 0u32;
 
+        // Get background color (default to transparent)
+        let bg = self.config.background.unwrap_or_else(BackgroundColor::transparent);
+        let bg_pixel = image::Rgba(bg.to_rgba());
+
         for z in min_zoom..=max_zoom {
             let grid_size = 1u32 << z;
             let canvas_size = grid_size * tile_size;
@@ -191,7 +282,7 @@ impl Tiler {
                 // Mercator: resize X uniformly, then remap Y per-row
                 let resized = img.resize_exact(scaled_w, height, FilterType::CatmullRom);
                 let src_rgba = resized.to_rgba8();
-                let mut canvas_buf = RgbaImage::new(canvas_size, canvas_size);
+                let mut canvas_buf = RgbaImage::from_pixel(canvas_size, canvas_size, bg_pixel);
 
                 for cy in 0..canvas_size {
                     let t = cy as f64 / canvas_size as f64;
@@ -209,7 +300,20 @@ impl Tiler {
                         let g = (p0[1] as f64 * (1.0 - frac) + p1[1] as f64 * frac).round() as u8;
                         let b = (p0[2] as f64 * (1.0 - frac) + p1[2] as f64 * frac).round() as u8;
                         let a = (p0[3] as f64 * (1.0 - frac) + p1[3] as f64 * frac).round() as u8;
-                        canvas_buf.put_pixel(cx, cy, image::Rgba([r, g, b, a]));
+                        // Blend with background if pixel is semi-transparent
+                        let pixel = if a < 255 && !bg.is_transparent() {
+                            let alpha = a as f64 / 255.0;
+                            let inv_alpha = 1.0 - alpha;
+                            image::Rgba([
+                                (r as f64 * alpha + bg.r as f64 * inv_alpha).round() as u8,
+                                (g as f64 * alpha + bg.g as f64 * inv_alpha).round() as u8,
+                                (b as f64 * alpha + bg.b as f64 * inv_alpha).round() as u8,
+                                255,
+                            ])
+                        } else {
+                            image::Rgba([r, g, b, a])
+                        };
+                        canvas_buf.put_pixel(cx, cy, pixel);
                     }
                 }
 
@@ -217,8 +321,30 @@ impl Tiler {
             } else {
                 // Flat: standard resize + overlay
                 let resized = img.resize_exact(scaled_w, scaled_h, FilterType::CatmullRom);
-                let mut canvas_buf = RgbaImage::new(canvas_size, canvas_size);
-                image::imageops::overlay(&mut canvas_buf, &resized.to_rgba8(), 0, 0);
+                let mut canvas_buf = RgbaImage::from_pixel(canvas_size, canvas_size, bg_pixel);
+                // Blend resized image onto background
+                if bg.is_transparent() {
+                    image::imageops::overlay(&mut canvas_buf, &resized.to_rgba8(), 0, 0);
+                } else {
+                    // Manual blend for non-transparent background
+                    let resized_rgba = resized.to_rgba8();
+                    for (x, y, pixel) in resized_rgba.enumerate_pixels() {
+                        if pixel[3] == 255 {
+                            canvas_buf.put_pixel(x, y, *pixel);
+                        } else if pixel[3] > 0 {
+                            let alpha = pixel[3] as f64 / 255.0;
+                            let inv_alpha = 1.0 - alpha;
+                            let blended = image::Rgba([
+                                (pixel[0] as f64 * alpha + bg.r as f64 * inv_alpha).round() as u8,
+                                (pixel[1] as f64 * alpha + bg.g as f64 * inv_alpha).round() as u8,
+                                (pixel[2] as f64 * alpha + bg.b as f64 * inv_alpha).round() as u8,
+                                255,
+                            ]);
+                            canvas_buf.put_pixel(x, y, blended);
+                        }
+                        // If alpha == 0, keep the background pixel
+                    }
+                }
                 DynamicImage::ImageRgba8(canvas_buf)
             };
 

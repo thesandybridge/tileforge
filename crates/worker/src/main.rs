@@ -409,6 +409,9 @@ async fn process_job(
         min_zoom: job.min_zoom,
         max_zoom: job.max_zoom,
         projection,
+        scale: None,
+        background: None,
+        scale_metadata: None,
     };
 
     // Shared progress state: the blocking task writes here, a poller reads + publishes to Redis

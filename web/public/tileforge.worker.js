@@ -16,26 +16,59 @@ async function init() {
   }
 }
 
-function process(imageBytes, tileSize, minZoom, maxZoom, projection) {
+function process(msg) {
   if (!ready) {
     post({ type: "error", message: "WASM module not initialized" });
     return;
   }
 
   try {
-    const { WasmTileConfig, processTiles } = wasm_bindgen;
-    const config = new WasmTileConfig(tileSize);
-    if (minZoom !== undefined) config.setMinZoom(minZoom);
-    if (maxZoom !== undefined) config.setMaxZoom(maxZoom);
-    if (projection === "mercator") config.setProjection(1);
+    const { WasmTileConfig, processTiles, processTilesWithPmtiles } = wasm_bindgen;
+    const config = new WasmTileConfig(msg.tileSize);
 
-    const input = new Uint8Array(imageBytes);
-    const zipData = processTiles(input, config, function (tilesDone, tilesTotal, zoom) {
+    // Basic options
+    if (msg.minZoom !== undefined) config.setMinZoom(msg.minZoom);
+    if (msg.maxZoom !== undefined) config.setMaxZoom(msg.maxZoom);
+    if (msg.projection === "mercator") config.setProjection(1);
+
+    // New options
+    if (msg.scale !== undefined) config.setScale(msg.scale);
+    if (msg.backgroundColor) config.setBackgroundColor(msg.backgroundColor);
+
+    // Scale metadata
+    if (msg.scaleMetadata) {
+      if (msg.scaleMetadata.mode) config.setScaleMode(msg.scaleMetadata.mode);
+      if (msg.scaleMetadata.value !== undefined) config.setScaleValue(msg.scaleMetadata.value);
+      if (msg.scaleMetadata.unit) config.setScaleUnit(msg.scaleMetadata.unit);
+    }
+
+    const input = new Uint8Array(msg.imageBytes);
+
+    const progressCallback = function (tilesDone, tilesTotal, zoom) {
       post({ type: "progress", tilesDone: tilesDone, tilesTotal: tilesTotal, zoom: zoom });
-    });
+    };
 
-    const buffer = zipData.buffer;
-    post({ type: "complete", zipBytes: buffer }, [buffer]);
+    if (msg.includePmtiles) {
+      // Process with both ZIP and PMTiles output
+      const result = processTilesWithPmtiles(input, config, progressCallback);
+      const zipBuffer = result.zipBytes.buffer;
+      const pmtilesBuffer = result.pmtilesBytes.buffer;
+
+      const transfers = [zipBuffer];
+      const response = { type: "complete", zipBytes: zipBuffer };
+
+      if (pmtilesBuffer.byteLength > 0) {
+        response.pmtilesBytes = pmtilesBuffer;
+        transfers.push(pmtilesBuffer);
+      }
+
+      post(response, transfers);
+    } else {
+      // Process ZIP only (default)
+      const zipData = processTiles(input, config, progressCallback);
+      const buffer = zipData.buffer;
+      post({ type: "complete", zipBytes: buffer }, [buffer]);
+    }
   } catch (e) {
     post({ type: "error", message: e.message || String(e) });
   }
@@ -48,7 +81,7 @@ self.onmessage = function (e) {
       init();
       break;
     case "process":
-      process(msg.imageBytes, msg.tileSize, msg.minZoom, msg.maxZoom, msg.projection);
+      process(msg);
       break;
   }
 };

@@ -711,6 +711,9 @@ async fn process_tiles(
             min_zoom,
             max_zoom,
             projection,
+            scale: None,
+            background: None,
+            scale_metadata: None,
         };
         let tiler = Tiler::new(config);
         let buf = Cursor::new(Vec::new());

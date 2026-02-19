@@ -4,6 +4,49 @@ let wasm_bindgen = (function(exports) {
         script_src = new URL(document.currentScript.src, location.href).toString();
     }
 
+    /**
+     * Result containing both ZIP and PMTiles output bytes.
+     */
+    class TileOutput {
+        static __wrap(ptr) {
+            ptr = ptr >>> 0;
+            const obj = Object.create(TileOutput.prototype);
+            obj.__wbg_ptr = ptr;
+            TileOutputFinalization.register(obj, obj.__wbg_ptr, obj);
+            return obj;
+        }
+        __destroy_into_raw() {
+            const ptr = this.__wbg_ptr;
+            this.__wbg_ptr = 0;
+            TileOutputFinalization.unregister(this);
+            return ptr;
+        }
+        free() {
+            const ptr = this.__destroy_into_raw();
+            wasm.__wbg_tileoutput_free(ptr, 0);
+        }
+        /**
+         * @returns {Uint8Array}
+         */
+        get pmtilesBytes() {
+            const ret = wasm.tileoutput_pmtilesBytes(this.__wbg_ptr);
+            var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+            wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+            return v1;
+        }
+        /**
+         * @returns {Uint8Array}
+         */
+        get zipBytes() {
+            const ret = wasm.tileoutput_zipBytes(this.__wbg_ptr);
+            var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+            wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+            return v1;
+        }
+    }
+    if (Symbol.dispose) TileOutput.prototype[Symbol.dispose] = TileOutput.prototype.free;
+    exports.TileOutput = TileOutput;
+
     class WasmTileConfig {
         __destroy_into_raw() {
             const ptr = this.__wbg_ptr;
@@ -25,6 +68,15 @@ let wasm_bindgen = (function(exports) {
             return this;
         }
         /**
+         * Set background color as hex string (e.g., "#ffffff" or "#ffffffff" with alpha).
+         * @param {string} hex
+         */
+        setBackgroundColor(hex) {
+            const ptr0 = passStringToWasm0(hex, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len0 = WASM_VECTOR_LEN;
+            wasm.wasmtileconfig_setBackgroundColor(this.__wbg_ptr, ptr0, len0);
+        }
+        /**
          * @param {number} z
          */
         setMaxZoom(z) {
@@ -42,6 +94,38 @@ let wasm_bindgen = (function(exports) {
          */
         setProjection(p) {
             wasm.wasmtileconfig_setProjection(this.__wbg_ptr, p);
+        }
+        /**
+         * Set pre-scale factor (e.g., 0.5 = half size, 2.0 = double).
+         * @param {number} s
+         */
+        setScale(s) {
+            wasm.wasmtileconfig_setScale(this.__wbg_ptr, s);
+        }
+        /**
+         * Set scale metadata mode: "pixels_per_unit" or "units_per_tile".
+         * @param {string} mode
+         */
+        setScaleMode(mode) {
+            const ptr0 = passStringToWasm0(mode, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len0 = WASM_VECTOR_LEN;
+            wasm.wasmtileconfig_setScaleMode(this.__wbg_ptr, ptr0, len0);
+        }
+        /**
+         * Set scale metadata unit name (e.g., "meters", "feet").
+         * @param {string} unit
+         */
+        setScaleUnit(unit) {
+            const ptr0 = passStringToWasm0(unit, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len0 = WASM_VECTOR_LEN;
+            wasm.wasmtileconfig_setScaleUnit(this.__wbg_ptr, ptr0, len0);
+        }
+        /**
+         * Set scale metadata value.
+         * @param {number} value
+         */
+        setScaleValue(value) {
+            wasm.wasmtileconfig_setScaleValue(this.__wbg_ptr, value);
         }
     }
     if (Symbol.dispose) WasmTileConfig.prototype[Symbol.dispose] = WasmTileConfig.prototype.free;
@@ -82,16 +166,35 @@ let wasm_bindgen = (function(exports) {
         const ptr0 = passArray8ToWasm0(image_bytes, wasm.__wbindgen_malloc);
         const len0 = WASM_VECTOR_LEN;
         _assertClass(config, WasmTileConfig);
-        var ptr1 = config.__destroy_into_raw();
-        const ret = wasm.processTiles(ptr0, len0, ptr1, on_progress);
+        const ret = wasm.processTiles(ptr0, len0, config.__wbg_ptr, on_progress);
         if (ret[3]) {
             throw takeFromExternrefTable0(ret[2]);
         }
-        var v3 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
         wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
-        return v3;
+        return v2;
     }
     exports.processTiles = processTiles;
+
+    /**
+     * Process image bytes into both ZIP and PMTiles archives.
+     * `on_progress` is called with (tiles_done, tiles_total, current_zoom).
+     * @param {Uint8Array} image_bytes
+     * @param {WasmTileConfig} config
+     * @param {Function} on_progress
+     * @returns {TileOutput}
+     */
+    function processTilesWithPmtiles(image_bytes, config, on_progress) {
+        const ptr0 = passArray8ToWasm0(image_bytes, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        _assertClass(config, WasmTileConfig);
+        const ret = wasm.processTilesWithPmtiles(ptr0, len0, config.__wbg_ptr, on_progress);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return TileOutput.__wrap(ret[0]);
+    }
+    exports.processTilesWithPmtiles = processTilesWithPmtiles;
 
     function __wbg_get_imports() {
         const import0 = {
@@ -128,6 +231,9 @@ let wasm_bindgen = (function(exports) {
         };
     }
 
+    const TileOutputFinalization = (typeof FinalizationRegistry === 'undefined')
+        ? { register: () => {}, unregister: () => {} }
+        : new FinalizationRegistry(ptr => wasm.__wbg_tileoutput_free(ptr >>> 0, 1));
     const WasmTileConfigFinalization = (typeof FinalizationRegistry === 'undefined')
         ? { register: () => {}, unregister: () => {} }
         : new FinalizationRegistry(ptr => wasm.__wbg_wasmtileconfig_free(ptr >>> 0, 1));
@@ -178,6 +284,43 @@ let wasm_bindgen = (function(exports) {
         return ptr;
     }
 
+    function passStringToWasm0(arg, malloc, realloc) {
+        if (realloc === undefined) {
+            const buf = cachedTextEncoder.encode(arg);
+            const ptr = malloc(buf.length, 1) >>> 0;
+            getUint8ArrayMemory0().subarray(ptr, ptr + buf.length).set(buf);
+            WASM_VECTOR_LEN = buf.length;
+            return ptr;
+        }
+
+        let len = arg.length;
+        let ptr = malloc(len, 1) >>> 0;
+
+        const mem = getUint8ArrayMemory0();
+
+        let offset = 0;
+
+        for (; offset < len; offset++) {
+            const code = arg.charCodeAt(offset);
+            if (code > 0x7F) break;
+            mem[ptr + offset] = code;
+        }
+        if (offset !== len) {
+            if (offset !== 0) {
+                arg = arg.slice(offset);
+            }
+            ptr = realloc(ptr, len, len = offset + arg.length * 3, 1) >>> 0;
+            const view = getUint8ArrayMemory0().subarray(ptr + offset, ptr + len);
+            const ret = cachedTextEncoder.encodeInto(arg, view);
+
+            offset += ret.written;
+            ptr = realloc(ptr, len, offset, 1) >>> 0;
+        }
+
+        WASM_VECTOR_LEN = offset;
+        return ptr;
+    }
+
     function takeFromExternrefTable0(idx) {
         const value = wasm.__wbindgen_externrefs.get(idx);
         wasm.__externref_table_dealloc(idx);
@@ -188,6 +331,19 @@ let wasm_bindgen = (function(exports) {
     cachedTextDecoder.decode();
     function decodeText(ptr, len) {
         return cachedTextDecoder.decode(getUint8ArrayMemory0().subarray(ptr, ptr + len));
+    }
+
+    const cachedTextEncoder = new TextEncoder();
+
+    if (!('encodeInto' in cachedTextEncoder)) {
+        cachedTextEncoder.encodeInto = function (arg, view) {
+            const buf = cachedTextEncoder.encode(arg);
+            view.set(buf);
+            return {
+                read: arg.length,
+                written: buf.length
+            };
+        };
     }
 
     let WASM_VECTOR_LEN = 0;

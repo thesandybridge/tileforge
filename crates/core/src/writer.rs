@@ -1,8 +1,94 @@
+use std::cell::RefCell;
 use std::io::{Seek, Write};
+use std::rc::Rc;
 use zip::write::SimpleFileOptions;
 use zip::ZipWriter;
 
 use crate::TilerError;
+
+/// A shared buffer that can be used with writers that consume ownership.
+/// After the writer is done, the buffer contents can be extracted.
+#[derive(Clone)]
+pub struct SharedBuffer {
+    inner: Rc<RefCell<Vec<u8>>>,
+}
+
+impl SharedBuffer {
+    pub fn new() -> Self {
+        Self {
+            inner: Rc::new(RefCell::new(Vec::new())),
+        }
+    }
+
+    /// Get the contents of the buffer (clones the data).
+    pub fn take_bytes(&self) -> Vec<u8> {
+        std::mem::take(&mut *self.inner.borrow_mut())
+    }
+
+    /// Get a cursor for writing.
+    pub fn cursor(&self) -> SharedBufferCursor {
+        SharedBufferCursor {
+            buffer: self.inner.clone(),
+            position: 0,
+        }
+    }
+}
+
+impl Default for SharedBuffer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// A cursor that writes to a SharedBuffer.
+pub struct SharedBufferCursor {
+    buffer: Rc<RefCell<Vec<u8>>>,
+    position: u64,
+}
+
+impl Write for SharedBufferCursor {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let mut inner = self.buffer.borrow_mut();
+        let pos = self.position as usize;
+
+        // Extend buffer if needed
+        if pos + buf.len() > inner.len() {
+            inner.resize(pos + buf.len(), 0);
+        }
+
+        inner[pos..pos + buf.len()].copy_from_slice(buf);
+        self.position += buf.len() as u64;
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl Seek for SharedBufferCursor {
+    fn seek(&mut self, pos: std::io::SeekFrom) -> std::io::Result<u64> {
+        let inner = self.buffer.borrow();
+        let len = inner.len() as i64;
+        drop(inner);
+
+        let new_pos = match pos {
+            std::io::SeekFrom::Start(p) => p as i64,
+            std::io::SeekFrom::End(p) => len + p,
+            std::io::SeekFrom::Current(p) => self.position as i64 + p,
+        };
+
+        if new_pos < 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "seek to negative position",
+            ));
+        }
+
+        self.position = new_pos as u64;
+        Ok(self.position)
+    }
+}
 
 /// Trait abstracting tile output format (ZIP, PMTiles, etc.).
 ///
