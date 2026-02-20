@@ -86,7 +86,7 @@
 [data-mode="dark"] {
     --background: var(--primary-bg);
     --foreground: var(--text-bright);
-    --card: var(--secondary-bg);
+    --card: var(--card-bg, var(--secondary-bg));
     --card-foreground: var(--text-bright);
     --popover: var(--secondary-bg);
     --popover-foreground: var(--text-bright);
