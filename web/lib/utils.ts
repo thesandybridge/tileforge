@@ -1,10 +1,7 @@
-import { clsx, type ClassValue } from "clsx"
-import { twMerge } from "tailwind-merge"
 import { BYTES_PER_KB, BYTES_PER_MB, BYTES_PER_GB } from "./constants";
 
-export function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs))
-}
+// Re-export cn from shared package
+export { cn } from "@thesandybridge/ui/components";
 
 export function formatBytes(bytes: number): string {
   if (bytes < BYTES_PER_KB) return `${bytes} B`;
