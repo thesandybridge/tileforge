@@ -11,7 +11,7 @@
   },
   "dependencies": {
     "@tanstack/react-query": "^5.90.21",
-    "@thesandybridge/themes": "^1.4.0",
+    "@thesandybridge/themes": "^1.5.0",
     "@thesandybridge/ui": "^1.3.2",
     "@types/pg": "^8.16.0",
     "class-variance-authority": "^0.7.1",
