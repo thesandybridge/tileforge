@@ -1,8 +1,9 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
+@import "../lib/themes/themes.css";
 
-@custom-variant dark (&:is(.dark *));
+@custom-variant dark (&:is([data-mode="dark"] *));
 
 @theme inline {
     --radius-sm: calc(var(--radius) - 4px);
@@ -45,80 +46,80 @@
     --color-sidebar-ring: var(--sidebar-ring);
 }
 
-/* Light mode — neutral with a subtle green hint */
-:root {
+/* Map shared theme variables to shadcn variables */
+/* Light mode (default for data-mode="light") */
+:root, [data-mode="light"] {
     --radius: 0.75rem;
-    --background: oklch(0.98 0.005 150);
-    --foreground: oklch(0.16 0.02 150);
-    --card: oklch(1 0.003 150);
-    --card-foreground: oklch(0.16 0.02 150);
-    --popover: oklch(1 0.003 150);
-    --popover-foreground: oklch(0.16 0.02 150);
-    --primary: oklch(0.72 0.165 75);
-    --primary-foreground: oklch(0.98 0.005 150);
-    --secondary: oklch(0.94 0.008 150);
-    --secondary-foreground: oklch(0.16 0.02 150);
-    --muted: oklch(0.94 0.008 150);
-    --muted-foreground: oklch(0.5 0.015 150);
-    --accent: oklch(0.94 0.008 150);
-    --accent-foreground: oklch(0.16 0.02 150);
-    --destructive: oklch(0.577 0.245 27.325);
-    --border: oklch(0.88 0.01 150);
-    --input: oklch(0.88 0.01 150);
-    --ring: oklch(0.72 0.165 75);
-    --chart-1: oklch(0.646 0.222 41.116);
-    --chart-2: oklch(0.6 0.118 184.704);
-    --chart-3: oklch(0.398 0.07 227.392);
-    --chart-4: oklch(0.828 0.189 84.429);
-    --chart-5: oklch(0.769 0.188 70.08);
-    --sidebar: oklch(0.96 0.005 150);
-    --sidebar-foreground: oklch(0.16 0.02 150);
-    --sidebar-primary: oklch(0.72 0.165 75);
-    --sidebar-primary-foreground: oklch(0.98 0.005 150);
-    --sidebar-accent: oklch(0.94 0.008 150);
-    --sidebar-accent-foreground: oklch(0.16 0.02 150);
-    --sidebar-border: oklch(0.88 0.01 150);
-    --sidebar-ring: oklch(0.72 0.165 75);
+    --background: var(--primary-bg);
+    --foreground: var(--text-bright);
+    --card: var(--secondary-bg);
+    --card-foreground: var(--text-bright);
+    --popover: var(--secondary-bg);
+    --popover-foreground: var(--text-bright);
+    --primary: var(--secondary-fg);
+    --primary-foreground: var(--primary-bg);
+    --secondary: var(--secondary-bg);
+    --secondary-foreground: var(--text-bright);
+    --muted: var(--secondary-bg);
+    --muted-foreground: var(--primary-fg);
+    --accent: var(--secondary-bg);
+    --accent-foreground: var(--text-bright);
+    --destructive: var(--error);
+    --input: var(--border);
+    --ring: var(--secondary-fg);
+    --chart-1: var(--secondary-fg);
+    --chart-2: var(--alt);
+    --chart-3: var(--info);
+    --chart-4: var(--warning);
+    --chart-5: var(--success);
+    --sidebar: var(--secondary-bg);
+    --sidebar-foreground: var(--text-bright);
+    --sidebar-primary: var(--secondary-fg);
+    --sidebar-primary-foreground: var(--primary-bg);
+    --sidebar-accent: var(--secondary-bg);
+    --sidebar-accent-foreground: var(--text-bright);
+    --sidebar-border: var(--border);
+    --sidebar-ring: var(--secondary-fg);
 }
 
-/* Dark mode — warm Gruvbox-adjacent with amber accent */
-.dark {
-    --background: oklch(0.145 0.005 70);
-    --foreground: oklch(0.85 0.04 85);
-    --card: oklch(0.175 0.008 70);
-    --card-foreground: oklch(0.85 0.04 85);
-    --popover: oklch(0.175 0.008 70);
-    --popover-foreground: oklch(0.85 0.04 85);
-    --primary: oklch(0.78 0.155 80);
-    --primary-foreground: oklch(0.145 0.005 70);
-    --secondary: oklch(0.22 0.008 70);
-    --secondary-foreground: oklch(0.85 0.04 85);
-    --muted: oklch(0.22 0.008 70);
-    --muted-foreground: oklch(0.58 0.03 70);
-    --accent: oklch(0.22 0.008 70);
-    --accent-foreground: oklch(0.85 0.04 85);
-    --destructive: oklch(0.65 0.2 25);
-    --border: oklch(0.35 0.015 70 / 20%);
-    --input: oklch(0.35 0.015 70 / 25%);
-    --ring: oklch(0.78 0.155 80);
-    --chart-1: oklch(0.78 0.155 80);
-    --chart-2: oklch(0.696 0.17 162.48);
-    --chart-3: oklch(0.769 0.188 70.08);
-    --chart-4: oklch(0.627 0.265 303.9);
-    --chart-5: oklch(0.645 0.246 16.439);
-    --sidebar: oklch(0.175 0.008 70);
-    --sidebar-foreground: oklch(0.85 0.04 85);
-    --sidebar-primary: oklch(0.78 0.155 80);
-    --sidebar-primary-foreground: oklch(0.145 0.005 70);
-    --sidebar-accent: oklch(0.22 0.008 70);
-    --sidebar-accent-foreground: oklch(0.85 0.04 85);
-    --sidebar-border: oklch(0.35 0.015 70 / 20%);
-    --sidebar-ring: oklch(0.78 0.155 80);
+/* Dark mode */
+[data-mode="dark"] {
+    --background: var(--primary-bg);
+    --foreground: var(--text-bright);
+    --card: var(--secondary-bg);
+    --card-foreground: var(--text-bright);
+    --popover: var(--secondary-bg);
+    --popover-foreground: var(--text-bright);
+    --primary: var(--secondary-fg);
+    --primary-foreground: var(--primary-bg);
+    --secondary: var(--secondary-bg);
+    --secondary-foreground: var(--text-bright);
+    --muted: var(--secondary-bg);
+    --muted-foreground: var(--primary-fg);
+    --accent: var(--secondary-bg);
+    --accent-foreground: var(--text-bright);
+    --destructive: var(--error);
+    --input: var(--border);
+    --ring: var(--secondary-fg);
+    --chart-1: var(--secondary-fg);
+    --chart-2: var(--alt);
+    --chart-3: var(--info);
+    --chart-4: var(--warning);
+    --chart-5: var(--success);
+    --sidebar: var(--secondary-bg);
+    --sidebar-foreground: var(--text-bright);
+    --sidebar-primary: var(--secondary-fg);
+    --sidebar-primary-foreground: var(--primary-bg);
+    --sidebar-accent: var(--secondary-bg);
+    --sidebar-accent-foreground: var(--text-bright);
+    --sidebar-border: var(--border);
+    --sidebar-ring: var(--secondary-fg);
 }
 
 @layer base {
   * {
     @apply border-border outline-ring/50;
+    transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease, fill 0.3s ease, stroke 0.3s ease;
   }
   html {
     @apply overflow-x-hidden;
@@ -128,11 +129,11 @@
   }
 }
 
-/* Corona glow — ambient amber halo for cards */
+/* Corona glow — uses theme accent color */
 .corona-glow {
   box-shadow:
-    0 0 15px 2px rgba(215, 153, 33, 0.10),
-    0 0 4px 1px rgba(215, 153, 33, 0.06);
+    0 0 15px 2px rgba(var(--secondary-fg-rgb), 0.10),
+    0 0 4px 1px rgba(var(--secondary-fg-rgb), 0.06);
 }
 
 .corona-glow-hover {
@@ -140,8 +141,8 @@
 }
 .corona-glow-hover:hover {
   box-shadow:
-    0 0 15px 2px rgba(215, 153, 33, 0.10),
-    0 0 4px 1px rgba(215, 153, 33, 0.06);
+    0 0 15px 2px rgba(var(--secondary-fg-rgb), 0.10),
+    0 0 4px 1px rgba(var(--secondary-fg-rgb), 0.06);
 }
 
 /* Scroll reveal — fade-slide in */

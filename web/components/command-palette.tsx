@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { useTheme } from "next-themes";
+import { useTheme } from "@/components/theme-provider";
 import {
   CommandDialog,
   CommandEmpty,
@@ -21,7 +21,6 @@ import {
   LogOut,
   Moon,
   Sun,
-  Monitor,
   Home,
   Grid3X3,
   FileText,
@@ -64,7 +63,7 @@ export function CommandPaletteProvider({ children }: { children: ReactNode }) {
   const [searchResults, setSearchResults] = useState<TileSet[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const router = useRouter();
-  const { setTheme } = useTheme();
+  const { setMode } = useTheme();
   const { data: session } = useSession();
   const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -220,17 +219,13 @@ export function CommandPaletteProvider({ children }: { children: ReactNode }) {
           <CommandSeparator />
 
           <CommandGroup heading="Theme">
-            <CommandItem onSelect={() => runCommand(() => setTheme("light"))}>
+            <CommandItem onSelect={() => runCommand(() => setMode("light"))}>
               <Sun className="mr-2 h-4 w-4" />
               Light Mode
             </CommandItem>
-            <CommandItem onSelect={() => runCommand(() => setTheme("dark"))}>
+            <CommandItem onSelect={() => runCommand(() => setMode("dark"))}>
               <Moon className="mr-2 h-4 w-4" />
               Dark Mode
-            </CommandItem>
-            <CommandItem onSelect={() => runCommand(() => setTheme("system"))}>
-              <Monitor className="mr-2 h-4 w-4" />
-              System Theme
             </CommandItem>
           </CommandGroup>
 

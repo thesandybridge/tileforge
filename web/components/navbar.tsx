@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useSession } from "next-auth/react";
 import { MenuIcon, GalleryHorizontalEnd, FolderOpen, Newspaper, Github, Search } from "lucide-react";
 import { UserMenu } from "@/components/user-menu";
-import { ThemeToggle } from "@/components/theme-toggle";
+import { ThemePicker } from "@/components/theme-picker";
 import { NotificationPanel } from "@/components/notification-panel";
 import { StandaloneProcessingIndicator } from "@/components/processing-indicator";
 import { useCommandPalette } from "@/components/command-palette";
@@ -112,7 +112,7 @@ export function Navbar() {
             </kbd>
           </Button>
           <GitHubLink className="text-muted-foreground hover:text-foreground transition-colors" />
-          <ThemeToggle />
+          <ThemePicker />
           <NotificationPanel />
           {!session && <StandaloneProcessingIndicator />}
           <UserMenu />
@@ -120,7 +120,7 @@ export function Navbar() {
 
         {/* Mobile right side */}
         <div className="flex items-center gap-2 md:hidden">
-          <ThemeToggle />
+          <ThemePicker />
           <NotificationPanel />
           <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
             <SheetTrigger asChild>

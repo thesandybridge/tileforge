@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Inter, Geist_Mono } from "next/font/google";
+import { generateThemeScript } from "@/lib/themes";
 import { ThemeProvider } from "@/components/theme-provider";
 import { SessionProvider } from "@/components/session-provider";
 import { QueryProvider } from "@/components/query-provider";
@@ -83,6 +84,7 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
+        <script dangerouslySetInnerHTML={{ __html: generateThemeScript() }} />
         <link rel="icon" href="/icon.svg" type="image/svg+xml" />
         <link rel="apple-touch-icon" href="/icon.svg" />
         <meta name="theme-color" content="#1d2021" media="(prefers-color-scheme: dark)" />
@@ -120,7 +122,7 @@ export default function RootLayout({
       <body className={`${inter.className} ${geistMono.variable} flex min-h-dvh flex-col antialiased`}>
         <SessionProvider>
           <QueryProvider>
-            <ThemeProvider attribute="class" defaultTheme="dark" enableSystem>
+            <ThemeProvider>
               <CommandPaletteProvider>
               <RateLimitProvider>
               <NotificationProvider>

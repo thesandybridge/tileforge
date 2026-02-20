@@ -1,17 +1,17 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useTheme } from "next-themes";
+import { useTheme } from "@/components/theme-provider";
 
 export function CursorGlow() {
   const ref = useRef<HTMLDivElement>(null);
-  const { resolvedTheme } = useTheme();
+  const { mode } = useTheme();
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => setMounted(true), []);
 
   useEffect(() => {
-    if (!mounted || resolvedTheme !== "dark") return;
+    if (!mounted || mode !== "dark") return;
 
     const el = ref.current;
     if (!el) return;
@@ -38,10 +38,10 @@ export function CursorGlow() {
       window.removeEventListener("mousemove", onMove);
       document.removeEventListener("mouseleave", onLeave);
     };
-  }, [mounted, resolvedTheme]);
+  }, [mounted, mode]);
 
   // Don't render anything until mounted (avoids hydration mismatch)
-  if (!mounted || resolvedTheme !== "dark") return null;
+  if (!mounted || mode !== "dark") return null;
 
   return (
     <div
