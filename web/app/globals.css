@@ -30,50 +30,6 @@
     --color-ring: var(--ring);
 }
 
-/* Map shared theme variables to shadcn variables */
-/* Light mode (default for data-mode="light") */
-:root, [data-mode="light"] {
-    --radius: 0.75rem;
-    --background: var(--primary-bg);
-    --foreground: var(--text-bright);
-    --card: var(--primary-bg);
-    --card-foreground: var(--text-bright);
-    --popover: var(--primary-bg);
-    --popover-foreground: var(--text-bright);
-    --primary: var(--secondary-fg);
-    --primary-foreground: var(--primary-bg);
-    --secondary: var(--secondary-bg);
-    --secondary-foreground: var(--text-bright);
-    --muted: var(--secondary-bg);
-    --muted-foreground: var(--primary-fg);
-    --accent: var(--secondary-bg);
-    --accent-foreground: var(--text-bright);
-    --destructive: var(--error);
-    --input: var(--border);
-    --ring: var(--secondary-fg);
-}
-
-/* Dark mode */
-[data-mode="dark"] {
-    --background: var(--primary-bg);
-    --foreground: var(--text-bright);
-    --card: var(--primary-bg);
-    --card-foreground: var(--text-bright);
-    --popover: var(--primary-bg);
-    --popover-foreground: var(--text-bright);
-    --primary: var(--secondary-fg);
-    --primary-foreground: var(--primary-bg);
-    --secondary: var(--secondary-bg);
-    --secondary-foreground: var(--text-bright);
-    --muted: var(--secondary-bg);
-    --muted-foreground: var(--primary-fg);
-    --accent: var(--secondary-bg);
-    --accent-foreground: var(--text-bright);
-    --destructive: var(--error);
-    --input: var(--border);
-    --ring: var(--secondary-fg);
-}
-
 @layer base {
   * {
     @apply border-border outline-ring/50;
