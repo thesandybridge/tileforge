@@ -14,25 +14,8 @@ import { ErrorBoundary } from "@/components/error-boundary";
 import { ServiceWorkerRegister } from "@/components/sw-register";
 import { RateLimitProvider } from "@/hooks/use-rate-limit";
 import { CommandPaletteProvider } from "@/components/command-palette";
-import { DynamicFavicon, type FaviconDrawFn } from "@thesandybridge/ui/components";
+import { Favicon } from "@/components/favicon";
 import "./globals.css";
-
-const drawTileIcon: FaviconDrawFn = (ctx, size, accent, bg) => {
-  const r = 3;
-  // Background
-  ctx.fillStyle = bg;
-  ctx.beginPath();
-  ctx.roundRect(0, 0, size, size, 6);
-  ctx.fill();
-  // Tiles
-  ctx.fillStyle = accent;
-  ctx.beginPath(); ctx.roundRect(5, 5, 9, 9, r); ctx.fill();
-  ctx.beginPath(); ctx.roundRect(18, 5, 9, 9, r); ctx.fill();
-  ctx.beginPath(); ctx.roundRect(5, 18, 9, 9, r); ctx.fill();
-  ctx.globalAlpha = 0.5;
-  ctx.beginPath(); ctx.roundRect(19, 19, 7.5, 7.5, r); ctx.fill();
-  ctx.globalAlpha = 1;
-};
 
 const inter = Inter({ subsets: ["latin"] });
 const geistMono = Geist_Mono({ subsets: ["latin"], variable: "--font-geist-mono" });
@@ -142,7 +125,7 @@ export default function RootLayout({
         <SessionProvider>
           <QueryProvider>
             <ThemeProvider>
-              <DynamicFavicon draw={drawTileIcon} />
+              <Favicon />
               <CommandPaletteProvider>
               <RateLimitProvider>
               <NotificationProvider>
