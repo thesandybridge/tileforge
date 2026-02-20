@@ -52,16 +52,25 @@ const PRESIGN_TTL_SECS: u32 = 600; // 10 minutes
         (name = "Notifications", description = "In-app notifications"),
         (name = "API Keys", description = "API key management (Pro only)")
     ),
-    components(schemas(
-        ErrorBody,
-        AcceptedResponse,
-        Plan,
-        UserResponse,
-        TileSetRow,
-        ApiKeyRow,
-        ApiKeyCreatedResponse,
-        NotificationRow
-    ))
+    paths(
+        health,
+        process_tiles,
+        get_current_user,
+        list_tilesets,
+        get_tileset
+    ),
+    components(
+        schemas(
+            ErrorBody,
+            AcceptedResponse,
+            Plan,
+            UserResponse,
+            TileSetRow,
+            ApiKeyRow,
+            ApiKeyCreatedResponse,
+            NotificationRow
+        )
+    )
 )]
 struct ApiDoc;
 
@@ -346,7 +355,7 @@ async fn validate_api_key(db: &PgPool, raw_key: &str) -> Option<UserClaims> {
 // Query params
 // ---------------------------------------------------------------------------
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::IntoParams)]
 struct TileParams {
     tile_size: Option<u32>,
     min_zoom: Option<u32>,
@@ -625,10 +634,31 @@ async fn rate_limit_mutations(
 // Routes
 // ---------------------------------------------------------------------------
 
+#[utoipa::path(
+    get,
+    path = "/health",
+    tag = "Health",
+    responses(
+        (status = 200, description = "Service is healthy", body = String)
+    )
+)]
 async fn health() -> &'static str {
     "ok"
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/tiles",
+    tag = "Tiles",
+    params(TileParams),
+    request_body(content = Vec<u8>, content_type = "application/octet-stream", description = "Image bytes"),
+    responses(
+        (status = 200, description = "Tiles processed (sync)", content_type = "application/zip"),
+        (status = 202, description = "Job queued for async processing", body = AcceptedResponse),
+        (status = 400, description = "Invalid input", body = ErrorBody),
+        (status = 429, description = "Rate limit exceeded", body = ErrorBody)
+    )
+)]
 async fn process_tiles(
     State(state): State<AppState>,
     claims: OptionalClaims,
@@ -1076,7 +1106,7 @@ struct TileSetRow {
     height: Option<i32>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::IntoParams)]
 struct ListTileSetsQuery {
     user_id: Option<Uuid>,
     page: Option<i64>,
@@ -1141,6 +1171,15 @@ async fn create_tileset(
     Ok((StatusCode::CREATED, Json(row)).into_response())
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/tilesets",
+    tag = "Tilesets",
+    params(ListTileSetsQuery),
+    responses(
+        (status = 200, description = "List of tilesets", body = Vec<TileSetRow>)
+    )
+)]
 async fn list_tilesets(
     State(state): State<AppState>,
     claims: OptionalClaims,
@@ -1186,6 +1225,18 @@ async fn list_tilesets(
     Ok(Json(rows))
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/tilesets/{slug}",
+    tag = "Tilesets",
+    params(
+        ("slug" = String, Path, description = "Tileset slug")
+    ),
+    responses(
+        (status = 200, description = "Tileset details", body = TileSetRow),
+        (status = 404, description = "Tileset not found", body = ErrorBody)
+    )
+)]
 async fn get_tileset(
     State(state): State<AppState>,
     claims: OptionalClaims,
@@ -1298,6 +1349,15 @@ struct UserResponse {
     storage_quota: i64,
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/user",
+    tag = "User",
+    responses(
+        (status = 200, description = "Current user info", body = UserResponse),
+        (status = 401, description = "Unauthorized", body = ErrorBody)
+    )
+)]
 async fn get_current_user(
     State(state): State<AppState>,
     Claims(user): Claims,
