@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useSession } from "next-auth/react";
-import { Check, X } from "lucide-react";
+import { Check, X, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PLAN_PRO } from "@/lib/plans";
 import { useCheckout } from "@/hooks/use-billing";
@@ -163,7 +163,14 @@ export default function PricingPage() {
                 onClick={() => checkout.mutate()}
                 disabled={checkout.isPending}
               >
-                {checkout.isPending ? "Loading..." : "Upgrade to Pro"}
+                {checkout.isPending ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Loading...
+                  </>
+                ) : (
+                  "Upgrade to Pro"
+                )}
               </Button>
             )
           ) : (

@@ -14,6 +14,7 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { useNotifications } from "@/components/notification-context";
 import { useRateLimit } from "@/hooks/use-rate-limit";
+import { DEFAULT_TILE_SIZE } from "@/lib/constants";
 import type { WorkerRequest, WorkerResponse, ScaleMetadata } from "@/lib/worker-protocol";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
@@ -326,7 +327,7 @@ export function TileforgeProvider({ children }: { children: ReactNode }) {
       const msg: WorkerRequest = {
         type: "process",
         imageBytes,
-        tileSize: opts.tileSize ?? 256,
+        tileSize: opts.tileSize ?? DEFAULT_TILE_SIZE,
         minZoom: opts.minZoom,
         maxZoom: opts.maxZoom,
         projection: opts.projection,
@@ -363,7 +364,7 @@ export function TileforgeProvider({ children }: { children: ReactNode }) {
       dispatch({ type: "processing" });
 
       const params = new URLSearchParams();
-      params.set("tile_size", String(opts.tileSize ?? 256));
+      params.set("tile_size", String(opts.tileSize ?? DEFAULT_TILE_SIZE));
       if (opts.minZoom != null) params.set("min_zoom", String(opts.minZoom));
       if (opts.maxZoom != null) params.set("max_zoom", String(opts.maxZoom));
       if (opts.projection) params.set("projection", opts.projection);
@@ -550,7 +551,7 @@ export function TileforgeProvider({ children }: { children: ReactNode }) {
     updateQueueItem(file.id, { status: "processing", progress: null });
 
     const params = new URLSearchParams();
-    params.set("tile_size", String(opts.tileSize ?? 256));
+    params.set("tile_size", String(opts.tileSize ?? DEFAULT_TILE_SIZE));
     if (opts.minZoom != null) params.set("min_zoom", String(opts.minZoom));
     if (opts.maxZoom != null) params.set("max_zoom", String(opts.maxZoom));
     if (opts.projection) params.set("projection", opts.projection);

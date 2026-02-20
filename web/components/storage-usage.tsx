@@ -2,9 +2,10 @@
 
 import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
+import { BYTES_PER_GB } from "@/lib/constants";
 
 function formatGB(bytes: number): string {
-  return (bytes / (1024 * 1024 * 1024)).toFixed(2);
+  return (bytes / BYTES_PER_GB).toFixed(2);
 }
 
 interface StorageUsageProps {

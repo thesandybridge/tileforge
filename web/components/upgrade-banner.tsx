@@ -7,7 +7,7 @@ import { ArrowRight } from "lucide-react";
 import { useCheckout } from "@/hooks/use-billing";
 import { PLAN_PRO } from "@/lib/plans";
 import { Button } from "@/components/ui/button";
-import { X, Zap, Server, Database, Key } from "lucide-react";
+import { X, Zap, Server, Database, Key, Loader2 } from "lucide-react";
 
 const STORAGE_KEY = "tileforge:upgrade-banner-dismissed";
 const DISMISS_DURATION_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
@@ -83,8 +83,17 @@ export function UpgradeBanner() {
           </div>
 
           <Button onClick={handleUpgrade} disabled={checkout.isPending} size="sm">
-            <Zap className="mr-2 h-4 w-4" />
-            {checkout.isPending ? "Loading..." : session ? "Upgrade now" : "Sign in to upgrade"}
+            {checkout.isPending ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Loading...
+              </>
+            ) : (
+              <>
+                <Zap className="mr-2 h-4 w-4" />
+                {session ? "Upgrade now" : "Sign in to upgrade"}
+              </>
+            )}
           </Button>
         </div>
       </div>

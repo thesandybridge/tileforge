@@ -11,6 +11,14 @@ import { TileParticles } from "@/components/tile-particles";
 import { UpgradeBanner } from "@/components/upgrade-banner";
 import { useTileforge } from "@/components/tileforge-context";
 import { PLAN_PRO } from "@/lib/plans";
+import {
+  DEFAULT_TILE_SIZE,
+  DEFAULT_MIN_ZOOM,
+  DEFAULT_MAX_ZOOM,
+  DEFAULT_PROJECTION,
+  BYTES_PER_PIXEL,
+  BYTES_PER_MB,
+} from "@/lib/constants";
 import { useTileDefaults } from "@/hooks/use-tile-defaults";
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
 import { usePresets, type Preset } from "@/hooks/use-presets";
@@ -57,7 +65,7 @@ function readImageDimensions(file: File): Promise<ImageInfo> {
       const w = img.naturalWidth;
       const h = img.naturalHeight;
       URL.revokeObjectURL(img.src);
-      resolve({ width: w, height: h, decodedMB: (w * h * 4) / (1024 * 1024) });
+      resolve({ width: w, height: h, decodedMB: (w * h * BYTES_PER_PIXEL) / BYTES_PER_MB });
     };
     img.onerror = () => {
       URL.revokeObjectURL(img.src);
@@ -127,10 +135,10 @@ const initialFormState: FormState = {
   mode: "local",
   fileName: null,
   imageInfo: null,
-  tileSize: 256,
-  minZoom: 0,
-  maxZoom: 4,
-  projection: "flat",
+  tileSize: DEFAULT_TILE_SIZE,
+  minZoom: DEFAULT_MIN_ZOOM,
+  maxZoom: DEFAULT_MAX_ZOOM,
+  projection: DEFAULT_PROJECTION,
   hasFile: false,
   dragState: "idle",
   scale: null,
@@ -966,7 +974,7 @@ export default function Home() {
                 )}
                 {status === "done" && zipBlob && (
                   <Button size="lg" variant="secondary" onClick={onDownload} className="flex-1 sm:flex-none">
-                    Download ZIP ({(zipBlob.size / (1024 * 1024)).toFixed(1)} MB)
+                    Download ZIP ({(zipBlob.size / BYTES_PER_MB).toFixed(1)} MB)
                   </Button>
                 )}
                 {status === "done" && (pmtilesUrl || pmtilesBlob) && (

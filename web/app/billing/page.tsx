@@ -86,8 +86,17 @@ function BillingContent() {
               </div>
             )}
             <Button onClick={handleManage} disabled={loading} variant="outline">
-              <ExternalLink className="mr-2 h-4 w-4" />
-              {portal.isPending ? "Loading..." : "Manage Subscription"}
+              {portal.isPending ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Loading...
+                </>
+              ) : (
+                <>
+                  <ExternalLink className="mr-2 h-4 w-4" />
+                  Manage Subscription
+                </>
+              )}
             </Button>
           </div>
         ) : (
@@ -96,7 +105,14 @@ function BillingContent() {
               Upgrade to Pro for server-side processing and persistent tilesets.
             </p>
             <Button onClick={handleUpgrade} disabled={loading}>
-              {checkout.isPending ? "Loading..." : "Upgrade to Pro"}
+              {checkout.isPending ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Loading...
+                </>
+              ) : (
+                "Upgrade to Pro"
+              )}
             </Button>
           </div>
         )}

@@ -15,7 +15,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Key, Copy, CheckCheck } from "lucide-react";
+import { Key, Copy, CheckCheck, Loader2 } from "lucide-react";
 
 export function ApiKeyCard() {
   const { data: apiKey, isLoading } = useApiKey();
@@ -115,7 +115,14 @@ export function ApiKeyCard() {
               onClick={() => setConfirmRegenerate(true)}
               disabled={createKey.isPending}
             >
-              {createKey.isPending ? "Generating..." : "Regenerate"}
+              {createKey.isPending ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Generating...
+                </>
+              ) : (
+                "Regenerate"
+              )}
             </Button>
             <Button
               variant="ghost"
@@ -124,14 +131,30 @@ export function ApiKeyCard() {
               disabled={revokeKey.isPending}
               className="text-destructive hover:text-destructive"
             >
-              {revokeKey.isPending ? "Revoking..." : "Revoke"}
+              {revokeKey.isPending ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Revoking...
+                </>
+              ) : (
+                "Revoke"
+              )}
             </Button>
           </div>
         </div>
       ) : (
         <Button onClick={handleCreate} disabled={createKey.isPending} size="sm">
-          <Key className="mr-2 h-4 w-4" />
-          {createKey.isPending ? "Generating..." : "Generate API Key"}
+          {createKey.isPending ? (
+            <>
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              Generating...
+            </>
+          ) : (
+            <>
+              <Key className="mr-2 h-4 w-4" />
+              Generate API Key
+            </>
+          )}
         </Button>
       )}
 

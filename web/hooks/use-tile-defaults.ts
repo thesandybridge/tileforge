@@ -1,22 +1,29 @@
 "use client";
 
 import { useCallback, useSyncExternalStore } from "react";
+import {
+  DEFAULT_TILE_SIZE,
+  DEFAULT_MIN_ZOOM,
+  DEFAULT_MAX_ZOOM,
+  DEFAULT_PROJECTION,
+  type Projection,
+} from "@/lib/constants";
 
 export interface TileDefaults {
   tileSize: number;
   minZoom: number;
   maxZoom: number;
-  projection: "flat" | "mercator" | "isometric";
+  projection: Projection;
   defaultPublic: boolean;
 }
 
 const STORAGE_KEY = "tileforge:tile-defaults";
 
 const DEFAULT_VALUES: TileDefaults = {
-  tileSize: 256,
-  minZoom: 0,
-  maxZoom: 4,
-  projection: "flat",
+  tileSize: DEFAULT_TILE_SIZE,
+  minZoom: DEFAULT_MIN_ZOOM,
+  maxZoom: DEFAULT_MAX_ZOOM,
+  projection: DEFAULT_PROJECTION,
   defaultPublic: false,
 };
 
