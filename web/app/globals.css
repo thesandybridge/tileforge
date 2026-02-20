@@ -1,6 +1,5 @@
 @import "tailwindcss";
 @import "tw-animate-css";
-@import "shadcn/tailwind.css";
 @import "@thesandybridge/themes/css";
 
 @custom-variant dark (&:is([data-mode="dark"] *));
@@ -52,9 +51,9 @@
     --radius: 0.75rem;
     --background: var(--primary-bg);
     --foreground: var(--text-bright);
-    --card: var(--secondary-bg);
+    --card: var(--primary-bg);
     --card-foreground: var(--text-bright);
-    --popover: var(--secondary-bg);
+    --popover: var(--primary-bg);
     --popover-foreground: var(--text-bright);
     --primary: var(--secondary-fg);
     --primary-foreground: var(--primary-bg);
@@ -63,7 +62,7 @@
     --muted: var(--secondary-bg);
     --muted-foreground: var(--primary-fg);
     --accent: var(--secondary-bg);
-    --accent-foreground: var(--text-bright);
+    --accent-foreground: var(--secondary-fg);
     --destructive: var(--error);
     --input: var(--border);
     --ring: var(--secondary-fg);
@@ -86,9 +85,9 @@
 [data-mode="dark"] {
     --background: var(--primary-bg);
     --foreground: var(--text-bright);
-    --card: var(--card-bg, var(--secondary-bg));
+    --card: var(--primary-bg);
     --card-foreground: var(--text-bright);
-    --popover: var(--secondary-bg);
+    --popover: var(--primary-bg);
     --popover-foreground: var(--text-bright);
     --primary: var(--secondary-fg);
     --primary-foreground: var(--primary-bg);
@@ -97,7 +96,7 @@
     --muted: var(--secondary-bg);
     --muted-foreground: var(--primary-fg);
     --accent: var(--secondary-bg);
-    --accent-foreground: var(--text-bright);
+    --accent-foreground: var(--secondary-fg);
     --destructive: var(--error);
     --input: var(--border);
     --ring: var(--secondary-fg);

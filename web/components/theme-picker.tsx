@@ -80,12 +80,6 @@ export function ThemePicker() {
             onMouseLeave={handlePreviewLeave}
             className="gap-2 hover:!bg-[rgba(128,128,128,0.2)]"
           >
-            <div
-              className="h-3 w-3 rounded-full border"
-              style={{
-                backgroundColor: getThemeAccentColor(t.id, mode),
-              }}
-            />
             {t.name}
             {theme === t.id && <Check className="ml-auto h-4 w-4" />}
           </DropdownMenuItem>
@@ -93,19 +87,4 @@ export function ThemePicker() {
       </DropdownMenuContent>
     </DropdownMenu>
   );
-}
-
-function getThemeAccentColor(themeId: string, mode: "light" | "dark"): string {
-  const accents: Record<string, Record<"light" | "dark", string>> = {
-    gruvbox: { dark: "#d79921", light: "#b57614" },
-    dracula: { dark: "#bd93f9", light: "#9d6dd0" },
-    alucard: { dark: "#dc143c", light: "#b01030" },
-    nord: { dark: "#88c0d0", light: "#5e81ac" },
-    catppuccin: { dark: "#cba6f7", light: "#8839ef" },
-    "one-dark": { dark: "#56b6c2", light: "#0184bc" },
-    solarized: { dark: "#b58900", light: "#b58900" },
-    prism: { dark: "#e8b4d8", light: "#d946ef" },
-    "oil-spill": { dark: "#4a9ca8", light: "#2d7a87" },
-  };
-  return accents[themeId]?.[mode] ?? "#888";
 }
