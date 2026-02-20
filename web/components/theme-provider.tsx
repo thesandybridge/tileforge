@@ -11,7 +11,7 @@ import {
   isValidMode,
   DEFAULT_THEME,
   DEFAULT_MODE,
-} from '@/lib/themes';
+} from '@thesandybridge/themes';
 
 export { THEMES, type Theme, type Mode };
 
