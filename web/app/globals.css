@@ -62,7 +62,7 @@
     --muted: var(--secondary-bg);
     --muted-foreground: var(--primary-fg);
     --accent: var(--secondary-bg);
-    --accent-foreground: var(--secondary-fg);
+    --accent-foreground: var(--text-bright);
     --destructive: var(--error);
     --input: var(--border);
     --ring: var(--secondary-fg);
@@ -96,7 +96,7 @@
     --muted: var(--secondary-bg);
     --muted-foreground: var(--primary-fg);
     --accent: var(--secondary-bg);
-    --accent-foreground: var(--secondary-fg);
+    --accent-foreground: var(--text-bright);
     --destructive: var(--error);
     --input: var(--border);
     --ring: var(--secondary-fg);
