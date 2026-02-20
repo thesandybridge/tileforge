@@ -15,6 +15,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useNotifications } from "@/components/notification-context";
 import { useRateLimit } from "@/hooks/use-rate-limit";
 import { DEFAULT_TILE_SIZE } from "@/lib/constants";
+import { toFriendlyError } from "@/lib/error-messages";
 import type { WorkerRequest, WorkerResponse, ScaleMetadata } from "@/lib/worker-protocol";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
@@ -299,9 +300,11 @@ export function TileforgeProvider({ children }: { children: ReactNode }) {
           });
           break;
         }
-        case "error":
-          dispatch({ type: "error", message: msg.message });
+        case "error": {
+          const friendly = toFriendlyError(msg.message);
+          dispatch({ type: "error", message: `${friendly.title}: ${friendly.message}` });
           break;
+        }
       }
     };
 
@@ -355,7 +358,8 @@ export function TileforgeProvider({ children }: { children: ReactNode }) {
       const healthy = await waitForHealth(signal);
       if (!healthy) {
         if (!signal.aborted) {
-          dispatch({ type: "error", message: "Server is unavailable. Try local WASM processing instead." });
+          const friendly = toFriendlyError("server unavailable");
+          dispatch({ type: "error", message: `${friendly.title}: ${friendly.message}` });
         }
         return;
       }
@@ -385,7 +389,8 @@ export function TileforgeProvider({ children }: { children: ReactNode }) {
 
         if (!res.ok && res.status !== 202) {
           const body = await res.json().catch(() => ({ error: "Server error" }));
-          dispatch({ type: "error", message: body.error ?? `Server error (${res.status})` });
+          const friendly = toFriendlyError(body.error ?? `Server error (${res.status})`);
+          dispatch({ type: "error", message: `${friendly.title}: ${friendly.message}` });
           return;
         }
 
@@ -442,12 +447,14 @@ export function TileforgeProvider({ children }: { children: ReactNode }) {
                   queryClient.invalidateQueries({ queryKey: ["user"] });
                   queryClient.invalidateQueries({ queryKey: ["tilesets"] });
                 } catch (dlErr) {
-                  dispatch({ type: "error", message: dlErr instanceof Error ? dlErr.message : "Download failed" });
+                  const friendly = toFriendlyError(dlErr instanceof Error ? dlErr.message : "Download failed");
+                  dispatch({ type: "error", message: `${friendly.title}: ${friendly.message}` });
                 }
               } else if (data.status === "failed") {
                 sse.close();
                 sseRef.current = null;
-                dispatch({ type: "error", message: data.error ?? "Processing failed" });
+                const friendly = toFriendlyError(data.error ?? "Processing failed");
+                dispatch({ type: "error", message: `${friendly.title}: ${friendly.message}` });
               }
             } catch {
               // Ignore parse errors
@@ -462,7 +469,8 @@ export function TileforgeProvider({ children }: { children: ReactNode }) {
             if (sseRetries >= MAX_SSE_RETRIES) {
               sse.close();
               sseRef.current = null;
-              dispatch({ type: "error", message: "Lost connection to server after multiple retries" });
+              const friendly = toFriendlyError("lost connection");
+              dispatch({ type: "error", message: `${friendly.title}: ${friendly.message}` });
             }
             // Otherwise let EventSource auto-reconnect
           };
@@ -482,8 +490,9 @@ export function TileforgeProvider({ children }: { children: ReactNode }) {
         if (err instanceof Error && err.name === "AbortError") {
           return;
         }
-        const message = err instanceof Error ? err.message : "Failed to connect to server";
-        dispatch({ type: "error", message });
+        const errorMsg = err instanceof Error ? err.message : "Failed to connect to server";
+        const friendly = toFriendlyError(errorMsg);
+        dispatch({ type: "error", message: `${friendly.title}: ${friendly.message}` });
       }
     },
     [queryClient],
@@ -577,7 +586,8 @@ export function TileforgeProvider({ children }: { children: ReactNode }) {
 
       if (!res.ok && res.status !== 202) {
         const body = await res.json().catch(() => ({ error: "Server error" }));
-        updateQueueItem(file.id, { status: "error", error: body.error ?? `Server error (${res.status})` });
+        const friendly = toFriendlyError(body.error ?? `Server error (${res.status})`);
+        updateQueueItem(file.id, { status: "error", error: `${friendly.title}: ${friendly.message}` });
         return;
       }
 
@@ -632,14 +642,16 @@ export function TileforgeProvider({ children }: { children: ReactNode }) {
                     progress: null,
                   });
                 } catch (dlErr) {
+                  const friendly = toFriendlyError(dlErr instanceof Error ? dlErr.message : "Download failed");
                   updateQueueItem(file.id, {
                     status: "error",
-                    error: dlErr instanceof Error ? dlErr.message : "Download failed",
+                    error: `${friendly.title}: ${friendly.message}`,
                   });
                 }
               } else if (data.status === "failed") {
                 cleanup();
-                updateQueueItem(file.id, { status: "error", error: data.error ?? "Processing failed" });
+                const friendly = toFriendlyError(data.error ?? "Processing failed");
+                updateQueueItem(file.id, { status: "error", error: `${friendly.title}: ${friendly.message}` });
               }
             } catch {
               // Ignore parse errors
@@ -648,7 +660,8 @@ export function TileforgeProvider({ children }: { children: ReactNode }) {
 
           sse.onerror = () => {
             cleanup();
-            updateQueueItem(file.id, { status: "error", error: "Lost connection to server" });
+            const friendly = toFriendlyError("lost connection");
+            updateQueueItem(file.id, { status: "error", error: `${friendly.title}: ${friendly.message}` });
           };
         });
       } else {
@@ -662,7 +675,8 @@ export function TileforgeProvider({ children }: { children: ReactNode }) {
       }
     } catch (err) {
       if ((err as Error).name !== "AbortError") {
-        updateQueueItem(file.id, { status: "error", error: "Failed to connect to server" });
+        const friendly = toFriendlyError("Failed to connect to server");
+        updateQueueItem(file.id, { status: "error", error: `${friendly.title}: ${friendly.message}` });
       }
     }
   }, [updateQueueItem, updateFromHeaders]);

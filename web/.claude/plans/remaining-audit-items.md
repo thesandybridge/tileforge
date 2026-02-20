@@ -15,9 +15,9 @@ Items identified during codebase audit that are deferred for later implementatio
 - Add exponential backoff retry for S3 uploads
 - Handle transient network failures gracefully
 
-### M-3: User-Friendly Worker Error Messages
-- Map technical WASM errors to user-friendly messages
-- Provide actionable guidance (e.g., "Image too large, try reducing dimensions")
+### ~~M-3: User-Friendly Worker Error Messages~~ ✓ DONE
+- ~~Map technical WASM errors to user-friendly messages~~
+- ~~Provide actionable guidance (e.g., "Image too large, try reducing dimensions")~~
 
 ### M-6: Request Timeouts
 - Add timeout handling for long-running operations
@@ -25,17 +25,17 @@ Items identified during codebase audit that are deferred for later implementatio
 
 ## Low Priority
 
-### L-2: Magic Numbers
-- Extract magic numbers in tile processing to named constants
-- Document their meaning and valid ranges
+### ~~L-2: Magic Numbers~~ ✓ DONE
+- ~~Extract magic numbers in tile processing to named constants~~
+- ~~Document their meaning and valid ranges~~
 
-### L-3: Error Message Consistency
-- Standardize error message format across API routes
-- Use consistent structure: `{ error: string, code?: string, details?: object }`
+### ~~L-3: Error Message Consistency~~ ✓ DONE
+- ~~Standardize error message format across API routes~~
+- ~~Use consistent structure: `{ error: string, code?: string, details?: object }`~~
 
-### L-4: Button Loading States
-- Add loading spinners to buttons that trigger async operations
-- Disable buttons during loading to prevent double-clicks
+### ~~L-4: Button Loading States~~ ✓ DONE
+- ~~Add loading spinners to buttons that trigger async operations~~
+- ~~Disable buttons during loading to prevent double-clicks~~
 
 ### L-6: PWA Manifest
 - Add proper favicon set for PWA

@@ -35,6 +35,7 @@ import {
 import { DropAreaSkeleton } from "@/components/tileset-skeleton";
 import { RateLimitBanner } from "@/components/rate-limit-banner";
 import { BatchQueue } from "@/components/batch-queue";
+import { InlineError } from "@/components/error-boundary";
 import {
   Dialog,
   DialogContent,
@@ -997,7 +998,11 @@ export default function Home() {
               )}
 
               {error && (
-                <p className="text-destructive text-center text-sm">{error}</p>
+                <InlineError
+                  error={error}
+                  onRetry={canProcess ? onProcess : undefined}
+                  onDismiss={onReset}
+                />
               )}
             </CardContent>
           </Card>
