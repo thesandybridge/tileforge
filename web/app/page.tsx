@@ -980,7 +980,7 @@ export default function Home() {
                 )}
                 {status === "done" && (pmtilesUrl || pmtilesBlob) && (
                   <Button size="lg" variant="secondary" onClick={onDownloadPmtiles} className="flex-1 sm:flex-none">
-                    Download PMTiles
+                    Download PMTiles{pmtilesBlob && ` (${(pmtilesBlob.size / BYTES_PER_MB).toFixed(1)} MB)`}
                   </Button>
                 )}
                 {(status === "done" || status === "error") && (
@@ -991,9 +991,10 @@ export default function Home() {
               </div>
 
               {/* Stats */}
-              {status === "done" && durationMs != null && form.imageInfo && (
+              {status === "done" && durationMs != null && (
                 <p className="text-muted-foreground text-center text-xs">
-                  Done in {(durationMs / 1000).toFixed(1)}s &mdash; {totalTiles} tiles &mdash; peak memory ~{Math.round(form.imageInfo.decodedMB)} MB
+                  Done in {(durationMs / 1000).toFixed(1)}s &mdash; {totalTiles} tiles
+                  {form.imageInfo && <> &mdash; peak memory ~{Math.round(form.imageInfo.decodedMB)} MB</>}
                 </p>
               )}
 
@@ -1019,12 +1020,12 @@ export default function Home() {
       </div>
 
       {/* Tile preview — full width */}
-      {status === "done" && zipBlob && form.imageInfo && (
+      {status === "done" && zipBlob && (
         <div className="mx-auto mt-8 max-w-6xl px-6">
           <TilePreview
             zipBlob={zipBlob}
-            imageWidth={form.imageInfo.width}
-            imageHeight={form.imageInfo.height}
+            imageWidth={form.imageInfo?.width ?? form.tileSize * (1 << form.maxZoom)}
+            imageHeight={form.imageInfo?.height ?? form.tileSize * (1 << form.maxZoom)}
             maxZoom={form.maxZoom}
             tileSize={form.tileSize}
             projection={form.projection}

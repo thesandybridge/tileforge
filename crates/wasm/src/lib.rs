@@ -1,6 +1,6 @@
 use tileforge_core::{
     BackgroundColor, PmTilesTileWriter, Projection, ScaleMetadata, SharedBuffer, TeeTileWriter,
-    TileConfig, Tiler, ZipTileWriter,
+    TileConfig, TileWriter, Tiler, ZipTileWriter,
 };
 use wasm_bindgen::prelude::*;
 
@@ -216,6 +216,10 @@ pub fn process_tiles_with_pmtiles(
                 &JsValue::from(p.zoom),
             );
         })
+        .map_err(|e| JsError::new(&e.to_string()))?;
+
+    // Finalize both writers (writes PMTiles headers/directory)
+    tee_writer.finish()
         .map_err(|e| JsError::new(&e.to_string()))?;
 
     let (zip_writer, _pmtiles_writer) = tee_writer.into_inner();
