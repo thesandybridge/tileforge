@@ -4,8 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev --turbopack",
-    "build": "npm run build:wasm && next build",
-    "build:wasm": "cd ../crates/wasm && wasm-pack build --target no-modules --out-dir ../../web/public/wasm --release",
+    "build": "next build",
     "start": "next start",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui"

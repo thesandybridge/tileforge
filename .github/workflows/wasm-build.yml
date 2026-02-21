@@ -1,13 +1,13 @@
-name: Build and Test WASM
+name: Build WASM
 
 on:
   push:
     paths:
       - "crates/**"
     branches: [main]
-  pull_request:
-    paths:
-      - "crates/**"
+
+permissions:
+  contents: write
 
 jobs:
   build-wasm:
@@ -29,10 +29,12 @@ jobs:
       - name: Build WASM
         run: wasm-pack build crates/wasm --target no-modules --out-dir ../../web/public/wasm --release
 
-      - name: Test WASM build
+      - name: Commit WASM if changed
         run: |
-          if [ ! -f web/public/wasm/tileforge_wasm_bg.wasm ]; then
-            echo "WASM build failed - output file not found"
-            exit 1
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add web/public/wasm/
+          if ! git diff --staged --quiet; then
+            git commit -m "build: update WASM output [skip ci]"
+            git push
           fi
-          echo "WASM build successful"
