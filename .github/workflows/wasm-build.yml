@@ -2,8 +2,6 @@ name: Build WASM
 
 on:
   push:
-    paths:
-      - "crates/**"
     branches: [main]
 
 permissions:
@@ -29,12 +27,15 @@ jobs:
       - name: Build WASM
         run: wasm-pack build crates/wasm --target no-modules --out-dir ../../web/public/wasm --release
 
-      - name: Commit WASM if changed
+      - name: Commit WASM
         run: |
+          rm -f web/public/wasm/.gitignore
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add web/public/wasm/
           if ! git diff --staged --quiet; then
             git commit -m "build: update WASM output [skip ci]"
             git push
+          else
+            echo "No WASM changes to commit"
           fi
