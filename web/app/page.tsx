@@ -1022,14 +1022,17 @@ export default function Home() {
       {/* Tile preview — full width */}
       {status === "done" && zipBlob && (
         <div className="mx-auto mt-8 max-w-6xl px-6">
-          <TilePreview
-            zipBlob={zipBlob}
-            imageWidth={form.imageInfo?.width ?? form.tileSize * (1 << form.maxZoom)}
-            imageHeight={form.imageInfo?.height ?? form.tileSize * (1 << form.maxZoom)}
-            maxZoom={form.maxZoom}
-            tileSize={form.tileSize}
-            projection={form.projection}
-          />
+          <div className="rounded-lg border border-border p-4">
+            <h2 className="mb-4 text-lg font-semibold">Tile Preview</h2>
+            <TilePreview
+              zipBlob={zipBlob}
+              imageWidth={form.imageInfo?.width ?? form.tileSize * (1 << form.maxZoom)}
+              imageHeight={form.imageInfo?.height ?? form.tileSize * (1 << form.maxZoom)}
+              maxZoom={form.maxZoom}
+              tileSize={form.tileSize}
+              projection={form.projection}
+            />
+          </div>
         </div>
       )}
 
