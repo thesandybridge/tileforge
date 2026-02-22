@@ -12,7 +12,7 @@ use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
 use std::io::Cursor;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tileforge_core::{streaming::should_use_streaming, Projection, TileConfig, Tiler, ZipTileWriter, STREAMING_THRESHOLD};
+use tileforge_core::{streaming::should_use_streaming, BackgroundColor, Projection, TileConfig, Tiler, ZipTileWriter, STREAMING_THRESHOLD};
 use tileforge_shared::{
     progress_key, tile_s3_prefix, upload_s3_key, JobProgress, TileJob,
     NATS_JOBS_SUBJECT, REDIS_JOBS_KEY,
@@ -32,6 +32,8 @@ pub struct TileParams {
     max_zoom: Option<u32>,
     projection: Option<String>,
     file_name: Option<String>,
+    scale: Option<f64>,
+    background_color: Option<String>,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -137,15 +139,15 @@ async fn enqueue_async(
     Ok((StatusCode::ACCEPTED, Json(AcceptedResponse { job_id })).into_response())
 }
 
-fn process_sync(body: Bytes, tile_size: u32, min_zoom: Option<u32>, max_zoom: Option<u32>, projection: Projection) -> Result<Vec<u8>, ApiError> {
+fn process_sync(body: Bytes, tile_size: u32, min_zoom: Option<u32>, max_zoom: Option<u32>, projection: Projection, scale: Option<f64>, background_color: Option<String>) -> Result<Vec<u8>, ApiError> {
     let image_bytes = body.to_vec();
     let config = TileConfig {
         tile_size,
         min_zoom,
         max_zoom,
         projection,
-        scale: None,
-        background: None,
+        scale,
+        background: background_color.as_deref().and_then(BackgroundColor::from_hex),
         scale_metadata: None,
     };
     let tiler = Tiler::new(config);
@@ -210,6 +212,8 @@ pub async fn process_tiles(
             user_id: claims.0.as_ref().map(|c| c.sub.clone()),
             file_name: params.file_name.clone(),
             reserved_bytes,
+            scale: params.scale,
+            background_color: params.background_color.clone(),
         };
         return enqueue_async(&state, &body, job).await;
     }
@@ -217,8 +221,10 @@ pub async fn process_tiles(
     // Sync path
     let min_zoom = params.min_zoom;
     let max_zoom = params.max_zoom;
+    let scale = params.scale;
+    let background_color = params.background_color.clone();
     let zip_bytes = tokio::task::spawn_blocking(move || {
-        process_sync(body, tile_size, min_zoom, max_zoom, projection)
+        process_sync(body, tile_size, min_zoom, max_zoom, projection, scale, background_color)
     })
     .await
     .map_err(|e| ApiError::Processing(format!("task join error: {e}")))?;
@@ -416,6 +422,8 @@ mod tests {
             max_zoom,
             projection: projection.map(|s| s.to_string()),
             file_name: None,
+            scale: None,
+            background_color: None,
         }
     }
 
@@ -495,7 +503,7 @@ mod tests {
         img.write_to(&mut buf, image::ImageFormat::Png).unwrap();
         let bytes = Bytes::from(buf.into_inner());
 
-        let result = process_sync(bytes, 256, None, None, Projection::Flat);
+        let result = process_sync(bytes, 256, None, None, Projection::Flat, None, None);
         assert!(result.is_ok());
         let zip_bytes = result.unwrap();
         assert!(!zip_bytes.is_empty());

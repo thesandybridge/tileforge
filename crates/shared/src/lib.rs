@@ -51,6 +51,10 @@ pub struct TileJob {
     pub file_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reserved_bytes: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scale: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub background_color: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -110,6 +114,8 @@ mod tests {
             user_id: None,
             file_name: Some("map.png".into()),
             reserved_bytes: None,
+            scale: None,
+            background_color: None,
         };
         let json = serde_json::to_string(&job).unwrap();
         let parsed: TileJob = serde_json::from_str(&json).unwrap();

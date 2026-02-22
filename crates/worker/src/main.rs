@@ -13,8 +13,8 @@ use std::io::Cursor;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tileforge_core::{
-    streaming::should_use_streaming, PmTilesTileWriter, Projection, TeeTileWriter, TileConfig,
-    TileProgress, Tiler, ZipTileWriter, STREAMING_THRESHOLD,
+    streaming::should_use_streaming, BackgroundColor, PmTilesTileWriter, Projection, TeeTileWriter,
+    TileConfig, TileProgress, Tiler, ZipTileWriter, STREAMING_THRESHOLD,
 };
 
 fn unix_now() -> u64 {
@@ -391,8 +391,8 @@ async fn process_job(
         min_zoom: job.min_zoom,
         max_zoom: job.max_zoom,
         projection,
-        scale: None,
-        background: None,
+        scale: job.scale,
+        background: job.background_color.as_deref().and_then(BackgroundColor::from_hex),
         scale_metadata: None,
     };
 

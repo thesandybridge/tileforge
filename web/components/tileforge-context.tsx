@@ -373,6 +373,8 @@ export function TileforgeProvider({ children }: { children: ReactNode }) {
       if (opts.maxZoom != null) params.set("max_zoom", String(opts.maxZoom));
       if (opts.projection) params.set("projection", opts.projection);
       if (opts.fileName) params.set("file_name", opts.fileName);
+      if (opts.scale != null) params.set("scale", String(opts.scale));
+      if (opts.backgroundColor) params.set("background_color", opts.backgroundColor);
 
       try {
         const headers: Record<string, string> = { "content-type": "application/octet-stream" };
@@ -565,6 +567,8 @@ export function TileforgeProvider({ children }: { children: ReactNode }) {
     if (opts.maxZoom != null) params.set("max_zoom", String(opts.maxZoom));
     if (opts.projection) params.set("projection", opts.projection);
     params.set("file_name", file.fileName);
+    if (opts.scale != null) params.set("scale", String(opts.scale));
+    if (opts.backgroundColor) params.set("background_color", opts.backgroundColor);
 
     const startTime = performance.now();
 
