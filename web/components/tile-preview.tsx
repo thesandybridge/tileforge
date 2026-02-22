@@ -145,7 +145,7 @@ export default function TilePreview({
     ];
 
     return (
-      <div className="mt-4 overflow-hidden rounded-xl border">
+      <div className="overflow-hidden rounded-xl border">
         <MapContainer
           bounds={mercatorBounds}
           maxZoom={maxZoom}
@@ -169,7 +169,7 @@ export default function TilePreview({
   ];
 
   return (
-    <div className="mt-4 overflow-hidden rounded-xl border">
+    <div className="overflow-hidden rounded-xl border">
       <MapContainer
         bounds={bounds}
         maxZoom={maxZoom}

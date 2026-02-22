@@ -379,10 +379,10 @@ export default function Home() {
   });
 
   return (
-    <div className="flex flex-1 flex-col py-16">
+    <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col px-4 py-16 md:px-6">
       {/* Hero */}
       <ScrollReveal>
-        <header className="mx-auto max-w-2xl px-6 text-center">
+        <header className="mx-auto max-w-2xl text-center">
           <div className="inline-flex items-center gap-3">
             <svg
               viewBox="0 0 32 32"
@@ -416,7 +416,7 @@ export default function Home() {
 
       {/* Main tool card */}
       <ScrollReveal className="overflow-y-visible overflow-x-clip">
-      <main className="mx-auto mt-10 max-w-2xl px-6 space-y-4">
+      <main className="mx-auto mt-10 max-w-2xl space-y-4">
         <RateLimitBanner />
         {form.mode === "local" && (status === "idle" || status === "loading") && (
           <DropAreaSkeleton />
@@ -1013,7 +1013,7 @@ export default function Home() {
       </ScrollReveal>
 
       {/* Upgrade CTA */}
-      <div className="mx-auto mt-8 max-w-2xl px-6">
+      <div className="mx-auto mt-8 max-w-2xl">
         <ScrollReveal>
           <UpgradeBanner />
         </ScrollReveal>
@@ -1021,18 +1021,16 @@ export default function Home() {
 
       {/* Tile preview — full width */}
       {status === "done" && zipBlob && (
-        <div className="mx-auto mt-8 max-w-6xl px-6">
-          <div className="rounded-lg border border-border p-4">
-            <h2 className="mb-4 text-lg font-semibold">Tile Preview</h2>
-            <TilePreview
+        <div className="mt-8">
+          <h2 className="mb-2 text-lg font-semibold">Tile Preview</h2>
+          <TilePreview
               zipBlob={zipBlob}
               imageWidth={form.imageInfo?.width ?? form.tileSize * (1 << form.maxZoom)}
               imageHeight={form.imageInfo?.height ?? form.tileSize * (1 << form.maxZoom)}
               maxZoom={form.maxZoom}
               tileSize={form.tileSize}
               projection={form.projection}
-            />
-          </div>
+          />
         </div>
       )}
 
