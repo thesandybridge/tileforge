@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use sqlx::PgPool;
+use tileforge_shared::TILESET_S3_SUFFIXES;
 
 use crate::error::ApiError;
 
@@ -12,9 +13,6 @@ pub const PRESIGN_TTL_SECS: u32 = 600;
 
 /// Stale job timeout: 5 minutes with no progress update.
 pub const STALE_JOB_TIMEOUT_SECS: u64 = 300;
-
-/// S3 object suffixes for tileset storage cleanup.
-pub const TILESET_S3_OBJECTS: &[&str] = &["tiles.zip", "tiles.pmtiles", "thumbnail.jpg"];
 
 #[derive(Clone)]
 pub struct AppState {
@@ -43,7 +41,7 @@ pub fn require_bucket(state: &AppState) -> Result<&Arc<s3::Bucket>, ApiError> {
 
 /// Delete all S3 objects for a tileset storage path.
 pub async fn delete_tileset_s3_objects(bucket: &s3::Bucket, storage_path: &str) {
-    for suffix in TILESET_S3_OBJECTS {
+    for suffix in TILESET_S3_SUFFIXES {
         let _ = bucket.delete_object(&format!("{storage_path}/{suffix}")).await;
     }
 }

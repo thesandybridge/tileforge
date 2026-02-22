@@ -13,6 +13,10 @@ use serde::{Deserialize, Serialize};
 use std::io::Cursor;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tileforge_core::{streaming::should_use_streaming, Projection, TileConfig, Tiler, ZipTileWriter, STREAMING_THRESHOLD};
+use tileforge_shared::{
+    progress_key, tile_s3_prefix, upload_s3_key, JobProgress, TileJob,
+    NATS_JOBS_SUBJECT, REDIS_JOBS_KEY,
+};
 use uuid::Uuid;
 
 use crate::auth::{Claims, OptionalClaims, Plan};
@@ -30,38 +34,9 @@ pub struct TileParams {
     file_name: Option<String>,
 }
 
-#[derive(Serialize)]
-struct JobPayload {
-    job_id: String,
-    tile_size: u32,
-    min_zoom: Option<u32>,
-    max_zoom: Option<u32>,
-    projection: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    user_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    file_name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    reserved_bytes: Option<i64>,
-}
-
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct AcceptedResponse {
     job_id: String,
-}
-
-#[derive(Deserialize)]
-#[allow(dead_code)]
-struct ProgressData {
-    status: String,
-    #[serde(default)]
-    last_updated: u64,
-    zoom: Option<u32>,
-    tiles_done: Option<u32>,
-    tiles_total: Option<u32>,
-    download_url: Option<String>,
-    pmtiles_url: Option<String>,
-    error: Option<String>,
 }
 
 fn parse_projection(s: &str) -> Result<Projection, ApiError> {
@@ -134,7 +109,7 @@ async fn enqueue_async(
 
     // Upload image bytes to S3
     bucket
-        .put_object(&format!("uploads/{job_id}.bin"), body)
+        .put_object(&upload_s3_key(job_id), body)
         .await
         .map_err(|e| ApiError::Processing(format!("S3 upload failed: {e}")))?;
 
@@ -146,16 +121,16 @@ async fn enqueue_async(
         "user_id": user.map(|c| &c.sub),
     });
     let _: redis::RedisResult<()> = redis
-        .set_ex(format!("tileforge:progress:{job_id}"), initial_progress.to_string(), 3600u64)
+        .set_ex(progress_key(job_id), initial_progress.to_string(), 3600u64)
         .await;
 
     // Build job payload
-    let job = JobPayload {
+    let job = TileJob {
         job_id: job_id.to_string(),
-        tile_size,
+        tile_size: Some(tile_size),
         min_zoom: params.min_zoom,
         max_zoom: params.max_zoom,
-        projection: projection_str.to_string(),
+        projection: Some(projection_str.to_string()),
         user_id: user.map(|c| c.sub.clone()),
         file_name: params.file_name.clone(),
         reserved_bytes,
@@ -163,14 +138,14 @@ async fn enqueue_async(
     let job_json = serde_json::to_string(&job).unwrap();
 
     if let Some(ref nats) = state.nats {
-        nats.publish("tileforge.jobs", job_json.into())
+        nats.publish(NATS_JOBS_SUBJECT, job_json.into())
             .await
             .map_err(|e| ApiError::Processing(format!("NATS publish failed: {e}")))?
             .await
             .map_err(|e| ApiError::Processing(format!("NATS publish ack failed: {e}")))?;
         tracing::info!(job_id = %job_id, "enqueued async job via NATS");
     } else {
-        let _: redis::RedisResult<()> = redis.lpush("tileforge:jobs", &job_json).await;
+        let _: redis::RedisResult<()> = redis.lpush(REDIS_JOBS_KEY, &job_json).await;
         tracing::info!(job_id = %job_id, "enqueued async job via Redis (NATS not configured)");
     }
 
@@ -286,7 +261,7 @@ pub async fn job_progress(
 
     tokio::spawn(async move {
         let mut conn = redis;
-        let key = format!("tileforge:progress:{job_id}");
+        let key = progress_key(&job_id);
         let mut interval = tokio::time::interval(std::time::Duration::from_millis(500));
 
         for _ in 0..1200u32 {
@@ -296,7 +271,7 @@ pub async fn job_progress(
             let (event, is_terminal) = match val {
                 Ok(Some(json)) => {
                     let mut terminal = false;
-                    if let Ok(progress) = serde_json::from_str::<ProgressData>(&json) {
+                    if let Ok(progress) = serde_json::from_str::<JobProgress>(&json) {
                         if progress.status == "complete" || progress.status == "failed" {
                             terminal = true;
                         } else if progress.last_updated > 0 {
@@ -350,7 +325,7 @@ async fn verify_job_owner(
     job_id: &str,
     user: &crate::auth::UserClaims,
 ) -> Result<(), ApiError> {
-    let key = format!("tileforge:progress:{job_id}");
+    let key = progress_key(job_id);
     let val: Option<String> = redis.get(&key).await.ok().flatten();
     if let Some(json) = val {
         if let Ok(data) = serde_json::from_str::<serde_json::Value>(&json) {
@@ -375,7 +350,7 @@ pub async fn job_download(
 
     let bucket = require_bucket(&state)?;
     let response = bucket
-        .get_object(&format!("tiles/{job_id}/tiles.zip"))
+        .get_object(&format!("{}/tiles.zip", tile_s3_prefix(&job_id)))
         .await
         .map_err(|_| ApiError::NotFound)?;
 
@@ -396,7 +371,7 @@ pub async fn job_thumbnail(
 ) -> Result<Response, ApiError> {
     let bucket = require_bucket(&state)?;
     let resp = bucket
-        .get_object(&format!("tiles/{job_id}/thumbnail.jpg"))
+        .get_object(&format!("{}/thumbnail.jpg", tile_s3_prefix(&job_id)))
         .await
         .map_err(|_| ApiError::NotFound)?;
 
@@ -424,7 +399,7 @@ pub async fn job_download_pmtiles(
 
     let bucket = require_bucket(&state)?;
     let response = bucket
-        .get_object(&format!("tiles/{job_id}/tiles.pmtiles"))
+        .get_object(&format!("{}/tiles.pmtiles", tile_s3_prefix(&job_id)))
         .await
         .map_err(|_| ApiError::NotFound)?;
 

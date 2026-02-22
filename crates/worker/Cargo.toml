@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 tileforge-core = { path = "../core", features = ["tiff"] }
+tileforge-shared = { path = "../shared" }
 redis = { version = "0.27", features = ["aio", "tokio-comp"] }
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }

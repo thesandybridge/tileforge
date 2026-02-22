@@ -3759,6 +3759,7 @@ dependencies = [
  "sha2",
  "sqlx",
  "tileforge-core",
+ "tileforge-shared",
  "tokio",
  "tokio-stream",
  "tower",
@@ -3792,6 +3793,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "tileforge-shared"
+version = "0.1.0"
+dependencies = [
+ "rust-s3",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "tileforge-wasm"
 version = "0.1.0"
 dependencies = [
@@ -3814,6 +3824,7 @@ dependencies = [
  "sqlx",
  "tempfile",
  "tileforge-core",
+ "tileforge-shared",
  "tokio",
  "tracing",
  "tracing-subscriber",

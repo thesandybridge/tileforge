@@ -3,7 +3,6 @@ mod config;
 mod error;
 mod handlers;
 mod rate_limit;
-mod s3;
 mod state;
 
 use std::net::SocketAddr;
@@ -117,10 +116,12 @@ async fn init_nats(url: &str) -> Option<async_nats::jetstream::Context> {
         Ok(client) => {
             let js = async_nats::jetstream::new(client);
 
+            use tileforge_shared::{NATS_STREAM_NAME, NATS_JOBS_SUBJECT};
+
             match js
                 .get_or_create_stream(async_nats::jetstream::stream::Config {
-                    name: "TILEFORGE_JOBS".into(),
-                    subjects: vec!["tileforge.jobs".into()],
+                    name: NATS_STREAM_NAME.into(),
+                    subjects: vec![NATS_JOBS_SUBJECT.into()],
                     retention: async_nats::jetstream::stream::RetentionPolicy::WorkQueue,
                     max_age: std::time::Duration::from_secs(86400),
                     storage: async_nats::jetstream::stream::StorageType::File,
@@ -128,7 +129,7 @@ async fn init_nats(url: &str) -> Option<async_nats::jetstream::Context> {
                 })
                 .await
             {
-                Ok(_) => tracing::info!("NATS JetStream stream TILEFORGE_JOBS ready"),
+                Ok(_) => tracing::info!("NATS JetStream stream {NATS_STREAM_NAME} ready"),
                 Err(e) => tracing::warn!("failed to create NATS stream: {e}"),
             }
 
@@ -136,7 +137,7 @@ async fn init_nats(url: &str) -> Option<async_nats::jetstream::Context> {
                 .get_or_create_stream(async_nats::jetstream::stream::Config {
                     name: "TILEFORGE_DLQ".into(),
                     subjects: vec![
-                        "$JS.EVENT.ADVISORY.CONSUMER.MAX_DELIVERIES.TILEFORGE_JOBS.>".into(),
+                        format!("$JS.EVENT.ADVISORY.CONSUMER.MAX_DELIVERIES.{NATS_STREAM_NAME}.>"),
                     ],
                     max_age: std::time::Duration::from_secs(7 * 86400),
                     storage: async_nats::jetstream::stream::StorageType::File,
@@ -359,7 +360,7 @@ async fn main() {
         }
     };
 
-    let bucket = s3::bucket_from_env();
+    let bucket = tileforge_shared::s3::bucket_from_env();
     tracing::info!(
         "S3: {}",
         if bucket.is_some() { "configured" } else { "not configured" }

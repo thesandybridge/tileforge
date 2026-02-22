@@ -1,11 +1,12 @@
-mod s3;
-
 use async_nats::jetstream::consumer::PullConsumer;
 use async_nats::jetstream::message::AckKind;
 use futures::StreamExt;
 use redis::AsyncCommands;
-use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
+use tileforge_shared::{
+    progress_key, tile_s3_prefix, upload_s3_key, JobProgress, TileJob,
+    NATS_JOBS_SUBJECT, NATS_STREAM_NAME, REDIS_JOBS_KEY,
+};
 use uuid::Uuid;
 use std::cell::Cell;
 use std::io::Cursor;
@@ -21,40 +22,6 @@ fn unix_now() -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_secs()
-}
-
-// ---------------------------------------------------------------------------
-// Job / progress types
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Deserialize)]
-struct Job {
-    job_id: String,
-    tile_size: Option<u32>,
-    min_zoom: Option<u32>,
-    max_zoom: Option<u32>,
-    projection: Option<String>,
-    user_id: Option<String>,
-    file_name: Option<String>,
-    reserved_bytes: Option<i64>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct ProgressUpdate {
-    status: String,
-    last_updated: u64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    zoom: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    tiles_done: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    tiles_total: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    download_url: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pmtiles_url: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    error: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -92,7 +59,7 @@ async fn main() {
         .init();
 
     let config = WorkerConfig::from_env();
-    let bucket = s3::bucket_from_env().expect("S3 env vars required (S3_ENDPOINT, S3_BUCKET, S3_ACCESS_KEY, S3_SECRET_KEY)");
+    let bucket = tileforge_shared::s3::bucket_from_env().expect("S3 env vars required (S3_ENDPOINT, S3_BUCKET, S3_ACCESS_KEY, S3_SECRET_KEY)");
 
     // Connect to Postgres if configured (for tile_set row inserts)
     let db = if let Some(ref url) = config.database_url {
@@ -143,7 +110,7 @@ async fn main() {
 
 async fn run_nats_loop(
     nats_url: &str,
-    bucket: &s3::Bucket,
+    bucket: &tileforge_shared::s3::Bucket,
     conn: &mut redis::aio::MultiplexedConnection,
     db: Option<&PgPool>,
 ) {
@@ -154,8 +121,8 @@ async fn run_nats_loop(
 
     let stream = js
         .get_or_create_stream(async_nats::jetstream::stream::Config {
-            name: "TILEFORGE_JOBS".into(),
-            subjects: vec!["tileforge.jobs".into()],
+            name: NATS_STREAM_NAME.into(),
+            subjects: vec![NATS_JOBS_SUBJECT.into()],
             retention: async_nats::jetstream::stream::RetentionPolicy::WorkQueue,
             max_age: Duration::from_secs(86400),
             storage: async_nats::jetstream::stream::StorageType::File,
@@ -197,7 +164,7 @@ async fn run_nats_loop(
             }
         };
 
-        let job: Job = match serde_json::from_slice(&msg.payload) {
+        let job: TileJob = match serde_json::from_slice(&msg.payload) {
             Ok(j) => j,
             Err(e) => {
                 tracing::error!("invalid job JSON: {e}");
@@ -217,26 +184,22 @@ async fn run_nats_loop(
                     tracing::error!(job_id = %job.job_id, "failed to ack message: {e}");
                 }
                 bucket
-                    .delete_object(&format!("uploads/{}.bin", job.job_id))
+                    .delete_object(&upload_s3_key(&job.job_id))
                     .await
                     .ok();
                 tracing::info!(job_id = %job.job_id, "job complete, acked");
             }
             Err(e) => {
                 tracing::error!(job_id = %job.job_id, delivery = delivery_count, "job failed: {e}");
-                let progress = ProgressUpdate {
+                let progress = JobProgress {
                     status: "failed".into(),
                     last_updated: unix_now(),
-                    zoom: None,
-                    tiles_done: None,
-                    tiles_total: None,
-                    download_url: None,
-                    pmtiles_url: None,
                     error: Some(e.to_string()),
+                    ..Default::default()
                 };
                 let _: redis::RedisResult<()> = conn
                     .set_ex(
-                        format!("tileforge:progress:{}", job.job_id),
+                        progress_key(&job.job_id),
                         serde_json::to_string(&progress).unwrap(),
                         3600,
                     )
@@ -246,7 +209,7 @@ async fn run_nats_loop(
                     tracing::warn!(job_id = %job.job_id, "max retries reached, terminating");
                     let _ = msg.ack_with(AckKind::Term).await;
                     bucket
-                        .delete_object(&format!("uploads/{}.bin", job.job_id))
+                        .delete_object(&upload_s3_key(&job.job_id))
                         .await
                         .ok();
                     // Release storage reservation on permanent failure
@@ -282,16 +245,16 @@ async fn run_nats_loop(
 // ---------------------------------------------------------------------------
 
 async fn run_redis_loop(
-    bucket: &s3::Bucket,
+    bucket: &tileforge_shared::s3::Bucket,
     conn: &mut redis::aio::MultiplexedConnection,
     db: Option<&PgPool>,
 ) {
-    tracing::info!("listening for jobs on Redis (tileforge:jobs)");
+    tracing::info!("listening for jobs on Redis ({REDIS_JOBS_KEY})");
 
     loop {
         let result: redis::RedisResult<(String, String)> =
             redis::cmd("BRPOP")
-                .arg("tileforge:jobs")
+                .arg(REDIS_JOBS_KEY)
                 .arg(0)
                 .query_async(conn)
                 .await;
@@ -305,7 +268,7 @@ async fn run_redis_loop(
             }
         };
 
-        let job: Job = match serde_json::from_str(&job_json) {
+        let job: TileJob = match serde_json::from_str(&job_json) {
             Ok(j) => j,
             Err(e) => {
                 tracing::error!("invalid job JSON: {e}");
@@ -319,25 +282,21 @@ async fn run_redis_loop(
 
         // Always clean up the upload from S3
         bucket
-            .delete_object(&format!("uploads/{}.bin", job.job_id))
+            .delete_object(&upload_s3_key(&job.job_id))
             .await
             .ok();
 
         if let Err(e) = result {
             tracing::error!(job_id = %job.job_id, "job failed: {e}");
-            let progress = ProgressUpdate {
+            let progress = JobProgress {
                 status: "failed".into(),
                 last_updated: unix_now(),
-                zoom: None,
-                tiles_done: None,
-                tiles_total: None,
-                download_url: None,
-                pmtiles_url: None,
                 error: Some(e.to_string()),
+                ..Default::default()
             };
             let _: redis::RedisResult<()> = conn
                 .set_ex(
-                    format!("tileforge:progress:{}", job.job_id),
+                    progress_key(&job.job_id),
                     serde_json::to_string(&progress).unwrap(),
                     3600,
                 )
@@ -363,31 +322,27 @@ async fn run_redis_loop(
 // ---------------------------------------------------------------------------
 
 async fn process_job(
-    job: &Job,
-    bucket: &s3::Bucket,
+    job: &TileJob,
+    bucket: &tileforge_shared::s3::Bucket,
     conn: &mut redis::aio::MultiplexedConnection,
     db: Option<&PgPool>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let progress_key = format!("tileforge:progress:{}", job.job_id);
+    let pkey = progress_key(&job.job_id);
 
     // Set initial processing status
-    let initial = ProgressUpdate {
+    let initial = JobProgress {
         status: "processing".into(),
         last_updated: unix_now(),
-        zoom: None,
         tiles_done: Some(0),
         tiles_total: Some(0),
-        download_url: None,
-        pmtiles_url: None,
-        error: None,
+        ..Default::default()
     };
-    conn.set_ex::<_, _, ()>(&progress_key, serde_json::to_string(&initial)?, 3600u64)
+    conn.set_ex::<_, _, ()>(&pkey, serde_json::to_string(&initial)?, 3600u64)
         .await?;
 
     // Download image from S3
-    let s3_key = format!("uploads/{}.bin", job.job_id);
     let resp = bucket
-        .get_object(&s3_key)
+        .get_object(&upload_s3_key(&job.job_id))
         .await
         .map_err(|e| format!("S3 download failed: {e}"))?;
     let image_bytes = resp.to_vec();
@@ -406,7 +361,7 @@ async fn process_job(
             if let Ok(()) = thumb.write_to(&mut cursor, image::ImageFormat::Jpeg) {
                 match bucket
                     .put_object(
-                        &format!("tiles/{}/thumbnail.jpg", job.job_id),
+                        &format!("{}/thumbnail.jpg", tile_s3_prefix(&job.job_id)),
                         &jpeg_buf,
                     )
                     .await
@@ -447,7 +402,7 @@ async fn process_job(
 
     // Spawn a tokio task to poll shared_progress and write to Redis every 250ms
     let poller_conn = conn.clone();
-    let poller_key = progress_key.clone();
+    let poller_key = pkey.clone();
     let poller_progress = Arc::clone(&shared_progress);
     let poller_done = Arc::clone(&shared_done);
     let poller = tokio::spawn(async move {
@@ -458,15 +413,13 @@ async fn process_job(
             // Extract under the lock, then drop guard before awaiting
             let snapshot = { poller_progress.lock().unwrap().clone() };
             if let Some(p) = snapshot {
-                let update = ProgressUpdate {
+                let update = JobProgress {
                     status: "processing".into(),
                     last_updated: unix_now(),
                     zoom: Some(p.zoom),
                     tiles_done: Some(p.tiles_done),
                     tiles_total: Some(p.tiles_total),
-                    download_url: None,
-                    pmtiles_url: None,
-                    error: None,
+                    ..Default::default()
                 };
                 let _: redis::RedisResult<()> = conn
                     .set_ex(
@@ -533,8 +486,9 @@ async fn process_job(
     let _ = poller.await;
 
     // Upload both artifacts to S3
+    let prefix = tile_s3_prefix(&job.job_id);
     bucket
-        .put_object(&format!("tiles/{}/tiles.zip", job.job_id), &zip_bytes)
+        .put_object(&format!("{prefix}/tiles.zip"), &zip_bytes)
         .await
         .map_err(|e| format!("S3 ZIP upload failed: {e}"))?;
 
@@ -545,10 +499,7 @@ async fn process_job(
     );
 
     bucket
-        .put_object(
-            &format!("tiles/{}/tiles.pmtiles", job.job_id),
-            &pmtiles_bytes,
-        )
+        .put_object(&format!("{prefix}/tiles.pmtiles"), &pmtiles_bytes)
         .await
         .map_err(|e| format!("S3 PMTiles upload failed: {e}"))?;
 
@@ -559,17 +510,14 @@ async fn process_job(
     );
 
     // Set final progress
-    let final_progress = ProgressUpdate {
+    let final_progress = JobProgress {
         status: "complete".into(),
         last_updated: unix_now(),
-        zoom: None,
-        tiles_done: None,
-        tiles_total: None,
         download_url: Some(format!("/api/tiles/{}/download", job.job_id)),
         pmtiles_url: Some(format!("/api/tiles/{}/download/pmtiles", job.job_id)),
-        error: None,
+        ..Default::default()
     };
-    conn.set_ex::<_, _, ()>(&progress_key, serde_json::to_string(&final_progress)?, 3600u64)
+    conn.set_ex::<_, _, ()>(&pkey, serde_json::to_string(&final_progress)?, 3600u64)
         .await?;
 
     // Insert tile_set row if we have a user_id and DB connection
@@ -589,7 +537,7 @@ async fn process_job(
                 });
             let slug = &job.job_id;
             let projection = job.projection.as_deref().unwrap_or("flat");
-            let storage_path = format!("tiles/{}", job.job_id);
+            let storage_path = tile_s3_prefix(&job.job_id);
             let total_size = (zip_bytes.len() + pmtiles_bytes.len()) as i64;
 
             // Calculate tile count from zoom levels (i64 to avoid overflow at high zoom)
