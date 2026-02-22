@@ -1,0 +1,52 @@
+# API Keys
+
+API keys provide a convenient way to authenticate with the TileForge API without managing JWT tokens.
+
+## Creating an API Key
+
+1. Sign in to TileForge
+2. Go to **Settings** > **API Keys**
+3. Click **Create API Key**
+4. Give your key a descriptive name
+5. Copy the key — it won't be shown again
+
+<CalloutCard title="Save Your Key" variant="warning">
+  API keys are only displayed once at creation time. Store them securely.
+</CalloutCard>
+
+## Using API Keys
+
+API keys can be used in two ways:
+
+### As a Bearer Token
+
+```bash
+curl https://api.tileforge.sandybridge.io/api/tilesets \
+  -H "Authorization: Bearer tf_your_api_key_here"
+```
+
+### As a Query Parameter
+
+```bash
+curl "https://api.tileforge.sandybridge.io/api/tilesets?key=tf_your_api_key_here"
+```
+
+## Key Format
+
+All API keys start with the `tf_` prefix, making them easy to identify:
+
+```
+tf_a1b2c3d4e5f6g7h8i9j0...
+```
+
+## Managing Keys
+
+From the Settings page you can:
+
+- **View** all active keys with their creation dates
+- **Delete** keys that are no longer needed
+- **Regenerate** a key if it may have been compromised
+
+## Rate Limits
+
+API keys are subject to the same rate limits as your account tier. See [Pricing](/pricing) for details on plan limits.

@@ -1,0 +1,52 @@
+# Projections
+
+TileForge supports two projection modes for tile generation.
+
+## Flat Projection
+
+Flat projection treats the source image as a simple 2D plane. The image is divided into tiles without any geographic distortion.
+
+```bash
+tileforge input.png -o tiles --projection flat
+```
+
+**Use cases**:
+- Game maps and virtual worlds
+- Architectural floor plans
+- Art and illustrations
+- Any non-geographic image
+
+<CalloutCard title="Default Projection" variant="info">
+  Flat projection is the default. Use this unless your source image is a geographic map in Mercator projection.
+</CalloutCard>
+
+## Mercator Projection
+
+Mercator projection applies the Web Mercator (EPSG:3857) transformation used by web mapping services like Google Maps, OpenStreetMap, and Mapbox.
+
+```bash
+tileforge input.png -o tiles --projection mercator
+```
+
+**Use cases**:
+- Geographic maps and satellite imagery
+- Integration with existing map tile services
+- Overlaying custom data on standard web maps
+
+## How It Works
+
+### Flat
+The image is simply subdivided at each zoom level. At zoom 0, the entire image is one 256x256 tile. At zoom 1, it becomes 2x2 tiles, and so on.
+
+### Mercator
+The image is reprojected into the Web Mercator coordinate system before tiling. This ensures tiles align correctly when overlaid on standard web maps.
+
+## Choosing a Projection
+
+| Scenario | Projection |
+|----------|-----------|
+| Game map / floor plan | Flat |
+| Geographic map | Mercator |
+| Artwork / illustration | Flat |
+| Satellite overlay | Mercator |
+| Technical diagram | Flat |

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useSession } from "next-auth/react";
-import { MenuIcon, GalleryHorizontalEnd, FolderOpen, Newspaper, Github, Search } from "lucide-react";
+import { MenuIcon, GalleryHorizontalEnd, FolderOpen, Newspaper, BookOpen, Github, Search } from "lucide-react";
 import { UserMenu } from "@/components/user-menu";
 import { ThemePicker } from "@/components/theme-picker";
 import { NotificationPanel } from "@/components/notification-panel";
@@ -69,6 +69,14 @@ function NavLinks({ onClick }: { onClick?: () => void }) {
           My Tilesets
         </Link>
       )}
+      <Link
+        href="/docs"
+        onClick={onClick}
+        className="hover:text-foreground flex items-center gap-3 transition-colors"
+      >
+        <BookOpen className="h-4 w-4" />
+        Docs
+      </Link>
       <Link
         href="/changelog"
         onClick={onClick}

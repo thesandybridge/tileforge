@@ -1,0 +1,116 @@
+# Leaflet Integration
+
+Display TileForge tiles using Leaflet or MapLibre GL.
+
+## Leaflet with XYZ Tiles
+
+```html
+<div id="map" style="height: 500px;"></div>
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+```
+
+```javascript
+const map = L.map("map", {
+  crs: L.CRS.Simple, // Use Simple CRS for flat projection
+  minZoom: 0,
+  maxZoom: 5,
+});
+
+L.tileLayer("/tiles/{z}/{x}/{y}.png", {
+  minZoom: 0,
+  maxZoom: 5,
+  noWrap: true,
+}).addTo(map);
+
+map.setView([0, 0], 2);
+```
+
+<CalloutCard title="CRS Selection" variant="info">
+  Use `L.CRS.Simple` for flat projection tiles and `L.CRS.EPSG3857` (the default) for Mercator projection tiles.
+</CalloutCard>
+
+## React Leaflet
+
+```tsx
+import { MapContainer, TileLayer } from "react-leaflet";
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
+
+export function TileMap({ tileUrl }: { tileUrl: string }) {
+  return (
+    <MapContainer
+      crs={L.CRS.Simple}
+      center={[0, 0]}
+      zoom={2}
+      minZoom={0}
+      maxZoom={5}
+      style={{ height: "500px", width: "100%" }}
+    >
+      <TileLayer
+        url={`${tileUrl}/{z}/{x}/{y}.png`}
+        minZoom={0}
+        maxZoom={5}
+        noWrap
+      />
+    </MapContainer>
+  );
+}
+```
+
+## MapLibre GL with PMTiles
+
+```javascript
+import maplibregl from "maplibre-gl";
+import { Protocol } from "pmtiles";
+
+const protocol = new Protocol();
+maplibregl.addProtocol("pmtiles", protocol.tile);
+
+const map = new maplibregl.Map({
+  container: "map",
+  style: {
+    version: 8,
+    sources: {
+      tileset: {
+        type: "raster",
+        url: "pmtiles:///path/to/tileset.pmtiles",
+        tileSize: 256,
+      },
+    },
+    layers: [
+      {
+        id: "tileset-layer",
+        type: "raster",
+        source: "tileset",
+      },
+    ],
+  },
+});
+```
+
+## Serving Tiles
+
+### Static Files (XYZ)
+
+Serve the tile directory from any static file server:
+
+```bash
+# Python
+python -m http.server 8080 --directory ./tiles
+
+# Nginx
+location /tiles/ {
+    root /var/www;
+    add_header Access-Control-Allow-Origin *;
+}
+```
+
+### PMTiles
+
+PMTiles can be served from any server that supports HTTP range requests, including S3, CloudFront, and most CDNs.
+
+```bash
+# Just upload the .pmtiles file to your static host
+aws s3 cp tileset.pmtiles s3://my-bucket/tiles/
+```

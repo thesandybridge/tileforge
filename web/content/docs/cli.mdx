@@ -1,0 +1,85 @@
+# CLI
+
+The TileForge CLI generates map tiles from the command line.
+
+## Installation
+
+```bash
+cargo install tileforge-cli
+```
+
+Or build from source:
+
+```bash
+git clone https://github.com/thesandybridge/tileforge.git
+cd tileforge
+cargo build --release -p tileforge-cli
+```
+
+The binary will be at `target/release/tileforge`.
+
+## Usage
+
+```bash
+tileforge <INPUT> [OPTIONS]
+```
+
+### Basic Examples
+
+```bash
+# Generate XYZ tiles with default settings
+tileforge map.png -o ./tiles
+
+# Generate PMTiles with specific zoom range
+tileforge map.png -o output.pmtiles -f pmtiles --min-zoom 0 --max-zoom 8
+
+# Generate ZIP archive with Mercator projection
+tileforge satellite.jpg -o tiles.zip -f zip --projection mercator
+```
+
+## Options
+
+| Option | Short | Default | Description |
+|--------|-------|---------|-------------|
+| `--output` | `-o` | `./tiles` | Output path (directory for XYZ, file for PMTiles/ZIP) |
+| `--format` | `-f` | `xyz` | Output format: `xyz`, `pmtiles`, `zip` |
+| `--min-zoom` | | `0` | Minimum zoom level |
+| `--max-zoom` | | `5` | Maximum zoom level |
+| `--projection` | `-p` | `flat` | Projection: `flat` or `mercator` |
+| `--tile-size` | | `256` | Tile size in pixels |
+
+## Output
+
+The CLI displays progress during processing:
+
+```
+Processing: map.png (4096x3072)
+Format: pmtiles | Projection: flat
+Zoom levels: 0-5 | Tile size: 256px
+
+[████████████████████████████████] 100% (1365/1365 tiles)
+
+Done! Output: output.pmtiles (2.4 MB)
+```
+
+<CalloutCard title="Performance" variant="tip">
+  Always build with `--release` for production use. Debug builds are 10-100x slower for image processing.
+</CalloutCard>
+
+## Examples
+
+### Game Map Tiles
+
+```bash
+# High detail game map with many zoom levels
+tileforge game-world.png -o game-tiles -f pmtiles \
+  --min-zoom 0 --max-zoom 8 --projection flat
+```
+
+### Geographic Overlay
+
+```bash
+# Satellite imagery for web map overlay
+tileforge satellite.tif -o satellite.pmtiles -f pmtiles \
+  --projection mercator --min-zoom 0 --max-zoom 12
+```

@@ -1,0 +1,57 @@
+# Authentication
+
+TileForge uses GitHub OAuth for user authentication and JWT tokens for API access.
+
+## GitHub OAuth
+
+Sign in with your GitHub account through the web app. TileForge uses [Auth.js](https://authjs.dev/) (NextAuth v5) with the GitHub provider.
+
+### How It Works
+
+1. Click "Sign in with GitHub" in the web app
+2. Authorize TileForge on GitHub
+3. A session is created with a JWT token
+4. The JWT is shared between the Next.js frontend and the Rust API
+
+## JWT Tokens
+
+After authenticating via GitHub OAuth, you receive a JWT token that can be used for API requests.
+
+```bash
+curl https://api.tileforge.sandybridge.io/api/tilesets \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..."
+```
+
+<CalloutCard title="Token Security" variant="warning">
+  JWT tokens are signed with HS256. Keep your tokens secure and never expose them in client-side code or public repositories.
+</CalloutCard>
+
+### Token Format
+
+The JWT payload includes:
+
+```json
+{
+  "sub": "github-user-id",
+  "name": "username",
+  "email": "user@example.com",
+  "iat": 1234567890,
+  "exp": 1234657890
+}
+```
+
+## API Keys
+
+For programmatic access, you can create API keys instead of using JWT tokens directly. See [API Keys](/docs/api-keys) for details.
+
+## Authorization Methods
+
+The API accepts credentials in three ways:
+
+| Method | Example |
+|--------|---------|
+| JWT Bearer | `Authorization: Bearer eyJ...` |
+| API Key Bearer | `Authorization: Bearer tf_...` |
+| API Key Query | `?key=tf_...` |
+
+All three methods are equivalent for authorization purposes.

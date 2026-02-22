@@ -1,0 +1,52 @@
+# Quick Start
+
+Get started with TileForge in just a few steps.
+
+## Web App
+
+The fastest way to try TileForge is through the web interface:
+
+1. Visit [tileforge.sandybridge.io](https://tileforge.sandybridge.io)
+2. Drop an image onto the upload area
+3. Configure tile settings (format, zoom levels, projection)
+4. Download your tiles
+
+<CalloutCard title="Browser Processing" variant="info">
+  The web app processes images entirely in your browser using WebAssembly. No data is uploaded to any server unless you explicitly use the API.
+</CalloutCard>
+
+## CLI Installation
+
+Install the CLI tool using Cargo:
+
+```bash
+cargo install tileforge-cli
+```
+
+Generate tiles from an image:
+
+```bash
+tileforge input.png -o ./tiles -f xyz --min-zoom 0 --max-zoom 5
+```
+
+## API Usage
+
+If you have an API account, you can generate tiles programmatically:
+
+```bash
+# Upload and process an image
+curl -X POST https://api.tileforge.sandybridge.io/api/tilesets \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/octet-stream" \
+  -H "X-Filename: map.png" \
+  --data-binary @map.png
+```
+
+See the [REST API docs](/docs/api) for the full reference.
+
+## Next Steps
+
+- [Tile Formats](/docs/tile-formats) — understand XYZ, PMTiles, and ZIP outputs
+- [Projections](/docs/projections) — choose between flat and Mercator projections
+- [Leaflet Integration](/docs/leaflet) — display your tiles on a web map
+- [Authentication](/docs/authentication) — set up API access

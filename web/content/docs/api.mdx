@@ -1,0 +1,103 @@
+# REST API
+
+The TileForge API lets you create and manage tilesets programmatically.
+
+## Base URL
+
+```
+https://api.tileforge.sandybridge.io/api
+```
+
+## Authentication
+
+All API requests require authentication via one of:
+
+- **Bearer token**: `Authorization: Bearer <jwt_token>`
+- **API key header**: `Authorization: Bearer tf_...`
+- **API key query param**: `?key=tf_...`
+
+See [Authentication](/docs/authentication) and [API Keys](/docs/api-keys) for setup details.
+
+## Endpoints
+
+### Create Tileset
+
+```http
+POST /api/tilesets?name=my-map&min_zoom=0&max_zoom=5&format=pmtiles
+Content-Type: application/octet-stream
+Authorization: Bearer tf_your_api_key
+
+<binary image data>
+```
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `name` | string | filename | Name for the tileset |
+| `min_zoom` | integer | `0` | Minimum zoom level |
+| `max_zoom` | integer | `5` | Maximum zoom level |
+| `format` | string | `pmtiles` | Output format: `xyz`, `pmtiles`, or `zip` |
+| `projection` | string | `flat` | Projection: `flat` or `mercator` |
+
+**Response** `201 Created`:
+```json
+{
+  "id": "uuid",
+  "name": "my-map",
+  "status": "processing",
+  "created_at": "2025-01-01T00:00:00Z"
+}
+```
+
+### List Tilesets
+
+```http
+GET /api/tilesets?page=1&per_page=20
+```
+
+**Response** `200 OK`:
+```json
+{
+  "tilesets": [...],
+  "total": 42,
+  "page": 1,
+  "per_page": 20
+}
+```
+
+### Get Tileset
+
+```http
+GET /api/tilesets/:id
+```
+
+### Download Tileset
+
+```http
+GET /api/tilesets/:id/download
+```
+
+Returns a `307 Temporary Redirect` to a presigned S3 URL.
+
+### Delete Tileset
+
+```http
+DELETE /api/tilesets/:id
+```
+
+## Error Responses
+
+All errors follow this format:
+
+```json
+{
+  "error": "Description of what went wrong"
+}
+```
+
+| Status | Meaning |
+|--------|---------|
+| `400` | Bad request — invalid parameters |
+| `401` | Unauthorized — missing or invalid credentials |
+| `404` | Not found |
+| `429` | Rate limited |
+| `500` | Internal server error |

@@ -1,0 +1,40 @@
+# TileForge Documentation
+
+TileForge transforms large images into map tiles for use with mapping libraries like Leaflet, MapLibre GL, and OpenLayers. It supports XYZ tile pyramids, PMTiles archives, and ZIP bundles.
+
+<CardGrid>
+  <MiniCard title="Quick Start" href="/docs/quick-start">
+    Get up and running with TileForge in minutes.
+  </MiniCard>
+  <MiniCard title="REST API" href="/docs/api">
+    Integrate tile generation into your workflow via the API.
+  </MiniCard>
+  <MiniCard title="Tile Formats" href="/docs/tile-formats">
+    Learn about XYZ tiles, PMTiles, and ZIP output formats.
+  </MiniCard>
+  <MiniCard title="CLI Tool" href="/docs/cli">
+    Generate tiles from the command line with the Rust CLI.
+  </MiniCard>
+</CardGrid>
+
+## Features
+
+- **Browser-based processing** — tile generation runs entirely in WebAssembly, no server upload required for the web app
+- **Server-side API** — upload images via REST API for server-side processing with S3 storage
+- **Multiple output formats** — XYZ directory structure, PMTiles single-file archives, or ZIP bundles
+- **Flat and Mercator projections** — choose the right projection for your use case
+- **High performance** — written in Rust, optimized for large images
+
+## Architecture
+
+TileForge is built as a Rust workspace with multiple crates:
+
+| Crate | Purpose |
+|-------|---------|
+| `core` | Core tiling engine — image processing, tile generation |
+| `wasm` | WebAssembly bindings for browser-side processing |
+| `api` | Axum-based REST API server |
+| `worker` | Background job processor for async tile generation |
+| `cli` | Command-line interface |
+
+The web frontend is a Next.js application that can process images locally via WASM or submit them to the API for server-side processing with S3 storage.

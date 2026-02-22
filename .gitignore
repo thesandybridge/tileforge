@@ -3,7 +3,7 @@
 web/.next/
 node_modules/
 web/node_modules/
-docs/
+/docs/
 *.tsbuildinfo
 .env
 .env.*

@@ -1,0 +1,67 @@
+# Tile Formats
+
+TileForge supports three output formats for generated tiles.
+
+## XYZ Tiles
+
+The standard slippy map tile format used by most mapping libraries. Tiles are organized in a `z/x/y.png` directory structure.
+
+```
+tiles/
+├── 0/
+│   └── 0/
+│       └── 0.png
+├── 1/
+│   ├── 0/
+│   │   ├── 0.png
+│   │   └── 1.png
+│   └── 1/
+│       ├── 0.png
+│       └── 1.png
+└── ...
+```
+
+**Best for**: Direct serving from a file system or static hosting (S3, CloudFront, Nginx).
+
+## PMTiles
+
+[PMTiles](https://github.com/protomaps/PMTiles) is a single-file tile archive format. All tiles are packed into one `.pmtiles` file with an optimized index for HTTP range requests.
+
+```bash
+# Serve with any static file server
+python -m http.server 8080
+```
+
+```javascript
+// Load in MapLibre GL
+import { Protocol } from "pmtiles";
+const protocol = new Protocol();
+maplibregl.addProtocol("pmtiles", protocol.tile);
+```
+
+**Best for**: Simple deployment, serverless hosting, or when you want a single portable file.
+
+<CalloutCard title="Recommended Format" variant="tip">
+  PMTiles is the recommended format for most use cases. It combines the simplicity of a single file with efficient random access via HTTP range requests.
+</CalloutCard>
+
+## ZIP
+
+All tiles are bundled into a standard ZIP archive with the same directory structure as XYZ tiles.
+
+```bash
+# Extract and serve
+unzip tileset.zip -d ./tiles
+```
+
+**Best for**: Downloading and extracting locally, or when you need a standard archive format.
+
+## Format Comparison
+
+| Feature | XYZ | PMTiles | ZIP |
+|---------|-----|---------|-----|
+| Single file | No | Yes | Yes |
+| HTTP range requests | No | Yes | No |
+| Direct serving | Yes | Yes | Extract first |
+| Leaflet support | Native | Via plugin | Extract first |
+| File count | Many | 1 | 1 |

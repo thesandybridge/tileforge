@@ -35,8 +35,12 @@
     @apply border-border outline-ring/50;
     transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease, fill 0.3s ease, stroke 0.3s ease;
   }
+  html {
+    overflow-x: clip;
+  }
   body {
-    @apply bg-background text-foreground overflow-x-hidden;
+    @apply bg-background text-foreground;
+    overflow-x: clip;
   }
 }
 
@@ -73,4 +77,43 @@
     transform: none;
     transition: none;
   }
+}
+
+/* Shiki syntax highlighting — CSS variable theme */
+:root {
+  --shiki-color-text: var(--foreground);
+  --shiki-color-background: var(--muted);
+  --shiki-token-keyword: oklch(0.78 0.155 80);
+  --shiki-token-function: oklch(0.7 0.15 200);
+  --shiki-token-string: oklch(0.7 0.15 140);
+  --shiki-token-string-expression: oklch(0.7 0.15 140);
+  --shiki-token-constant: oklch(0.75 0.12 50);
+  --shiki-token-parameter: oklch(0.7 0.12 220);
+  --shiki-token-comment: oklch(0.55 0.02 70);
+  --shiki-token-punctuation: oklch(0.6 0.02 70);
+  --shiki-token-link: oklch(0.7 0.15 200);
+}
+
+/* Shiki code blocks */
+pre.shiki {
+  padding: 1rem;
+  border-radius: 0.5rem;
+  overflow-x: auto;
+  font-size: 0.875rem;
+  line-height: 1.7;
+}
+
+pre.shiki code {
+  background: transparent;
+  padding: 0;
+  font-size: inherit;
+  border-radius: 0;
+}
+
+/* Inline code (not inside pre) */
+:not(pre) > code {
+  font-size: 0.75rem;
+  background: var(--muted);
+  padding: 0.125rem 0.25rem;
+  border-radius: 0.25rem;
 }
