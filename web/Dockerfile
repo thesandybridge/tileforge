@@ -1,5 +1,6 @@
 # Stage 1: Build WASM
 FROM rust:1.88-slim AS wasm-builder
+RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
 RUN rustup target add wasm32-unknown-unknown
 RUN curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
 
