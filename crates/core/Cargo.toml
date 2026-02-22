@@ -6,6 +6,7 @@ edition = "2021"
 [features]
 default = ["parallel"]
 parallel = ["rayon"]
+tiff = ["image/tiff"]
 
 [dependencies]
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }

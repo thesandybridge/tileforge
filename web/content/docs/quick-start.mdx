@@ -7,12 +7,12 @@ Get started with TileForge in just a few steps.
 The fastest way to try TileForge is through the web interface:
 
 1. Visit [tileforge.sandybridge.io](https://tileforge.sandybridge.io)
-2. Drop an image onto the upload area
-3. Configure tile settings (format, zoom levels, projection)
-4. Download your tiles
+2. Drop an image onto the upload area (PNG, JPEG, WebP — or TIFF/GeoTIFF with Pro)
+3. Configure tile settings (tile size, zoom levels, projection)
+4. Click **Process** and download your tiles
 
 <CalloutCard title="Browser Processing" variant="info">
-  The web app processes images entirely in your browser using WebAssembly. No data is uploaded to any server unless you explicitly use the API.
+  The web app processes images entirely in your browser using WebAssembly. No data is uploaded to any server unless you explicitly use server mode (Pro).
 </CalloutCard>
 
 ## CLI Installation
@@ -31,15 +31,33 @@ tileforge input.png -o ./tiles -f xyz --min-zoom 0 --max-zoom 5
 
 ## API Usage
 
-If you have an API account, you can generate tiles programmatically:
+Pro users can generate tiles programmatically via the REST API:
 
 ```bash
 # Upload and process an image
-curl -X POST https://api.tileforge.sandybridge.io/api/tilesets \
-  -H "Authorization: Bearer YOUR_API_KEY" \
+curl -X POST "https://api.tileforge.sandybridge.io/api/tiles?tile_size=256&max_zoom=5&projection=flat&file_name=map.png" \
+  -H "Authorization: Bearer tf_your_api_key" \
   -H "Content-Type: application/octet-stream" \
-  -H "X-Filename: map.png" \
   --data-binary @map.png
+```
+
+This returns a `job_id`. Track progress with SSE:
+
+```bash
+curl -N "https://api.tileforge.sandybridge.io/api/tiles/{job_id}/progress" \
+  -H "Authorization: Bearer tf_your_api_key"
+```
+
+Then download results:
+
+```bash
+# Download ZIP
+curl -o tiles.zip "https://api.tileforge.sandybridge.io/api/tiles/{job_id}/download" \
+  -H "Authorization: Bearer tf_your_api_key"
+
+# Download PMTiles
+curl -o tiles.pmtiles "https://api.tileforge.sandybridge.io/api/tiles/{job_id}/download/pmtiles" \
+  -H "Authorization: Bearer tf_your_api_key"
 ```
 
 See the [REST API docs](/docs/api) for the full reference.
@@ -47,6 +65,6 @@ See the [REST API docs](/docs/api) for the full reference.
 ## Next Steps
 
 - [Tile Formats](/docs/tile-formats) — understand XYZ, PMTiles, and ZIP outputs
-- [Projections](/docs/projections) — choose between flat and Mercator projections
+- [Projections](/docs/projections) — choose between flat, Mercator, and isometric projections
 - [Leaflet Integration](/docs/leaflet) — display your tiles on a web map
 - [Authentication](/docs/authentication) — set up API access

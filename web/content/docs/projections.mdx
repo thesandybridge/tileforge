@@ -1,6 +1,6 @@
 # Projections
 
-TileForge supports two projection modes for tile generation.
+TileForge supports three projection modes for tile generation.
 
 ## Flat Projection
 
@@ -17,7 +17,7 @@ tileforge input.png -o tiles --projection flat
 - Any non-geographic image
 
 <CalloutCard title="Default Projection" variant="info">
-  Flat projection is the default. Use this unless your source image is a geographic map in Mercator projection.
+  Flat projection is the default. Use this unless your source image is a geographic map or you want an isometric view.
 </CalloutCard>
 
 ## Mercator Projection
@@ -33,6 +33,23 @@ tileforge input.png -o tiles --projection mercator
 - Integration with existing map tile services
 - Overlaying custom data on standard web maps
 
+## Isometric Projection
+
+Isometric projection transforms a top-down image into a 2.5D isometric perspective, creating a pseudo-3D effect.
+
+```bash
+tileforge input.png -o tiles --projection isometric
+```
+
+**Use cases**:
+- Game world maps (city builders, strategy games)
+- Architectural visualizations
+- Technical diagrams with depth
+
+<CalloutCard title="Streaming Limitation" variant="warning">
+  Isometric projection requires access to the entire image for the transformation, so it uses the naive (full-image) processing mode rather than row-by-row streaming. Very large images may need more memory.
+</CalloutCard>
+
 ## How It Works
 
 ### Flat
@@ -40,6 +57,9 @@ The image is simply subdivided at each zoom level. At zoom 0, the entire image i
 
 ### Mercator
 The image is reprojected into the Web Mercator coordinate system before tiling. This ensures tiles align correctly when overlaid on standard web maps.
+
+### Isometric
+The image is rotated 45 degrees and scaled vertically by ~0.5x to create the isometric perspective, then tiled normally.
 
 ## Choosing a Projection
 
@@ -50,3 +70,5 @@ The image is reprojected into the Web Mercator coordinate system before tiling. 
 | Artwork / illustration | Flat |
 | Satellite overlay | Mercator |
 | Technical diagram | Flat |
+| City builder game map | Isometric |
+| 2.5D visualization | Isometric |

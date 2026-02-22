@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-tileforge-core = { path = "../core" }
+tileforge-core = { path = "../core", features = ["tiff"] }
 axum = { version = "0.8", features = ["multipart"] }
 tokio = { version = "1", features = ["full"] }
 tokio-stream = "0.1"

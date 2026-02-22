@@ -380,6 +380,8 @@ export default function Home() {
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col px-4 py-16 md:px-6">
+      <h1 className="sr-only">Image to Map Tiles — Free XYZ Tile Generator</h1>
+
       {/* Hero */}
       <ScrollReveal>
         <header className="mx-auto max-w-2xl text-center">
@@ -395,12 +397,12 @@ export default function Home() {
               <rect x="5" y="18" width="9" height="9" rx="2" fill="currentColor" />
               <rect x="19" y="19" width="7.5" height="7.5" rx="2" fill="currentColor" opacity="0.5" />
             </svg>
-            <h1
+            <h2
               className="font-[family-name:var(--font-geist-mono)] text-primary text-4xl font-bold tracking-tight sm:text-5xl"
               style={{ textShadow: "0 0 20px rgba(215,153,33,0.3)" }}
             >
               tileforge
-            </h1>
+            </h2>
           </div>
           <p className="text-muted-foreground mt-4 text-lg">
             Slice any image into XYZ map tiles — entirely in your browser, powered by WebAssembly.
@@ -480,7 +482,7 @@ export default function Home() {
                           browse
                           <input
                             type="file"
-                            accept="image/*"
+                            accept={session?.user?.plan === PLAN_PRO ? "image/*,.tif,.tiff" : "image/*"}
                             multiple
                             onChange={(e) => {
                               if (e.target.files && e.target.files.length > 0) {
@@ -492,7 +494,7 @@ export default function Home() {
                         </label>
                       </p>
                       <p className="text-muted-foreground/60 mt-1 text-sm">
-                        PNG, JPEG, WebP supported — select multiple for batch processing
+                        PNG, JPEG, WebP{session?.user?.plan === PLAN_PRO ? ", TIFF/GeoTIFF" : ""} supported — select multiple for batch processing
                       </p>
                     </div>
                   )}
@@ -1018,6 +1020,50 @@ export default function Home() {
           <UpgradeBanner />
         </ScrollReveal>
       </div>
+
+      {/* Features (SEO) */}
+      <section className="mx-auto mt-16 max-w-4xl space-y-12">
+        <ScrollReveal>
+          <div className="grid gap-8 sm:grid-cols-2 lg:grid-cols-3">
+            <div>
+              <h2 className="text-lg font-semibold">XYZ Tile Generator</h2>
+              <p className="text-muted-foreground mt-2 text-sm">
+                Convert any image into standard XYZ slippy map tiles compatible with Leaflet, OpenLayers, MapLibre, and other mapping libraries.
+              </p>
+            </div>
+            <div>
+              <h2 className="text-lg font-semibold">PMTiles Export</h2>
+              <p className="text-muted-foreground mt-2 text-sm">
+                Export tiles as a single PMTiles file for serverless map hosting. No tile server required — serve directly from cloud storage.
+              </p>
+            </div>
+            <div>
+              <h2 className="text-lg font-semibold">Multiple Projections</h2>
+              <p className="text-muted-foreground mt-2 text-sm">
+                Choose flat projection for custom maps, Web Mercator for geographic data, or isometric for 2.5D visualizations.
+              </p>
+            </div>
+            <div>
+              <h2 className="text-lg font-semibold">Browser-Based Processing</h2>
+              <p className="text-muted-foreground mt-2 text-sm">
+                Powered by Rust and WebAssembly. Your images never leave your device — everything processes locally in the browser.
+              </p>
+            </div>
+            <div>
+              <h2 className="text-lg font-semibold">TIFF &amp; GeoTIFF Support</h2>
+              <p className="text-muted-foreground mt-2 text-sm">
+                Pro users can process TIFF and GeoTIFF files — the standard format for GIS, satellite imagery, and remote sensing data.
+              </p>
+            </div>
+            <div>
+              <h2 className="text-lg font-semibold">REST API</h2>
+              <p className="text-muted-foreground mt-2 text-sm">
+                Automate tile generation with the REST API. Upload images, configure parameters, and download results programmatically.
+              </p>
+            </div>
+          </div>
+        </ScrollReveal>
+      </section>
 
       {/* Tile preview — full width */}
       {status === "done" && zipBlob && (

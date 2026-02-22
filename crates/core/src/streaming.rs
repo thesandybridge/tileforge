@@ -625,6 +625,18 @@ pub fn read_png_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
     Some((width, height))
 }
 
+/// Returns true if the bytes begin with a TIFF or BigTIFF magic header.
+pub fn is_tiff(bytes: &[u8]) -> bool {
+    if bytes.len() < 4 {
+        return false;
+    }
+    matches!(
+        &bytes[0..4],
+        b"II\x2a\x00" | b"MM\x00\x2a" | // TIFF
+        b"II\x2b\x00" | b"MM\x00\x2b"   // BigTIFF
+    )
+}
+
 /// Returns true if the image's decoded RGBA memory would exceed the budget.
 ///
 /// Checks PNG header first (fast), falls back to the `image` crate's
@@ -674,6 +686,40 @@ mod tests {
     fn test_read_png_dimensions_not_png() {
         assert_eq!(read_png_dimensions(b"not a png"), None);
         assert_eq!(read_png_dimensions(b"short"), None);
+    }
+
+    #[test]
+    fn test_is_tiff_little_endian() {
+        // TIFF little-endian magic: "II" + 42 as LE u16
+        assert!(is_tiff(b"II\x2a\x00rest of file"));
+    }
+
+    #[test]
+    fn test_is_tiff_big_endian() {
+        // TIFF big-endian magic: "MM" + 42 as BE u16
+        assert!(is_tiff(b"MM\x00\x2arest of file"));
+    }
+
+    #[test]
+    fn test_is_bigtiff_little_endian() {
+        // BigTIFF little-endian magic: "II" + 43 as LE u16
+        assert!(is_tiff(b"II\x2b\x00rest of file"));
+    }
+
+    #[test]
+    fn test_is_bigtiff_big_endian() {
+        // BigTIFF big-endian magic: "MM" + 43 as BE u16
+        assert!(is_tiff(b"MM\x00\x2brest of file"));
+    }
+
+    #[test]
+    fn test_is_tiff_not_tiff() {
+        assert!(!is_tiff(b"\x89PNG\r\n\x1a\n")); // PNG
+        assert!(!is_tiff(b"\xff\xd8\xff\xe0"));    // JPEG
+        assert!(!is_tiff(b"RIFF"));                 // WebP/RIFF
+        assert!(!is_tiff(b"not a tiff"));
+        assert!(!is_tiff(b"II"));                   // too short
+        assert!(!is_tiff(b""));                     // empty
     }
 
     #[test]

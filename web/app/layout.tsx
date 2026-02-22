@@ -23,7 +23,7 @@ const geistMono = Geist_Mono({ subsets: ["latin"], variable: "--font-geist-mono"
 const siteUrl = "https://tileforge.sandybridge.io";
 const title = "Tileforge — Slice Images into XYZ Map Tiles";
 const description =
-  "Free browser-based tool to slice any image into XYZ map tiles. Powered by Rust and WebAssembly. Supports PNG, JPEG, WebP with flat and Web Mercator projections. No uploads — everything runs locally.";
+  "Free browser-based tool to convert images into XYZ map tiles, PMTiles, and isometric projections. Supports PNG, JPEG, WebP, and TIFF/GeoTIFF. Powered by Rust and WebAssembly — no uploads required.";
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
@@ -34,6 +34,12 @@ export const metadata: Metadata = {
   description,
   keywords: [
     "tileforge",
+    "image to map tiles",
+    "xyz tile generator",
+    "geotiff to tiles",
+    "convert image to leaflet tiles",
+    "browser tile generator",
+    "image to pmtiles",
     "xyz tiles",
     "map tiles",
     "image tiler",
@@ -48,6 +54,8 @@ export const metadata: Metadata = {
     "map tile creator",
     "browser image processing",
     "open source",
+    "tiff tile generator",
+    "isometric map tiles",
   ],
   authors: [{ name: "sandybridge" }],
   creator: "sandybridge",
@@ -58,11 +66,13 @@ export const metadata: Metadata = {
     siteName: "Tileforge",
     type: "website",
     locale: "en_US",
+    images: [{ url: "/og.png", width: 1200, height: 630, alt: "TileForge — Image to Map Tiles" }],
   },
   twitter: {
     card: "summary_large_image",
     title,
     description,
+    images: ["/og.png"],
   },
   robots: {
     index: true,
@@ -102,17 +112,33 @@ export default function RootLayout({
               description,
               applicationCategory: "DeveloperApplication",
               operatingSystem: "Any",
-              offers: {
-                "@type": "Offer",
-                price: "0",
-                priceCurrency: "USD",
-              },
+              offers: [
+                {
+                  "@type": "Offer",
+                  name: "Free",
+                  price: "0",
+                  priceCurrency: "USD",
+                  description: "Browser-based WASM processing with ZIP and PMTiles export",
+                },
+                {
+                  "@type": "Offer",
+                  name: "Pro",
+                  price: "9",
+                  priceCurrency: "USD",
+                  billingDuration: "P1M",
+                  description: "Server processing, TIFF/GeoTIFF support, persistent storage, API access",
+                },
+              ],
               featureList: [
                 "XYZ tile generation",
+                "PMTiles export",
                 "Web Mercator projection",
                 "Flat/equirectangular projection",
-                "PNG, JPEG, WebP support",
+                "Isometric 2.5D projection",
+                "PNG, JPEG, WebP, TIFF/GeoTIFF support",
                 "Browser-based processing",
+                "Server-side processing (Pro)",
+                "REST API access (Pro)",
                 "WebAssembly powered",
                 "Interactive Leaflet tile preview",
                 "ZIP download",

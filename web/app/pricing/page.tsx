@@ -28,6 +28,7 @@ const features: PlanFeature[] = [
   { name: "ZIP export", free: true, pro: true },
   { name: "Mercator projection", free: true, pro: true },
   { name: "Flat projection", free: true, pro: true },
+  { name: "TIFF/GeoTIFF support", free: false, pro: true },
 ];
 
 function FeatureValue({ value }: { value: boolean | string }) {
@@ -145,6 +146,10 @@ export default function PricingPage() {
             <li className="flex items-center gap-2 text-sm">
               <Check className="h-4 w-4 text-green-500 shrink-0" />
               3 parallel batch uploads
+            </li>
+            <li className="flex items-center gap-2 text-sm">
+              <Check className="h-4 w-4 text-green-500 shrink-0" />
+              TIFF/GeoTIFF support
             </li>
             <li className="flex items-center gap-2 text-sm">
               <Check className="h-4 w-4 text-green-500 shrink-0" />

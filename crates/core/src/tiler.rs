@@ -595,6 +595,72 @@ mod tests {
         assert_eq!(output.total_tiles, 5);
     }
 
+    #[cfg(feature = "tiff")]
+    #[test]
+    fn test_process_tiff_image() {
+        // Encode a small image as TIFF in memory
+        let img = RgbaImage::from_pixel(256, 256, image::Rgba([0, 128, 255, 255]));
+        let mut tiff_bytes = Vec::new();
+        let encoder = image::codecs::tiff::TiffEncoder::new(std::io::Cursor::new(&mut tiff_bytes));
+        image::ImageEncoder::write_image(
+            encoder,
+            img.as_raw(),
+            256,
+            256,
+            image::ExtendedColorType::Rgba8,
+        )
+        .unwrap();
+
+        // Verify is_tiff detects it
+        assert!(crate::streaming::is_tiff(&tiff_bytes));
+
+        // Process through process_bytes (the API entry point)
+        let tiler = Tiler::new(TileConfig::default());
+        let buf = std::io::Cursor::new(Vec::new());
+        let mut zip_writer = ZipTileWriter::new(buf);
+        let output = tiler
+            .process_bytes(&tiff_bytes, &mut zip_writer, |_| {})
+            .expect("TIFF processing should succeed");
+
+        assert_eq!(output.width, 256);
+        assert_eq!(output.height, 256);
+        assert_eq!(output.max_zoom, 0);
+        assert_eq!(output.total_tiles, 1);
+    }
+
+    #[cfg(feature = "tiff")]
+    #[test]
+    fn test_process_tiff_large_image() {
+        // Larger TIFF that will go through the strip-based path
+        let img = RgbaImage::from_pixel(512, 512, image::Rgba([255, 0, 0, 255]));
+        let mut tiff_bytes = Vec::new();
+        let encoder = image::codecs::tiff::TiffEncoder::new(std::io::Cursor::new(&mut tiff_bytes));
+        image::ImageEncoder::write_image(
+            encoder,
+            img.as_raw(),
+            512,
+            512,
+            image::ExtendedColorType::Rgba8,
+        )
+        .unwrap();
+
+        let tiler = Tiler::new(TileConfig {
+            tile_size: 256,
+            max_zoom: Some(1),
+            ..Default::default()
+        });
+        let buf = std::io::Cursor::new(Vec::new());
+        let mut zip_writer = ZipTileWriter::new(buf);
+        let output = tiler
+            .process_bytes(&tiff_bytes, &mut zip_writer, |_| {})
+            .expect("TIFF processing should succeed");
+
+        assert_eq!(output.width, 512);
+        assert_eq!(output.height, 512);
+        assert_eq!(output.max_zoom, 1);
+        assert_eq!(output.total_tiles, 5); // z0=1 + z1=4
+    }
+
     #[test]
     fn test_process_rectangular_image_no_distortion() {
         let mut img = RgbaImage::new(1024, 512);

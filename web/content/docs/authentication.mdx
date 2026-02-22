@@ -32,17 +32,23 @@ The JWT payload includes:
 
 ```json
 {
-  "sub": "github-user-id",
-  "name": "username",
-  "email": "user@example.com",
+  "sub": "user-uuid",
+  "plan": "pro",
   "iat": 1234567890,
   "exp": 1234657890
 }
 ```
 
+| Field | Description |
+|-------|-------------|
+| `sub` | User UUID |
+| `plan` | User plan: `free` or `pro` |
+| `iat` | Issued at timestamp |
+| `exp` | Expiration timestamp |
+
 ## API Keys
 
-For programmatic access, you can create API keys instead of using JWT tokens directly. See [API Keys](/docs/api-keys) for details.
+For programmatic access, you can create API keys instead of using JWT tokens directly. API keys are available to Pro users. See [API Keys](/docs/api-keys) for details.
 
 ## Authorization Methods
 
@@ -54,4 +60,4 @@ The API accepts credentials in three ways:
 | API Key Bearer | `Authorization: Bearer tf_...` |
 | API Key Query | `?key=tf_...` |
 
-All three methods are equivalent for authorization purposes.
+All three methods are equivalent for authorization purposes. The API extracts the user identity and plan from whichever method is used.

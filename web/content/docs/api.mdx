@@ -1,29 +1,31 @@
 # REST API
 
-The TileForge API lets you create and manage tilesets programmatically.
+The TileForge API lets you process images into map tiles and manage tilesets programmatically. Requires a Pro plan.
 
 ## Base URL
 
 ```
-https://api.tileforge.sandybridge.io/api
+https://api.tileforge.sandybridge.io
 ```
 
 ## Authentication
 
 All API requests require authentication via one of:
 
-- **Bearer token**: `Authorization: Bearer <jwt_token>`
+- **JWT Bearer token**: `Authorization: Bearer <jwt_token>`
 - **API key header**: `Authorization: Bearer tf_...`
 - **API key query param**: `?key=tf_...`
 
 See [Authentication](/docs/authentication) and [API Keys](/docs/api-keys) for setup details.
 
-## Endpoints
+## Tile Processing
 
-### Create Tileset
+### Process Image
+
+Upload an image as raw bytes to create tiles. The image is sent as the request body (not multipart).
 
 ```http
-POST /api/tilesets?name=my-map&min_zoom=0&max_zoom=5&format=pmtiles
+POST /api/tiles?tile_size=256&min_zoom=0&max_zoom=5&projection=flat&file_name=map.png
 Content-Type: application/octet-stream
 Authorization: Bearer tf_your_api_key
 
@@ -32,57 +34,313 @@ Authorization: Bearer tf_your_api_key
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `name` | string | filename | Name for the tileset |
+| `tile_size` | integer | `256` | Tile size in pixels: `128`, `256`, or `512` |
 | `min_zoom` | integer | `0` | Minimum zoom level |
-| `max_zoom` | integer | `5` | Maximum zoom level |
-| `format` | string | `pmtiles` | Output format: `xyz`, `pmtiles`, or `zip` |
-| `projection` | string | `flat` | Projection: `flat` or `mercator` |
+| `max_zoom` | integer | auto | Maximum zoom level (capped at 12) |
+| `projection` | string | `flat` | Projection: `flat`, `mercator`, or `isometric` |
+| `file_name` | string | — | Original filename (used for tileset naming) |
 
-**Response** `201 Created`:
+**Supported formats**: PNG, JPEG, WebP, TIFF/GeoTIFF (Pro only).
+
+<CalloutCard title="TIFF/GeoTIFF" variant="info">
+  TIFF and GeoTIFF files are only accepted for Pro users. Free users uploading TIFF will receive a `403 Forbidden` response.
+</CalloutCard>
+
+**Response** `202 Accepted` (async processing):
+
 ```json
 {
-  "id": "uuid",
-  "name": "my-map",
-  "status": "processing",
-  "created_at": "2025-01-01T00:00:00Z"
+  "job_id": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+Pro users always use the async path. The image is uploaded to S3 and processed by a background worker. Use the progress endpoint to track status.
+
+### Job Progress (SSE)
+
+Stream real-time progress updates via Server-Sent Events.
+
+```http
+GET /api/tiles/{job_id}/progress
+```
+
+**Event data**:
+
+```json
+// Queued
+{"status": "queued"}
+
+// Processing
+{"status": "processing", "zoom": 3, "tiles_done": 42, "tiles_total": 1365}
+
+// Complete
+{"status": "complete", "download_url": "/api/tiles/{job_id}/download", "pmtiles_url": "/api/tiles/{job_id}/download/pmtiles"}
+
+// Failed
+{"status": "failed", "error": "description of error"}
+```
+
+### Download Tiles (ZIP)
+
+```http
+GET /api/tiles/{job_id}/download
+Authorization: Bearer tf_your_api_key
+```
+
+Returns the ZIP archive containing all generated tiles in `z/x/y.png` structure.
+
+### Download Tiles (PMTiles)
+
+```http
+GET /api/tiles/{job_id}/download/pmtiles
+Authorization: Bearer tf_your_api_key
+```
+
+Returns the PMTiles single-file archive.
+
+### Job Thumbnail
+
+```http
+GET /api/tiles/{job_id}/thumbnail
+```
+
+Returns a JPEG thumbnail of the processed image.
+
+## Tileset Management
+
+Tilesets are persistent records of processed tile jobs, identified by a unique slug.
+
+### Create Tileset
+
+<CalloutCard title="Internal Endpoint" variant="warning">
+  Tilesets are automatically created by the background worker after processing completes. You typically don't call this directly.
+</CalloutCard>
+
+```http
+POST /api/tilesets
+Authorization: Bearer tf_your_api_key
+Content-Type: application/json
+
+{
+  "name": "My Map",
+  "slug": "my-map",
+  "projection": "flat",
+  "tile_size": 256,
+  "min_zoom": 0,
+  "max_zoom": 5,
+  "tile_count": 1365,
+  "size_bytes": 2400000,
+  "storage_path": "tiles/job-id",
+  "public": true
 }
 ```
 
 ### List Tilesets
 
 ```http
-GET /api/tilesets?page=1&per_page=20
+GET /api/tilesets?page=1&per_page=20&search=map
+Authorization: Bearer tf_your_api_key
 ```
 
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `page` | integer | `1` | Page number |
+| `per_page` | integer | `50` | Results per page (max 100) |
+| `search` | string | — | Search tilesets by name |
+| `user_id` | UUID | — | Filter by user ID |
+
 **Response** `200 OK`:
+
 ```json
-{
-  "tilesets": [...],
-  "total": 42,
-  "page": 1,
-  "per_page": 20
-}
+[
+  {
+    "id": "uuid",
+    "user_id": "uuid",
+    "name": "My Map",
+    "slug": "my-map",
+    "projection": "flat",
+    "tile_size": 256,
+    "min_zoom": 0,
+    "max_zoom": 5,
+    "tile_count": 1365,
+    "size_bytes": 2400000,
+    "storage_path": "tiles/job-id",
+    "public": true,
+    "created_at": "2025-01-01T00:00:00Z",
+    "width": 4096,
+    "height": 3072
+  }
+]
 ```
 
 ### Get Tileset
 
 ```http
-GET /api/tilesets/:id
+GET /api/tilesets/{slug}
 ```
 
-### Download Tileset
+Returns tileset details. Public tilesets are visible to anyone; private tilesets require owner authentication.
+
+### Update Tileset
 
 ```http
-GET /api/tilesets/:id/download
-```
+PATCH /api/tilesets/{slug}
+Authorization: Bearer tf_your_api_key
+Content-Type: application/json
 
-Returns a `307 Temporary Redirect` to a presigned S3 URL.
+{
+  "name": "Updated Name",
+  "public": true
+}
+```
 
 ### Delete Tileset
 
 ```http
-DELETE /api/tilesets/:id
+DELETE /api/tilesets/{slug}
+Authorization: Bearer tf_your_api_key
 ```
+
+Returns `204 No Content`. Also deletes associated S3 objects (tiles, PMTiles, thumbnail).
+
+### Get PMTiles Presigned URL
+
+```http
+GET /api/tilesets/{slug}/pmtiles-url
+Authorization: Bearer tf_your_api_key
+```
+
+Returns a presigned S3 URL for direct PMTiles range-request access (valid for 10 minutes):
+
+```json
+{
+  "url": "https://s3.example.com/tiles/job-id/tiles.pmtiles?X-Amz-..."
+}
+```
+
+## User Management
+
+### Get Current User
+
+```http
+GET /api/user
+Authorization: Bearer tf_your_api_key
+```
+
+**Response**:
+
+```json
+{
+  "id": "uuid",
+  "plan": "pro",
+  "storage_used": 524288000,
+  "storage_quota": 5368709120
+}
+```
+
+### Deactivate Account
+
+```http
+POST /api/user/deactivate
+Authorization: Bearer tf_your_api_key
+```
+
+Deactivates the account and revokes all API keys. Can be reactivated within 30 days.
+
+### Reactivate Account
+
+```http
+POST /api/user/reactivate
+Authorization: Bearer tf_your_api_key
+```
+
+## API Key Management
+
+### Create API Key
+
+```http
+POST /api/keys
+Authorization: Bearer <jwt_token>
+```
+
+Creates a new API key and revokes any existing active key (one active key at a time).
+
+**Response** `201 Created`:
+
+```json
+{
+  "id": "uuid",
+  "key": "tf_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "key_prefix": "tf_xxxxxxxx",
+  "created_at": "2025-01-01T00:00:00Z"
+}
+```
+
+<CalloutCard title="Save Your Key" variant="warning">
+  The full key is only returned once at creation time. Store it securely.
+</CalloutCard>
+
+### Get Active API Key
+
+```http
+GET /api/keys
+Authorization: Bearer <jwt_token>
+```
+
+Returns the active key's prefix and metadata (not the full key).
+
+### Revoke API Key
+
+```http
+DELETE /api/keys
+Authorization: Bearer <jwt_token>
+```
+
+## Notifications
+
+### List Notifications
+
+```http
+GET /api/notifications
+Authorization: Bearer tf_your_api_key
+```
+
+Returns the 50 most recent notifications.
+
+### Mark All Read
+
+```http
+POST /api/notifications/read
+Authorization: Bearer tf_your_api_key
+```
+
+### Clear All
+
+```http
+DELETE /api/notifications
+Authorization: Bearer tf_your_api_key
+```
+
+## Rate Limits
+
+Requests are rate-limited per endpoint with tiered limits based on your plan:
+
+| Endpoint | Anonymous | Free | Pro |
+|----------|-----------|------|-----|
+| Tile processing | 5/min | 10/min | 60/min |
+| Progress/SSE | 30/min | 60/min | 300/min |
+| Downloads | 15/min | 30/min | 120/min |
+| Mutations (CRUD) | 10/min | 30/min | 120/min |
+
+Rate limit info is returned in response headers:
+
+```
+X-RateLimit-Limit: 60
+X-RateLimit-Remaining: 59
+X-RateLimit-Reset: 1234567890
+```
+
+When rate limited, the API returns `429 Too Many Requests` with a `Retry-After` header.
 
 ## Error Responses
 
@@ -98,6 +356,18 @@ All errors follow this format:
 |--------|---------|
 | `400` | Bad request — invalid parameters |
 | `401` | Unauthorized — missing or invalid credentials |
+| `403` | Forbidden — insufficient plan or permissions |
 | `404` | Not found |
+| `409` | Conflict — duplicate slug |
+| `413` | Payload too large — image exceeds size limit or storage quota exceeded |
 | `429` | Rate limited |
 | `500` | Internal server error |
+| `503` | Service unavailable — required backend (Redis, S3) not configured |
+
+## OpenAPI / Swagger
+
+Interactive API documentation is available at:
+
+```
+https://api.tileforge.sandybridge.io/swagger-ui
+```

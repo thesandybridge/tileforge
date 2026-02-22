@@ -19,11 +19,16 @@ TileForge transforms large images into map tiles for use with mapping libraries 
 
 ## Features
 
-- **Browser-based processing** — tile generation runs entirely in WebAssembly, no server upload required for the web app
-- **Server-side API** — upload images via REST API for server-side processing with S3 storage
+- **Browser-based processing** — tile generation runs entirely in WebAssembly, no server upload required
+- **Server-side API** — upload images via REST API for faster server-side processing with S3 storage (Pro)
+- **Multiple input formats** — PNG, JPEG, WebP for all users; TIFF/GeoTIFF for Pro users
 - **Multiple output formats** — XYZ directory structure, PMTiles single-file archives, or ZIP bundles
-- **Flat and Mercator projections** — choose the right projection for your use case
-- **High performance** — written in Rust, optimized for large images
+- **Three projection modes** — flat for custom maps, Web Mercator for geographic data, isometric for 2.5D views
+- **Batch processing** — process multiple images at once (1 sequential for Free, 3 parallel for Pro)
+- **REST API &amp; API keys** — automate tile generation with programmatic access (Pro)
+- **Persistent storage** — save tilesets to the cloud with 5 GB quota (Pro)
+- **Rate limiting** — tiered rate limits with higher allowances for Pro users
+- **High performance** — written in Rust, optimized for large images with streaming processing
 
 ## Architecture
 
@@ -31,9 +36,9 @@ TileForge is built as a Rust workspace with multiple crates:
 
 | Crate | Purpose |
 |-------|---------|
-| `core` | Core tiling engine — image processing, tile generation |
+| `core` | Core tiling engine — image processing, tile generation, streaming |
 | `wasm` | WebAssembly bindings for browser-side processing |
-| `api` | Axum-based REST API server |
+| `api` | Axum-based REST API server with auth, rate limiting, S3 |
 | `worker` | Background job processor for async tile generation |
 | `cli` | Command-line interface |
 

@@ -1,17 +1,20 @@
 # API Keys
 
-API keys provide a convenient way to authenticate with the TileForge API without managing JWT tokens.
+API keys provide a convenient way to authenticate with the TileForge API without managing JWT tokens. Available to Pro users only.
 
 ## Creating an API Key
 
 1. Sign in to TileForge
 2. Go to **Settings** > **API Keys**
 3. Click **Create API Key**
-4. Give your key a descriptive name
-5. Copy the key — it won't be shown again
+4. Copy the key — it won't be shown again
+
+<CalloutCard title="One Key at a Time" variant="info">
+  Creating a new API key automatically revokes any existing active key. You can have one active API key at a time.
+</CalloutCard>
 
 <CalloutCard title="Save Your Key" variant="warning">
-  API keys are only displayed once at creation time. Store them securely.
+  The full API key is only displayed once at creation time. Store it securely — you cannot retrieve it later.
 </CalloutCard>
 
 ## Using API Keys
@@ -33,20 +36,31 @@ curl "https://api.tileforge.sandybridge.io/api/tilesets?key=tf_your_api_key_here
 
 ## Key Format
 
-All API keys start with the `tf_` prefix, making them easy to identify:
+API keys are 35 characters long, starting with the `tf_` prefix followed by 32 hex characters:
 
 ```
-tf_a1b2c3d4e5f6g7h8i9j0...
+tf_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ```
+
+The key prefix (first 11 characters) is stored for display purposes. The full key is hashed with SHA-256 before storage.
 
 ## Managing Keys
 
 From the Settings page you can:
 
-- **View** all active keys with their creation dates
-- **Delete** keys that are no longer needed
-- **Regenerate** a key if it may have been compromised
+- **View** the active key's prefix and creation date
+- **Create** a new key (revokes the previous one)
+- **Revoke** the active key
 
 ## Rate Limits
 
-API keys are subject to the same rate limits as your account tier. See [Pricing](/pricing) for details on plan limits.
+API keys are subject to the same rate limits as your account tier:
+
+| Endpoint | Pro Limit |
+|----------|-----------|
+| Tile processing | 60/min |
+| Downloads | 120/min |
+| Progress/SSE | 300/min |
+| CRUD operations | 120/min |
+
+See [Pricing](/pricing) for full plan comparison.

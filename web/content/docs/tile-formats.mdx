@@ -2,7 +2,24 @@
 
 TileForge supports three output formats for generated tiles.
 
-## XYZ Tiles
+## Input Formats
+
+TileForge accepts the following image formats as input:
+
+| Format | Free | Pro | Notes |
+|--------|------|-----|-------|
+| PNG | Yes | Yes | Best quality, supports transparency |
+| JPEG | Yes | Yes | Smaller files, no transparency |
+| WebP | Yes | Yes | Modern format, good compression |
+| TIFF/GeoTIFF | No | Yes | Standard GIS/satellite imagery format |
+
+<CalloutCard title="TIFF/GeoTIFF Support" variant="info">
+  TIFF and GeoTIFF files are supported on the server-side API and worker for Pro users. The browser-based WASM processor does not support TIFF to keep the bundle size small.
+</CalloutCard>
+
+## Output Formats
+
+### XYZ Tiles
 
 The standard slippy map tile format used by most mapping libraries. Tiles are organized in a `z/x/y.png` directory structure.
 
@@ -65,3 +82,7 @@ unzip tileset.zip -d ./tiles
 | Direct serving | Yes | Yes | Extract first |
 | Leaflet support | Native | Via plugin | Extract first |
 | File count | Many | 1 | 1 |
+
+## Server Processing Output
+
+When using the API (Pro), both ZIP and PMTiles are generated automatically in a single pass. You can download either format after processing completes.

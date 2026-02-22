@@ -142,6 +142,7 @@ enum ApiError {
     Db(String),
     Conflict(String),
     QuotaExceeded,
+    FormatRequiresPro(String),
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -174,6 +175,10 @@ impl IntoResponse for ApiError {
             ApiError::QuotaExceeded => (
                 StatusCode::PAYLOAD_TOO_LARGE,
                 "storage quota exceeded (5 GB limit)".into(),
+            ),
+            ApiError::FormatRequiresPro(fmt) => (
+                StatusCode::FORBIDDEN,
+                format!("{fmt} format requires a Pro plan"),
             ),
         };
         (status, Json(ErrorBody { error: message })).into_response()
@@ -705,6 +710,11 @@ async fn process_tiles(
     // Authenticated users (pro/server mode) always use async path;
     // anonymous users only go async for large images.
     let is_pro = claims.0.as_ref().is_some_and(|c| c.plan == Plan::Pro);
+
+    if tileforge_core::is_tiff(&body) && !is_pro {
+        return Err(ApiError::FormatRequiresPro("TIFF/GeoTIFF".into()));
+    }
+
     let is_large = should_use_streaming(&body, STREAMING_THRESHOLD);
 
     // Atomic storage reservation for Pro users (prevents TOCTOU race)
