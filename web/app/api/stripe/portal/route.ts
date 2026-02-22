@@ -1,8 +1,6 @@
 import { NextResponse } from "next/server";
-import Stripe from "stripe";
 import { requireAuth, getStripeCustomerId, getOrigin } from "@/lib/api-utils";
-
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
+import { getStripe } from "@/lib/stripe";
 
 /**
  * POST /api/stripe/portal
@@ -21,7 +19,7 @@ export async function POST() {
     return NextResponse.json({ error: "No subscription found" }, { status: 400 });
   }
 
-  const portalSession = await stripe.billingPortal.sessions.create({
+  const portalSession = await getStripe().billingPortal.sessions.create({
     customer: customerId,
     return_url: `${getOrigin()}/billing`,
   });

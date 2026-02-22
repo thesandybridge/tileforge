@@ -1,9 +1,7 @@
 import { NextResponse } from "next/server";
-import Stripe from "stripe";
 import { API_URL } from "@/lib/api";
 import { requireAuth, getStripeCustomerId } from "@/lib/api-utils";
-
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
+import { getStripe } from "@/lib/stripe";
 
 /**
  * POST /api/account/deactivate
@@ -22,12 +20,12 @@ export async function POST() {
   // Cancel active Stripe subscriptions if any
   const customerId = await getStripeCustomerId(userId);
   if (customerId) {
-    const subscriptions = await stripe.subscriptions.list({
+    const subscriptions = await getStripe().subscriptions.list({
       customer: customerId,
       status: "active",
     });
     for (const sub of subscriptions.data) {
-      await stripe.subscriptions.cancel(sub.id);
+      await getStripe().subscriptions.cancel(sub.id);
     }
   }
 
