@@ -7,6 +7,7 @@ RUN curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
 WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
 COPY crates/core/Cargo.toml crates/core/Cargo.toml
+COPY crates/shared/Cargo.toml crates/shared/Cargo.toml
 COPY crates/wasm/Cargo.toml crates/wasm/Cargo.toml
 # Dummy workspace members so cargo resolves
 COPY crates/api/Cargo.toml crates/api/Cargo.toml
@@ -15,6 +16,7 @@ COPY cli/Cargo.toml cli/Cargo.toml
 COPY xtask/Cargo.toml xtask/Cargo.toml
 
 RUN mkdir -p crates/core/src && echo "" > crates/core/src/lib.rs \
+    && mkdir -p crates/shared/src && echo "" > crates/shared/src/lib.rs \
     && mkdir -p crates/wasm/src && echo "" > crates/wasm/src/lib.rs \
     && mkdir -p crates/api/src && echo "fn main() {}" > crates/api/src/main.rs \
     && mkdir -p crates/worker/src && echo "fn main() {}" > crates/worker/src/main.rs \
