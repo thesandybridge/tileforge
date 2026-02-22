@@ -90,13 +90,8 @@ async fn reserve_storage(
 
 async fn enqueue_async(
     state: &AppState,
-    job_id: &str,
     body: &Bytes,
-    params: &TileParams,
-    user: Option<&crate::auth::UserClaims>,
-    projection_str: &str,
-    tile_size: u32,
-    reserved_bytes: Option<i64>,
+    job: TileJob,
 ) -> Result<Response, ApiError> {
     let (mut redis, bucket) = match (&state.redis, &state.bucket) {
         (Some(r), Some(b)) => (r.clone(), b.clone()),
@@ -109,7 +104,7 @@ async fn enqueue_async(
 
     // Upload image bytes to S3
     bucket
-        .put_object(&upload_s3_key(job_id), body)
+        .put_object(&upload_s3_key(&job.job_id), body)
         .await
         .map_err(|e| ApiError::Processing(format!("S3 upload failed: {e}")))?;
 
@@ -118,23 +113,13 @@ async fn enqueue_async(
     let initial_progress = serde_json::json!({
         "status": "queued",
         "last_updated": now,
-        "user_id": user.map(|c| &c.sub),
+        "user_id": &job.user_id,
     });
     let _: redis::RedisResult<()> = redis
-        .set_ex(progress_key(job_id), initial_progress.to_string(), 3600u64)
+        .set_ex(progress_key(&job.job_id), initial_progress.to_string(), 3600u64)
         .await;
 
-    // Build job payload
-    let job = TileJob {
-        job_id: job_id.to_string(),
-        tile_size: Some(tile_size),
-        min_zoom: params.min_zoom,
-        max_zoom: params.max_zoom,
-        projection: Some(projection_str.to_string()),
-        user_id: user.map(|c| c.sub.clone()),
-        file_name: params.file_name.clone(),
-        reserved_bytes,
-    };
+    let job_id = job.job_id.clone();
     let job_json = serde_json::to_string(&job).unwrap();
 
     if let Some(ref nats) = state.nats {
@@ -149,7 +134,7 @@ async fn enqueue_async(
         tracing::info!(job_id = %job_id, "enqueued async job via Redis (NATS not configured)");
     }
 
-    Ok((StatusCode::ACCEPTED, Json(AcceptedResponse { job_id: job_id.to_string() })).into_response())
+    Ok((StatusCode::ACCEPTED, Json(AcceptedResponse { job_id })).into_response())
 }
 
 fn process_sync(body: Bytes, tile_size: u32, min_zoom: Option<u32>, max_zoom: Option<u32>, projection: Projection) -> Result<Vec<u8>, ApiError> {
@@ -216,11 +201,17 @@ pub async fn process_tiles(
     let is_large = should_use_streaming(&body, STREAMING_THRESHOLD);
 
     if is_pro || is_large {
-        let job_id = Uuid::new_v4().to_string();
-        return enqueue_async(
-            &state, &job_id, &body, &params,
-            claims.0.as_ref(), projection_str, tile_size, reserved_bytes,
-        ).await;
+        let job = TileJob {
+            job_id: Uuid::new_v4().to_string(),
+            tile_size: Some(tile_size),
+            min_zoom: params.min_zoom,
+            max_zoom: params.max_zoom,
+            projection: Some(projection_str.to_string()),
+            user_id: claims.0.as_ref().map(|c| c.sub.clone()),
+            file_name: params.file_name.clone(),
+            reserved_bytes,
+        };
+        return enqueue_async(&state, &body, job).await;
     }
 
     // Sync path
