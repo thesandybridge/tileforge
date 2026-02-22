@@ -279,18 +279,16 @@ struct Claims(UserClaims);
 impl<S: Send + Sync> FromRequestParts<S> for Claims {
     type Rejection = ApiError;
 
-    fn from_request_parts(
+    async fn from_request_parts(
         parts: &mut axum::http::request::Parts,
         _state: &S,
-    ) -> impl std::future::Future<Output = Result<Self, Self::Rejection>> + Send {
-        async move {
-            parts
-                .extensions
-                .get::<UserClaims>()
-                .cloned()
-                .map(Claims)
-                .ok_or(ApiError::Unauthorized)
-        }
+    ) -> Result<Self, Self::Rejection> {
+        parts
+            .extensions
+            .get::<UserClaims>()
+            .cloned()
+            .map(Claims)
+            .ok_or(ApiError::Unauthorized)
     }
 }
 
@@ -300,13 +298,11 @@ struct OptionalClaims(Option<UserClaims>);
 impl<S: Send + Sync> FromRequestParts<S> for OptionalClaims {
     type Rejection = ApiError;
 
-    fn from_request_parts(
+    async fn from_request_parts(
         parts: &mut axum::http::request::Parts,
         _state: &S,
-    ) -> impl std::future::Future<Output = Result<Self, Self::Rejection>> + Send {
-        async move {
-            Ok(OptionalClaims(parts.extensions.get::<UserClaims>().cloned()))
-        }
+    ) -> Result<Self, Self::Rejection> {
+        Ok(OptionalClaims(parts.extensions.get::<UserClaims>().cloned()))
     }
 }
 

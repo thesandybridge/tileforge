@@ -55,18 +55,12 @@ pub struct ScaleMetadata {
 }
 
 /// RGBA background color (0-255 per channel).
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct BackgroundColor {
     pub r: u8,
     pub g: u8,
     pub b: u8,
     pub a: u8,
-}
-
-impl Default for BackgroundColor {
-    fn default() -> Self {
-        Self { r: 0, g: 0, b: 0, a: 0 } // Transparent
-    }
 }
 
 impl BackgroundColor {

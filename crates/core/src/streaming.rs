@@ -432,6 +432,7 @@ impl StreamingTiler {
 /// When `projection == Mercator`, the Y axis is remapped using Web Mercator
 /// math so that equal-size tile rows cover equal Mercator-projected latitude
 /// bands rather than equal pixel bands.
+#[allow(clippy::too_many_arguments)]
 fn extract_tile(
     strip: &RgbaImage,
     strip_start_row: u32,
@@ -594,8 +595,7 @@ fn convert_row_to_rgba(data: &[u8], color_type: png::ColorType, width: u32) -> V
         }
         png::ColorType::Grayscale => {
             let mut rgba = Vec::with_capacity(w * 4);
-            for i in 0..w {
-                let g = data[i];
+            for &g in data.iter().take(w) {
                 rgba.extend_from_slice(&[g, g, g, 255]);
             }
             rgba
