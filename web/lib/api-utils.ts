@@ -45,5 +45,5 @@ export async function getStripeCustomerId(userId: string): Promise<string | null
  * Gets the app origin URL for redirects.
  */
 export function getOrigin(): string {
-  return process.env.NEXTAUTH_URL ?? "http://localhost:3000";
+  return process.env.AUTH_URL ?? process.env.NEXTAUTH_URL ?? "http://localhost:3000";
 }
