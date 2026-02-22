@@ -1014,12 +1014,20 @@ export default function Home() {
       </main>
       </ScrollReveal>
 
-      {/* Upgrade CTA */}
-      <div className="mx-auto mt-8 max-w-2xl">
-        <ScrollReveal>
-          <UpgradeBanner />
-        </ScrollReveal>
-      </div>
+      {/* Tile preview — full width */}
+      {status === "done" && zipBlob && (
+        <div className="mt-8">
+          <h2 className="mb-2 text-lg font-semibold">Tile Preview</h2>
+          <TilePreview
+              zipBlob={zipBlob}
+              imageWidth={form.imageInfo?.width ?? form.tileSize * (1 << form.maxZoom)}
+              imageHeight={form.imageInfo?.height ?? form.tileSize * (1 << form.maxZoom)}
+              maxZoom={form.maxZoom}
+              tileSize={form.tileSize}
+              projection={form.projection}
+          />
+        </div>
+      )}
 
       {/* Features (SEO) */}
       <section className="mx-auto mt-16 max-w-4xl space-y-12">
@@ -1065,20 +1073,12 @@ export default function Home() {
         </ScrollReveal>
       </section>
 
-      {/* Tile preview — full width */}
-      {status === "done" && zipBlob && (
-        <div className="mt-8">
-          <h2 className="mb-2 text-lg font-semibold">Tile Preview</h2>
-          <TilePreview
-              zipBlob={zipBlob}
-              imageWidth={form.imageInfo?.width ?? form.tileSize * (1 << form.maxZoom)}
-              imageHeight={form.imageInfo?.height ?? form.tileSize * (1 << form.maxZoom)}
-              maxZoom={form.maxZoom}
-              tileSize={form.tileSize}
-              projection={form.projection}
-          />
-        </div>
-      )}
+      {/* Upgrade CTA */}
+      <div className="mx-auto mt-8 max-w-2xl">
+        <ScrollReveal>
+          <UpgradeBanner />
+        </ScrollReveal>
+      </div>
 
       {/* Save Preset Dialog */}
       <Dialog open={presetDialogOpen} onOpenChange={setPresetDialogOpen}>

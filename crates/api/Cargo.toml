@@ -25,3 +25,8 @@ rand = "0.8"
 async-nats = "0.38"
 utoipa = { version = "5", features = ["axum_extras", "chrono", "uuid"] }
 utoipa-swagger-ui = { version = "9", features = ["axum", "reqwest"] }
+image = "0.25"
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"

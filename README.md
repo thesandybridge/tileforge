@@ -63,7 +63,21 @@ tileforge/
 ├── Cargo.toml                       # Workspace root
 ├── crates/
 │   ├── core/src/                    # Tiling engine (Tiler, ZipTileWriter, PmTilesTileWriter, TeeTileWriter)
-│   ├── api/src/main.rs              # HTTP API (axum) — tiles, downloads, CRUD, auth, notifications, API keys
+│   ├── api/src/                     # HTTP API (axum)
+│   │   ├── main.rs                  # Entrypoint, service init, router wiring
+│   │   ├── config.rs                # AppConfig (env var parsing)
+│   │   ├── state.rs                 # AppState, shared helpers (require_db, S3 cleanup)
+│   │   ├── error.rs                 # ApiError enum + HTTP status mapping
+│   │   ├── auth.rs                  # JWT/API key auth middleware, extractors
+│   │   ├── rate_limit.rs            # Tiered rate limiting (anon < free < pro)
+│   │   ├── s3.rs                    # S3 bucket initialization
+│   │   └── handlers/                # Route handlers
+│   │       ├── tiles.rs             # Tile processing (sync/async), SSE progress, downloads
+│   │       ├── tilesets.rs          # Tileset CRUD, PMTiles presigned URLs
+│   │       ├── user.rs              # Current user, account deactivation
+│   │       ├── notifications.rs     # Notification CRUD
+│   │       ├── api_keys.rs          # API key management (Pro only)
+│   │       └── admin.rs             # Broadcast notifications, purge accounts
 │   ├── worker/src/main.rs           # Background worker — async jobs, thumbnail generation
 │   └── wasm/src/lib.rs              # WASM bindings for crates/core
 ├── cli/src/main.rs                  # Native CLI binary
@@ -104,7 +118,7 @@ tileforge/
 | Service    | Purpose                                                       |
 |------------|---------------------------------------------------------------|
 | **web**    | Next.js 16 — UI, auth (Auth.js v5), SSR                      |
-| **api**    | Rust (axum) — tile processing, downloads, CRUD, auth, rate limiting |
+| **api**    | Rust (axum) — modular handlers for tiles, tilesets, auth, rate limiting |
 | **worker** | Rust — async job consumer, thumbnail generation               |
 | NATS       | JetStream job queue — durable publish, explicit ack, retry/DLQ |
 | Redis      | Progress cache + rate limiting (job queue fallback if no NATS) |
