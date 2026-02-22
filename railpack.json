@@ -6,6 +6,7 @@
   },
   "steps": {
     "wasm-build": {
+      "inputs": [{ "local": true }],
       "commands": [
         "rustup target add wasm32-unknown-unknown",
         "curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh",
@@ -13,6 +14,7 @@
       ]
     },
     "install": {
+      "inputs": [{ "local": true }],
       "commands": ["cd web && npm ci"]
     },
     "build": {
