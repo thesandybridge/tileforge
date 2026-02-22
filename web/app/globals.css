@@ -79,19 +79,19 @@
   }
 }
 
-/* Shiki syntax highlighting — CSS variable theme */
+/* Shiki syntax highlighting — themed via CSS variables */
 :root {
-  --shiki-color-text: var(--foreground);
-  --shiki-color-background: var(--muted);
-  --shiki-token-keyword: oklch(0.78 0.155 80);
-  --shiki-token-function: oklch(0.7 0.15 200);
-  --shiki-token-string: oklch(0.7 0.15 140);
-  --shiki-token-string-expression: oklch(0.7 0.15 140);
-  --shiki-token-constant: oklch(0.75 0.12 50);
-  --shiki-token-parameter: oklch(0.7 0.12 220);
-  --shiki-token-comment: oklch(0.55 0.02 70);
-  --shiki-token-punctuation: oklch(0.6 0.02 70);
-  --shiki-token-link: oklch(0.7 0.15 200);
+  --shiki-color-text: var(--text-bright);
+  --shiki-color-background: var(--code-bg);
+  --shiki-token-keyword: var(--secondary-fg);
+  --shiki-token-function: var(--info);
+  --shiki-token-string: var(--alt);
+  --shiki-token-string-expression: var(--alt);
+  --shiki-token-constant: var(--warning);
+  --shiki-token-parameter: var(--info);
+  --shiki-token-comment: var(--primary-fg);
+  --shiki-token-punctuation: var(--primary-fg);
+  --shiki-token-link: var(--info);
 }
 
 /* Shiki code blocks */
