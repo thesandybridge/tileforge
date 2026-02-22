@@ -415,7 +415,7 @@ export default function Home() {
       </noscript>
 
       {/* Main tool card */}
-      <ScrollReveal className="overflow-visible">
+      <ScrollReveal className="overflow-y-visible overflow-x-clip">
       <main className="mx-auto mt-10 max-w-2xl px-6 space-y-4">
         <RateLimitBanner />
         {form.mode === "local" && (status === "idle" || status === "loading") && (
@@ -423,7 +423,7 @@ export default function Home() {
         )}
 
         {showCard && (
-          <div className="relative overflow-visible">
+          <div className="relative overflow-y-visible overflow-x-clip">
             <TileParticles active={status === "processing" || status === "waking"} />
             <Card className="relative z-10 border-border/50 corona-glow shadow-lg">
             <CardContent className="space-y-6 p-6 sm:p-8">

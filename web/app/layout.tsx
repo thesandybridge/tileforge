@@ -83,7 +83,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" className="overflow-x-hidden" suppressHydrationWarning>
       <head>
         <meta name="darkreader-lock" />
         <script dangerouslySetInnerHTML={{ __html: generateThemeScript() }} />
