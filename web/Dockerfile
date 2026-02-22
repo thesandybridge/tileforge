@@ -35,8 +35,8 @@ FROM node:22-alpine AS builder
 WORKDIR /app
 
 COPY web/package.json web/package-lock.json web/.npmrc ./
-RUN --mount=type=secret,id=NPM_TOKEN \
-    NPM_TOKEN=$(cat /run/secrets/NPM_TOKEN) npm ci
+ARG NPM_TOKEN
+RUN npm ci
 
 COPY web/ .
 COPY --from=wasm-builder /wasm-out ./public/wasm/
