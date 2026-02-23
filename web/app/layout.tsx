@@ -101,14 +101,6 @@ export default function RootLayout({
       <head>
         <meta name="darkreader-lock" />
         <script dangerouslySetInnerHTML={{ __html: generateThemeScript() }} />
-        {umamiUrl && umamiId && (
-          <Script
-            async
-            src={umamiUrl}
-            data-website-id={umamiId}
-            strategy="afterInteractive"
-          />
-        )}
         <link rel="icon" href="/icon.svg" type="image/svg+xml" />
         <link rel="apple-touch-icon" href="/icon.svg" />
         <meta name="theme-color" content="#1d2021" media="(prefers-color-scheme: dark)" />
@@ -160,6 +152,14 @@ export default function RootLayout({
         />
       </head>
       <body className={`${inter.className} ${geistMono.variable} flex min-h-dvh flex-col antialiased`}>
+        {umamiUrl && umamiId && (
+          <Script
+            async
+            src={umamiUrl}
+            data-website-id={umamiId}
+            strategy="afterInteractive"
+          />
+        )}
         <SessionProvider>
           <QueryProvider>
             <ThemeProvider>
