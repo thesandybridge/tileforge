@@ -8,6 +8,7 @@ import dynamic from "next/dynamic";
 import { ArrowLeft, Map, Globe, Grid3X3, Copy, Check, Eye, EyeOff, Trash2, Pencil, Loader2 } from "lucide-react";
 import { formatBytes } from "@/lib/utils";
 import { copyToClipboard } from "@/lib/clipboard";
+import { API_URL } from "@/lib/api";
 import { useTileset, useUpdateTileset, useDeleteTileset, usePmtilesUrl } from "@/hooks/use-tilesets";
 import { useApiKey } from "@/hooks/use-api-key";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -157,9 +158,8 @@ export default function TileSetDetailPage() {
     );
   }
 
-  const origin = typeof window !== "undefined" ? window.location.origin : "";
   const keyParam = apiKey ? "?key=YOUR_API_KEY" : "";
-  const tileUrl = `${origin}/api/tiles/${tileset.slug}/download/pmtiles${keyParam}`;
+  const tileUrl = `${API_URL}/api/tiles/${tileset.slug}/download/pmtiles${keyParam}`;
 
   const leafletSnippet = `import "pmtiles";
 import * as protomapsL from "protomaps-leaflet";
