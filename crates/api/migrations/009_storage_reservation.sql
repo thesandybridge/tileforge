@@ -10,15 +10,15 @@ CREATE OR REPLACE FUNCTION reserve_storage(
     p_quota BIGINT
 ) RETURNS BOOLEAN AS $$
 DECLARE
-    v_success BOOLEAN;
+    v_rows INTEGER;
 BEGIN
     UPDATE users
     SET storage_reserved_bytes = storage_reserved_bytes + p_bytes
     WHERE id = p_user_id
       AND storage_used_bytes + storage_reserved_bytes + p_bytes <= p_quota;
 
-    GET DIAGNOSTICS v_success = ROW_COUNT;
-    RETURN v_success > 0;
+    GET DIAGNOSTICS v_rows = ROW_COUNT;
+    RETURN v_rows > 0;
 END;
 $$ LANGUAGE plpgsql;
 
