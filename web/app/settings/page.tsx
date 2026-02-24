@@ -122,6 +122,18 @@ function SettingsContent() {
             )}
           </div>
         </div>
+        {session.user.id && (
+          <button
+            type="button"
+            className="text-muted-foreground hover:text-foreground mt-4 flex items-center gap-2 rounded border px-3 py-1.5 font-mono text-xs transition-colors"
+            onClick={() => {
+              navigator.clipboard.writeText(session.user.id);
+              toast.success("User ID copied");
+            }}
+          >
+            <span className="text-muted-foreground/60">ID:</span> {session.user.id}
+          </button>
+        )}
       </div>
 
       {/* Connected Accounts */}

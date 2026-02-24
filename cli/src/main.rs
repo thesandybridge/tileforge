@@ -1,11 +1,25 @@
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use std::fs;
 use std::path::PathBuf;
 use tileforge_core::{StreamingTiler, TileConfig, Tiler, ZipTileWriter};
 
 #[derive(Parser)]
-#[command(name = "tileforge", about = "Slice images into XYZ tile sets")]
-struct Args {
+#[command(name = "tileforge", about = "TileForge CLI — tile images and manage accounts")]
+struct Cli {
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    /// Slice an image into XYZ tile sets
+    Tiles(TilesArgs),
+    /// Set a user's plan (free or pro)
+    SetPlan(SetPlanArgs),
+}
+
+#[derive(Parser)]
+struct TilesArgs {
     /// Path to the source image
     input: PathBuf,
 
@@ -38,6 +52,20 @@ struct Args {
     projection: String,
 }
 
+#[derive(Parser)]
+struct SetPlanArgs {
+    /// User ID (UUID), GitHub username, or email
+    user: String,
+
+    /// Plan to set
+    #[arg(value_parser = ["free", "pro"])]
+    plan: String,
+
+    /// Database URL (defaults to $DATABASE_URL)
+    #[arg(long, env = "DATABASE_URL")]
+    database_url: String,
+}
+
 fn progress_callback(p: tileforge_core::TileProgress) {
     eprint!(
         "\rProcessing: z{} ({}/{} tiles, {:.0}%)",
@@ -49,8 +77,54 @@ fn progress_callback(p: tileforge_core::TileProgress) {
 }
 
 fn main() {
-    let args = Args::parse();
+    let _ = dotenvy::dotenv();
+    let cli = Cli::parse();
 
+    match cli.command {
+        Command::Tiles(args) => run_tiles(args),
+        Command::SetPlan(args) => run_set_plan(args),
+    }
+}
+
+fn run_set_plan(args: SetPlanArgs) {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+
+    rt.block_on(async {
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .max_connections(1)
+            .connect(&args.database_url)
+            .await
+            .unwrap_or_else(|e| {
+                eprintln!("Failed to connect to database: {e}");
+                std::process::exit(1);
+            });
+
+        let result = sqlx::query_scalar::<_, String>(
+            "UPDATE users SET plan = $1, updated_at = now() WHERE id::text = $2 OR username = $2 OR email = $2 RETURNING username",
+        )
+        .bind(&args.plan)
+        .bind(&args.user)
+        .fetch_optional(&pool)
+        .await
+        .unwrap_or_else(|e| {
+            eprintln!("Database error: {e}");
+            std::process::exit(1);
+        });
+
+        match result {
+            Some(username) => println!("Set {username} to '{}'", args.plan),
+            None => {
+                eprintln!("No user found matching '{}'", args.user);
+                std::process::exit(1);
+            }
+        }
+    });
+}
+
+fn run_tiles(args: TilesArgs) {
     let bytes = fs::read(&args.input).unwrap_or_else(|e| {
         eprintln!("Failed to read {}: {e}", args.input.display());
         std::process::exit(1);

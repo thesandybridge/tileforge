@@ -3776,8 +3776,11 @@ name = "tileforge-cli"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "dotenvy",
  "image",
+ "sqlx",
  "tileforge-core",
+ "tokio",
 ]
 
 [[package]]
