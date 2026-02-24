@@ -158,8 +158,7 @@ export default function TileSetDetailPage() {
     );
   }
 
-  const keyParam = apiKey ? "?key=YOUR_API_KEY" : "";
-  const tileUrl = `${API_URL}/api/tiles/${tileset.slug}/download/pmtiles${keyParam}`;
+  const tileUrl = `${API_URL}/api/tilesets/${tileset.slug}/pmtiles-url`;
 
   const leafletSnippet = `import "pmtiles";
 import * as protomapsL from "protomaps-leaflet";
