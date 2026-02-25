@@ -80,6 +80,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       }
 
       if (trigger === "signIn" && account && profile) {
+        try {
         const provider = account.provider;
         const { providerAccountId, username, avatarUrl, email } =
           extractProfile(provider, profile as Profile);
@@ -211,6 +212,10 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         token.username = username;
         token.avatarUrl = avatarUrl;
         token.sub = row!.id;
+        } catch (err) {
+          console.error("[auth] jwt callback error:", err);
+          throw err;
+        }
       }
 
       // Mint a short-lived API token on every JWT refresh
