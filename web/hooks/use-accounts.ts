@@ -28,6 +28,10 @@ export function useUpdateAvatar() {
   const { data: session, update: updateSession } = useSession();
   return useMutation({
     mutationFn: (provider: string) => updateAvatar(provider, session!.accessToken!),
-    onSuccess: () => updateSession(),
+    onSuccess: async () => {
+      // Pass data to trigger the "update" path in the JWT callback
+      // (calling update() with no args just refetches without triggering)
+      await updateSession({});
+    },
   });
 }
