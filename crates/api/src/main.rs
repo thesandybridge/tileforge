@@ -246,6 +246,12 @@ fn build_router(state: AppState, rate_limit: RateLimit, config: &AppConfig) -> R
                 rate_limit_mutations,
             )),
         )
+        // Accounts (linked providers)
+        .route("/api/user/accounts", get(accounts::list_accounts))
+        .route(
+            "/api/user/accounts/{provider}",
+            axum::routing::delete(accounts::unlink_account),
+        )
         // Admin
         .route(
             "/api/admin/purge-deactivated",

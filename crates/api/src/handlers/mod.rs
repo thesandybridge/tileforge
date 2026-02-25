@@ -1,3 +1,4 @@
+pub mod accounts;
 pub mod admin;
 pub mod api_keys;
 pub mod notifications;
