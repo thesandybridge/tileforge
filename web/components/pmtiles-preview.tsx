@@ -124,7 +124,8 @@ export default function PmtilesPreview({
           maxZoom={maxZoom}
           minZoom={0}
           zoomSnap={1}
-          style={{ aspectRatio: "1 / 1", width: "100%", background: "var(--background)" }}
+          className="aspect-[4/3] w-full sm:aspect-square"
+          style={{ background: "var(--background)" }}
           attributionControl={false}
         >
           <PmtilesTileLayer
@@ -154,7 +155,8 @@ export default function PmtilesPreview({
         minZoom={0}
         zoomSnap={1}
         crs={L.CRS.Simple}
-        style={{ aspectRatio: "1 / 1", width: "100%", background: "var(--background)" }}
+        className="aspect-[4/3] w-full sm:aspect-square"
+          style={{ background: "var(--background)" }}
         attributionControl={false}
       >
         <PmtilesTileLayer

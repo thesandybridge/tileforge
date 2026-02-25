@@ -78,11 +78,11 @@ function CodeBlock({ code, label, lang = "typescript" }: { code: string; label: 
       </div>
       {html ? (
         <div
-          className="overflow-x-auto rounded-lg text-xs [&_pre]:p-4 [&_pre]:leading-relaxed"
+          className="overflow-x-auto rounded-lg text-xs [&_pre]:p-4 [&_pre]:leading-relaxed [&_pre]:whitespace-pre-wrap [&_pre]:break-all"
           dangerouslySetInnerHTML={{ __html: html }}
         />
       ) : (
-        <pre className="bg-muted overflow-x-auto rounded-lg p-4 text-xs leading-relaxed">
+        <pre className="bg-muted overflow-x-auto whitespace-pre-wrap break-all rounded-lg p-4 text-xs leading-relaxed">
           <code>{code}</code>
         </pre>
       )}
@@ -143,7 +143,7 @@ export default function TileSetDetailPage() {
 
   if (displayError || !tileset) {
     return (
-      <div className="mx-auto max-w-3xl px-6 py-16">
+      <div className="mx-auto max-w-3xl px-4 py-16 sm:px-6">
         <p className="text-destructive text-center">{displayError ?? "Tile set not found"}</p>
         <div className="mt-4 text-center">
           <Link
@@ -190,12 +190,12 @@ const map = new maplibregl.Map({
 });`;
 
   return (
-    <div className="mx-auto max-w-3xl px-6 py-10">
+    <div className="mx-auto max-w-3xl px-4 py-10 sm:px-6">
         <div className="flex items-start gap-3">
           <Map className="text-primary mt-1 h-6 w-6 shrink-0" />
           <div className="min-w-0 flex-1">
             {editState.editing ? (
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <input
                   autoFocus
                   aria-label="Tileset name"
@@ -205,18 +205,20 @@ const map = new maplibregl.Map({
                     if (e.key === "Enter") handleRename();
                     if (e.key === "Escape") setEditState({ editing: false });
                   }}
-                  className="bg-transparent text-3xl font-bold tracking-tight outline-none border-b border-primary w-full"
+                  className="bg-transparent text-2xl font-bold tracking-tight outline-none border-b border-primary w-full sm:text-3xl"
                 />
-                <Button size="sm" onClick={handleRename}>Save</Button>
-                <Button size="sm" variant="ghost" onClick={() => setEditState({ editing: false })}>Cancel</Button>
+                <div className="flex gap-2 shrink-0">
+                  <Button size="sm" onClick={handleRename}>Save</Button>
+                  <Button size="sm" variant="ghost" onClick={() => setEditState({ editing: false })}>Cancel</Button>
+                </div>
               </div>
             ) : (
               <div className="group flex items-center gap-2">
-                <h1 className="text-3xl font-bold tracking-tight">{tileset.name}</h1>
+                <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">{tileset.name}</h1>
                 {isOwner && (
                   <button
                     onClick={() => setEditState({ editing: true, name: tileset.name })}
-                    className="text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 transition-opacity"
+                    className="text-muted-foreground hover:text-foreground md:opacity-0 md:group-hover:opacity-100 transition-opacity"
                   >
                     <Pencil className="h-4 w-4" />
                   </button>
@@ -235,7 +237,7 @@ const map = new maplibregl.Map({
             <CardTitle className="text-lg">Details</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-2 gap-4 text-sm sm:grid-cols-4">
+            <div className="grid grid-cols-1 gap-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
               <div>
                 <p className="text-muted-foreground text-xs uppercase tracking-wider">Projection</p>
                 <p className="mt-1 flex items-center gap-1.5 font-medium">
@@ -272,7 +274,7 @@ const map = new maplibregl.Map({
                 <p className="text-muted-foreground text-xs uppercase tracking-wider">Visibility</p>
                 <p className="mt-1 font-medium">{tileset.public ? "Public" : "Private"}</p>
               </div>
-              <div className="col-span-2">
+              <div className="sm:col-span-2">
                 <p className="text-muted-foreground text-xs uppercase tracking-wider">Created</p>
                 <p className="mt-1 font-medium">
                   {new Date(tileset.created_at).toLocaleDateString(undefined, {
@@ -343,10 +345,10 @@ const map = new maplibregl.Map({
         )}
 
         {/* Actions */}
-        <div className="mt-8 flex gap-3">
+        <div className="mt-8 flex flex-wrap gap-3">
           {isOwner && (
             <>
-              <Button variant="secondary" onClick={handleToggleVisibility}>
+              <Button variant="secondary" onClick={handleToggleVisibility} className="w-full sm:w-auto">
                 {tileset.public ? (
                   <><EyeOff className="mr-2 h-4 w-4" /> Make Private</>
                 ) : (
@@ -355,7 +357,7 @@ const map = new maplibregl.Map({
               </Button>
               <AlertDialog>
                 <AlertDialogTrigger asChild>
-                  <Button variant="destructive">
+                  <Button variant="destructive" className="w-full sm:w-auto">
                     <Trash2 className="mr-2 h-4 w-4" /> Delete
                   </Button>
                 </AlertDialogTrigger>
