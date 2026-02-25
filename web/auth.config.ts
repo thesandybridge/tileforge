@@ -1,4 +1,6 @@
 import GitHub from "next-auth/providers/github";
+import Discord from "next-auth/providers/discord";
+import Google from "next-auth/providers/google";
 import { SignJWT, jwtVerify } from "jose";
 import type { NextAuthConfig } from "next-auth";
 
@@ -6,10 +8,26 @@ import type { NextAuthConfig } from "next-auth";
  * Auth.js config that is safe for the Edge runtime (no Node.js-only imports).
  * Used by middleware. The full auth.ts extends this with DB callbacks.
  */
+const useSecureCookies = process.env.NODE_ENV === "production";
+
 export default {
-  providers: [GitHub],
+  providers: [GitHub, Discord, Google],
   trustHost: true,
   session: { strategy: "jwt" },
+  cookies: {
+    sessionToken: {
+      name: "tileforge.session-token",
+      options: { httpOnly: true, sameSite: "lax" as const, path: "/", secure: useSecureCookies },
+    },
+    callbackUrl: {
+      name: "tileforge.callback-url",
+      options: { httpOnly: true, sameSite: "lax" as const, path: "/", secure: useSecureCookies },
+    },
+    csrfToken: {
+      name: "tileforge.csrf-token",
+      options: { httpOnly: false, sameSite: "lax" as const, path: "/", secure: useSecureCookies },
+    },
+  },
   jwt: {
     async encode({ token, salt, secret }) {
       if (!token) return "";

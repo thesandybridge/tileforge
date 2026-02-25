@@ -44,7 +44,7 @@ cd web && npm run test:e2e  # Playwright E2E
 - `wasm` — Browser bindings (wasm-pack `--target no-modules`, output committed to `web/public/wasm/`)
 - `cli` — Native CLI binary (clap)
 
-**Web frontend** (`web/`): Next.js 16 App Router, TypeScript strict, Tailwind v4, shadcn/ui (`@thesandybridge/ui`), React Query, Auth.js v5 (GitHub OAuth)
+**Web frontend** (`web/`): Next.js 16 App Router, TypeScript strict, Tailwind v4, shadcn/ui (`@thesandybridge/ui`), React Query, Auth.js v5 (GitHub, Discord, Google OAuth)
 
 **Data flow — async tile processing:**
 1. `POST /api/tiles` → upload to S3, publish `TileJob` to NATS/Redis → 202 + job_id
@@ -59,9 +59,9 @@ tiles/{job_id}/tiles.pmtiles            # PMTiles output
 tiles/{job_id}/thumbnail.jpg            # 480px JPEG
 ```
 
-**Auth:** HS256 JWT shared between Next.js and Rust API. Three levels: anon, free, pro. API keys (`tf_...` prefix) are Pro-only.
+**Auth:** Multi-provider OAuth (GitHub, Discord, Google) via Auth.js v5 with `accounts` table for provider linking. HS256 JWT shared between Next.js and Rust API. Three levels: anon, free, pro. API keys (`tf_...` prefix) are Pro-only. Auto-links accounts by email match on sign-in.
 
-**Database:** Postgres with sqlx migrations auto-applied on API startup (`crates/api/migrations/`). Tables: users, tile_sets, api_keys, notifications.
+**Database:** Postgres with sqlx migrations auto-applied on API startup (`crates/api/migrations/`). Tables: users, accounts, tile_sets, api_keys, notifications.
 
 ## Key Patterns
 
@@ -75,7 +75,7 @@ tiles/{job_id}/thumbnail.jpg            # 480px JPEG
 
 Dev infra from `docker-compose.yml`: Postgres 17 (:5433), Redis 7 (:6380), MinIO (:9000), NATS (:4222).
 
-Required env vars: `DATABASE_URL`, `REDIS_URL`, `JWT_SECRET`, `S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`. Web additionally needs `AUTH_SECRET`, `AUTH_GITHUB_ID`, `AUTH_GITHUB_SECRET`, Stripe keys.
+Required env vars: `DATABASE_URL`, `REDIS_URL`, `JWT_SECRET`, `S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`. Web additionally needs `AUTH_SECRET`, `AUTH_GITHUB_ID`, `AUTH_GITHUB_SECRET`, `AUTH_DISCORD_ID`, `AUTH_DISCORD_SECRET`, `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`, Stripe keys.
 
 ## Conventions
 

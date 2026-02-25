@@ -175,6 +175,7 @@ fn build_router(state: AppState, rate_limit: RateLimit, config: &AppConfig) -> R
                 .allow_methods([
                     Method::GET,
                     Method::POST,
+                    Method::PUT,
                     Method::PATCH,
                     Method::DELETE,
                     Method::OPTIONS,
@@ -245,6 +246,20 @@ fn build_router(state: AppState, rate_limit: RateLimit, config: &AppConfig) -> R
                 rate_limit.clone(),
                 rate_limit_mutations,
             )),
+        )
+        // Accounts (linked providers)
+        .route("/api/user/accounts", get(accounts::list_accounts))
+        .route(
+            "/api/user/accounts/{provider}",
+            axum::routing::delete(accounts::unlink_account).layer(
+                middleware::from_fn_with_state(rate_limit.clone(), rate_limit_mutations),
+            ),
+        )
+        .route(
+            "/api/user/avatar",
+            axum::routing::put(accounts::update_avatar).layer(
+                middleware::from_fn_with_state(rate_limit.clone(), rate_limit_mutations),
+            ),
         )
         // Admin
         .route(
