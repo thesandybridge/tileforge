@@ -1,0 +1,30 @@
+env_files = [".env", "web/.env.local"]
+required_tools = ["docker", "cargo", "node", "npm", "mprocs"]
+
+[docker]
+compose_file = "docker-compose.yml"
+
+[[docker.health_checks]]
+name = "postgres"
+cmd = ["docker", "compose", "exec", "-T", "postgres", "pg_isready", "-U", "tileforge"]
+timeout = 30
+
+[[docker.health_checks]]
+name = "redis"
+cmd = ["docker", "compose", "exec", "-T", "redis", "redis-cli", "ping"]
+timeout = 30
+
+[[docker.health_checks]]
+name = "minio"
+url = "http://localhost:9000/minio/health/live"
+timeout = 30
+
+[dev]
+mprocs_config = "mprocs.yaml"
+
+[[dev.hooks]]
+cmd = "npm install"
+cwd = "web"
+
+[dev.hooks.condition]
+missing = "web/node_modules"
