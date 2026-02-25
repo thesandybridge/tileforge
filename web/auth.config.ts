@@ -12,6 +12,20 @@ export default {
   providers: [GitHub, Discord, Google],
   trustHost: true,
   session: { strategy: "jwt" },
+  cookies: {
+    sessionToken: {
+      name: "tileforge.session-token",
+      options: { httpOnly: true, sameSite: "lax" as const, path: "/", secure: false },
+    },
+    callbackUrl: {
+      name: "tileforge.callback-url",
+      options: { httpOnly: true, sameSite: "lax" as const, path: "/", secure: false },
+    },
+    csrfToken: {
+      name: "tileforge.csrf-token",
+      options: { httpOnly: false, sameSite: "lax" as const, path: "/", secure: false },
+    },
+  },
   jwt: {
     async encode({ token, salt, secret }) {
       if (!token) return "";
