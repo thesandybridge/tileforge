@@ -250,7 +250,9 @@ fn build_router(state: AppState, rate_limit: RateLimit, config: &AppConfig) -> R
         .route("/api/user/accounts", get(accounts::list_accounts))
         .route(
             "/api/user/accounts/{provider}",
-            axum::routing::delete(accounts::unlink_account),
+            axum::routing::delete(accounts::unlink_account).layer(
+                middleware::from_fn_with_state(rate_limit.clone(), rate_limit_mutations),
+            ),
         )
         // Admin
         .route(

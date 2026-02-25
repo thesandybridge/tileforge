@@ -119,7 +119,7 @@ function ConnectedAccounts() {
             variant="outline"
             size="sm"
             className="h-7 text-xs"
-            onClick={() => signIn(provider)}
+            onClick={() => signIn(provider, { callbackUrl: "/settings" })}
           >
             Link
           </Button>

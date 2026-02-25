@@ -97,8 +97,14 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           );
         }
 
-        // 2. No existing link — try auto-link by email
-        if (!row && email) {
+        // 2. No existing link — try auto-link by email (only if verified)
+        // GitHub always verifies emails. Google sets email_verified=true.
+        // Discord does NOT verify email ownership — skip auto-link for unverified.
+        const emailVerified =
+          provider === "github" ||
+          (profile as Record<string, unknown>).email_verified === true;
+
+        if (!row && email && emailVerified) {
           const emailResult = await pool.query(
             "SELECT id, plan, deactivated_at FROM users WHERE email = $1",
             [email],
@@ -108,36 +114,51 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           if (row) {
             await pool.query(
               `INSERT INTO accounts (user_id, provider, provider_account_id, username, avatar_url, email)
-               VALUES ($1, $2, $3, $4, $5, $6)`,
+               VALUES ($1, $2, $3, $4, $5, $6)
+               ON CONFLICT (provider, provider_account_id) DO NOTHING`,
               [row.id, provider, providerAccountId, username, avatarUrl, email],
             );
           }
         }
 
-        // 3. Still no match — create new user + account link
+        // 3. Still no match — create new user + account link (transactional)
         if (!row) {
-          const userResult = await pool.query(
-            `INSERT INTO users (username, avatar_url, email)
-             VALUES ($1, $2, $3)
-             RETURNING id, plan, deactivated_at`,
-            [username, avatarUrl, email],
-          );
-          row = userResult.rows[0];
+          const client = await pool.connect();
+          try {
+            await client.query("BEGIN");
+            const userResult = await client.query(
+              `INSERT INTO users (username, avatar_url, email)
+               VALUES ($1, $2, $3)
+               RETURNING id, plan, deactivated_at`,
+              [username, avatarUrl, email],
+            );
+            row = userResult.rows[0];
 
-          await pool.query(
-            `INSERT INTO accounts (user_id, provider, provider_account_id, username, avatar_url, email)
-             VALUES ($1, $2, $3, $4, $5, $6)`,
-            [row!.id, provider, providerAccountId, username, avatarUrl, email],
-          );
+            await client.query(
+              `INSERT INTO accounts (user_id, provider, provider_account_id, username, avatar_url, email)
+               VALUES ($1, $2, $3, $4, $5, $6)`,
+              [row!.id, provider, providerAccountId, username, avatarUrl, email],
+            );
+            await client.query("COMMIT");
+          } catch (e) {
+            await client.query("ROLLBACK");
+            throw e;
+          } finally {
+            client.release();
+          }
         }
 
         // Reactivate if within 30-day window — reset to free plan
         if (row!.deactivated_at) {
-          await pool.query(
-            "UPDATE users SET deactivated_at = NULL, plan = 'free' WHERE id = $1",
-            [row!.id],
-          );
-          row!.plan = "free";
+          const daysSince =
+            (Date.now() - new Date(row!.deactivated_at).getTime()) / 86_400_000;
+          if (daysSince <= 30) {
+            await pool.query(
+              "UPDATE users SET deactivated_at = NULL, plan = 'free' WHERE id = $1",
+              [row!.id],
+            );
+            row!.plan = "free";
+          }
         }
 
         token.userId = row!.id;

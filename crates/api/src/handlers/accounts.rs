@@ -62,28 +62,32 @@ pub async fn unlink_account(
     let db = require_db(&state)?;
     let user_id = parse_user_id(&user)?;
 
-    // Count linked accounts — must keep at least 1
-    let count: (i64,) =
-        sqlx::query_as("SELECT COUNT(*) FROM accounts WHERE user_id = $1")
-            .bind(user_id)
-            .fetch_one(&db)
-            .await
-            .map_err(|e| ApiError::Db(e.to_string()))?;
-
-    if count.0 <= 1 {
-        return Err(ApiError::InvalidField(
-            "cannot unlink last provider — at least one must remain".into(),
-        ));
-    }
-
-    let result = sqlx::query("DELETE FROM accounts WHERE user_id = $1 AND provider = $2")
-        .bind(user_id)
-        .bind(&provider)
-        .execute(&db)
-        .await
-        .map_err(|e| ApiError::Db(e.to_string()))?;
+    // Atomic: only delete if user has more than 1 linked account (prevents TOCTOU race)
+    let result = sqlx::query(
+        "DELETE FROM accounts
+         WHERE user_id = $1 AND provider = $2
+           AND (SELECT COUNT(*) FROM accounts WHERE user_id = $1) > 1",
+    )
+    .bind(user_id)
+    .bind(&provider)
+    .execute(&db)
+    .await
+    .map_err(|e| ApiError::Db(e.to_string()))?;
 
     if result.rows_affected() == 0 {
+        // Could be: provider not found, or it's the last provider
+        let count: (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM accounts WHERE user_id = $1")
+                .bind(user_id)
+                .fetch_one(&db)
+                .await
+                .map_err(|e| ApiError::Db(e.to_string()))?;
+
+        if count.0 <= 1 {
+            return Err(ApiError::InvalidField(
+                "cannot unlink last provider — at least one must remain".into(),
+            ));
+        }
         return Err(ApiError::NotFound);
     }
 
