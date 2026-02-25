@@ -175,6 +175,7 @@ fn build_router(state: AppState, rate_limit: RateLimit, config: &AppConfig) -> R
                 .allow_methods([
                     Method::GET,
                     Method::POST,
+                    Method::PUT,
                     Method::PATCH,
                     Method::DELETE,
                     Method::OPTIONS,
