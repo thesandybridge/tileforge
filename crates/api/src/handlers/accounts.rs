@@ -3,7 +3,7 @@ use axum::{
     http::StatusCode,
     Json,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::auth::{parse_user_id, Claims};
 use crate::error::ApiError;
@@ -92,5 +92,42 @@ pub async fn unlink_account(
     }
 
     tracing::info!(user_id = %user_id, provider = %provider, "provider unlinked");
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+pub struct UpdateAvatarRequest {
+    pub provider: String,
+}
+
+pub async fn update_avatar(
+    State(state): State<AppState>,
+    Claims(user): Claims,
+    Json(body): Json<UpdateAvatarRequest>,
+) -> Result<StatusCode, ApiError> {
+    let db = require_db(&state)?;
+    let user_id = parse_user_id(&user)?;
+
+    let avatar_url: Option<(Option<String>,)> = sqlx::query_as(
+        "SELECT avatar_url FROM accounts WHERE user_id = $1 AND provider = $2",
+    )
+    .bind(user_id)
+    .bind(&body.provider)
+    .fetch_optional(&db)
+    .await
+    .map_err(|e| ApiError::Db(e.to_string()))?;
+
+    let Some((url,)) = avatar_url else {
+        return Err(ApiError::NotFound);
+    };
+
+    sqlx::query("UPDATE users SET avatar_url = $1 WHERE id = $2")
+        .bind(&url)
+        .bind(user_id)
+        .execute(&db)
+        .await
+        .map_err(|e| ApiError::Db(e.to_string()))?;
+
+    tracing::info!(user_id = %user_id, provider = %body.provider, "avatar updated");
     Ok(StatusCode::NO_CONTENT)
 }

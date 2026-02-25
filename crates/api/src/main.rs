@@ -254,6 +254,12 @@ fn build_router(state: AppState, rate_limit: RateLimit, config: &AppConfig) -> R
                 middleware::from_fn_with_state(rate_limit.clone(), rate_limit_mutations),
             ),
         )
+        .route(
+            "/api/user/avatar",
+            axum::routing::put(accounts::update_avatar).layer(
+                middleware::from_fn_with_state(rate_limit.clone(), rate_limit_mutations),
+            ),
+        )
         // Admin
         .route(
             "/api/admin/purge-deactivated",
