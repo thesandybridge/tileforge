@@ -8,6 +8,7 @@ use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sqlx::PgPool;
+use subtle::ConstantTimeEq;
 use uuid::Uuid;
 
 use crate::{error::ApiError, state::AppState};
@@ -98,10 +99,11 @@ pub async fn optional_auth(
         }
     }
 
-    // Path 3: API key query parameter (?key=tf_...)
+    // Path 3: API key query parameter (?key=tf_...) — DEPRECATED
     if req.extensions().get::<UserClaims>().is_none() {
         if let Some(ref db) = state.db {
             if let Some(api_key) = extract_api_key_from_query(req.uri()) {
+                tracing::warn!("API key used via query parameter (deprecated) — use Authorization header instead");
                 if let Some(claims) = validate_api_key(db, &api_key).await {
                     req.extensions_mut().insert(claims);
                 }
@@ -121,7 +123,9 @@ pub fn verify_admin(state: &AppState, req: &Request<axum::body::Body>) -> Result
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "))
         .ok_or(ApiError::Unauthorized)?;
-    if auth_header != admin_secret {
+    if auth_header.len() != admin_secret.len()
+        || auth_header.as_bytes().ct_ne(admin_secret.as_bytes()).into()
+    {
         return Err(ApiError::Forbidden);
     }
     Ok(())
@@ -136,7 +140,13 @@ async fn validate_jwt(secret: &str, token: &str, state: &AppState) -> Option<Use
     let mut validation = Validation::new(Algorithm::HS256);
     validation.set_required_spec_claims(&["sub", "exp"]);
 
-    let data = decode::<UserClaims>(token, &key, &validation).ok()?;
+    let data = match decode::<UserClaims>(token, &key, &validation) {
+        Ok(data) => data,
+        Err(e) => {
+            tracing::debug!(error = %e, "JWT validation failed");
+            return None;
+        }
+    };
 
     // Verify user is not deactivated
     if let Some(ref db) = state.db {

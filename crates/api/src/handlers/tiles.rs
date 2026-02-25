@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use std::io::Cursor;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tileforge_core::{streaming::should_use_streaming, BackgroundColor, Projection, TileConfig, Tiler, ZipTileWriter, STREAMING_THRESHOLD};
+use sqlx::PgPool;
 use tileforge_shared::{
     progress_key, tile_s3_prefix, upload_s3_key, JobProgress, TileJob,
     NATS_JOBS_SUBJECT, REDIS_JOBS_KEY,
@@ -286,7 +287,14 @@ pub async fn job_progress(
                             }
                         }
                     }
-                    (Ok(Event::default().data(json)), terminal)
+                    // Strip user_id from response to prevent enumeration
+                    let sanitized = if let Ok(mut data) = serde_json::from_str::<serde_json::Value>(&json) {
+                        data.as_object_mut().map(|o| o.remove("user_id"));
+                        data.to_string()
+                    } else {
+                        json
+                    };
+                    (Ok(Event::default().data(sanitized)), terminal)
                 }
                 Ok(None) => (
                     Ok(Event::default().data(serde_json::json!({"status": "unknown"}).to_string())),
@@ -321,15 +329,33 @@ async fn verify_job_owner(
     redis: &mut redis::aio::MultiplexedConnection,
     job_id: &str,
     user: &crate::auth::UserClaims,
+    db: Option<&PgPool>,
 ) -> Result<(), ApiError> {
     let key = progress_key(job_id);
     let val: Option<String> = redis.get(&key).await.ok().flatten();
     if let Some(json) = val {
         if let Ok(data) = serde_json::from_str::<serde_json::Value>(&json) {
-            if let Some(owner_id) = data.get("user_id").and_then(|v| v.as_str()) {
-                if owner_id != user.sub {
-                    return Err(ApiError::NotFound);
-                }
+            match data.get("user_id").and_then(|v| v.as_str()) {
+                Some(owner_id) if owner_id != user.sub => return Err(ApiError::NotFound),
+                Some(_) => return Ok(()), // owner matches
+                None => return Ok(()),    // anonymous job — no owner to check
+            }
+        }
+    }
+    // Redis key missing/expired — fall back to DB tileset lookup
+    if let Some(db) = db {
+        let storage_path = tile_s3_prefix(job_id);
+        let row: Option<(String,)> = sqlx::query_as(
+            "SELECT user_id::text FROM tile_sets WHERE storage_path = $1",
+        )
+        .bind(&storage_path)
+        .fetch_optional(db)
+        .await
+        .ok()
+        .flatten();
+        if let Some((owner_id,)) = row {
+            if owner_id != user.sub {
+                return Err(ApiError::NotFound);
             }
         }
     }
@@ -341,9 +367,9 @@ pub async fn job_download(
     State(state): State<AppState>,
     Path(job_id): Path<String>,
 ) -> Result<Response, ApiError> {
-    if let Some(ref redis) = state.redis {
-        verify_job_owner(&mut redis.clone(), &job_id, &user).await?;
-    }
+    let redis = state.redis.as_ref()
+        .ok_or_else(|| ApiError::ServiceUnavailable("download service unavailable".into()))?;
+    verify_job_owner(&mut redis.clone(), &job_id, &user, state.db.as_ref()).await?;
 
     let bucket = require_bucket(&state)?;
     let response = bucket
@@ -364,8 +390,31 @@ pub async fn job_download(
 
 pub async fn job_thumbnail(
     State(state): State<AppState>,
+    claims: OptionalClaims,
     Path(job_id): Path<String>,
 ) -> Result<Response, ApiError> {
+    // Check access: public tileset OR authenticated owner
+    if let Some(ref db) = state.db {
+        let storage_path = tile_s3_prefix(&job_id);
+        let row: Option<(bool, String)> = sqlx::query_as(
+            "SELECT public, user_id::text FROM tile_sets WHERE storage_path = $1",
+        )
+        .bind(&storage_path)
+        .fetch_optional(db)
+        .await
+        .ok()
+        .flatten();
+        if let Some((is_public, owner_id)) = row {
+            if !is_public {
+                let caller_id = claims.0.as_ref().map(|c| c.sub.as_str());
+                if caller_id != Some(&*owner_id) {
+                    return Err(ApiError::NotFound);
+                }
+            }
+        }
+        // No tileset row — transient job thumbnail, allow (S3 404 will handle missing)
+    }
+
     let bucket = require_bucket(&state)?;
     let resp = bucket
         .get_object(&format!("{}/thumbnail.jpg", tile_s3_prefix(&job_id)))
@@ -390,9 +439,9 @@ pub async fn job_download_pmtiles(
     State(state): State<AppState>,
     Path(job_id): Path<String>,
 ) -> Result<Response, ApiError> {
-    if let Some(ref redis) = state.redis {
-        verify_job_owner(&mut redis.clone(), &job_id, &user).await?;
-    }
+    let redis = state.redis.as_ref()
+        .ok_or_else(|| ApiError::ServiceUnavailable("download service unavailable".into()))?;
+    verify_job_owner(&mut redis.clone(), &job_id, &user, state.db.as_ref()).await?;
 
     let bucket = require_bucket(&state)?;
     let response = bucket

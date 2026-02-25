@@ -184,9 +184,9 @@ fn build_router(state: AppState, rate_limit: RateLimit, config: &AppConfig) -> R
         }
         None => {
             tracing::warn!(
-                "CORS_ORIGIN not set — allowing all origins (set CORS_ORIGIN in production!)"
+                "CORS_ORIGIN not set — blocking cross-origin requests (set CORS_ORIGIN to allow)"
             );
-            CorsLayer::permissive()
+            CorsLayer::new() // denies all cross-origin by default
         }
     };
 
@@ -264,11 +264,17 @@ fn build_router(state: AppState, rate_limit: RateLimit, config: &AppConfig) -> R
         // Admin
         .route(
             "/api/admin/purge-deactivated",
-            post(admin::purge_deactivated),
+            post(admin::purge_deactivated).layer(middleware::from_fn_with_state(
+                rate_limit.clone(),
+                rate_limit_mutations,
+            )),
         )
         .route(
             "/api/admin/broadcast-notification",
-            post(admin::broadcast_notification),
+            post(admin::broadcast_notification).layer(middleware::from_fn_with_state(
+                rate_limit.clone(),
+                rate_limit_mutations,
+            )),
         )
         // Notifications
         .route(
@@ -388,6 +394,25 @@ async fn main() {
             "not configured (auth disabled)"
         }
     );
+
+    // Validate secret lengths
+    let is_production = config.cors_origin.is_some();
+    if let Some(ref secret) = config.jwt_secret {
+        if secret.len() < 32 {
+            if is_production {
+                panic!("JWT_SECRET must be at least 32 bytes in production");
+            }
+            tracing::warn!("JWT_SECRET is shorter than 32 bytes — use a stronger secret in production");
+        }
+    }
+    if let Some(ref secret) = config.admin_secret {
+        if secret.len() < 32 {
+            if is_production {
+                panic!("ADMIN_SECRET must be at least 32 bytes in production");
+            }
+            tracing::warn!("ADMIN_SECRET is shorter than 32 bytes — use a stronger secret in production");
+        }
+    }
 
     let state = AppState {
         max_upload_bytes: config.max_upload_bytes,

@@ -21,6 +21,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 rust-s3 = { version = "=0.37.1", default-features = false, features = ["tokio-rustls-tls"] }
 sha2 = "0.10"
+subtle = "2"
 hex = "0.4"
 rand = "0.8"
 async-nats = "0.38"

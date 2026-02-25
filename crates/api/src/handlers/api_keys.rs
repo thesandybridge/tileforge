@@ -4,7 +4,7 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
-use rand::Rng;
+use rand::{rngs::OsRng, Rng};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
@@ -38,7 +38,7 @@ pub async fn create_api_key(
     let db = require_db(&state)?;
     let user_id = parse_user_id(&user)?;
 
-    let random_bytes: [u8; 16] = rand::thread_rng().gen();
+    let random_bytes: [u8; 16] = OsRng.gen();
     let raw_key = format!("tf_{}", hex::encode(random_bytes));
     let key_hash = hex::encode(Sha256::digest(raw_key.as_bytes()));
     let key_prefix = raw_key[..11].to_string();
