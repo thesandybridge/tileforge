@@ -2,7 +2,7 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
-import { listLinkedAccounts, unlinkAccount } from "@/lib/api";
+import { listLinkedAccounts, unlinkAccount, updateAvatar } from "@/lib/api";
 
 export function useLinkedAccounts() {
   const { data: session } = useSession();
@@ -21,5 +21,13 @@ export function useUnlinkAccount() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["linked-accounts"] });
     },
+  });
+}
+
+export function useUpdateAvatar() {
+  const { data: session, update: updateSession } = useSession();
+  return useMutation({
+    mutationFn: (provider: string) => updateAvatar(provider, session!.accessToken!),
+    onSuccess: () => updateSession(),
   });
 }

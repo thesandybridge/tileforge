@@ -267,6 +267,21 @@ export async function unlinkAccount(provider: string, token: string): Promise<vo
   }
 }
 
+export async function updateAvatar(provider: string, token: string): Promise<void> {
+  const res = await fetch(`${API_URL}/api/user/avatar`, {
+    method: "PUT",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ provider }),
+  });
+  if (!res.ok && res.status !== 204) {
+    const body = await res.json().catch(() => ({ error: "Unknown error" }));
+    throw new ApiError(res.status, body.error ?? `HTTP ${res.status}`);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Account deactivation
 // ---------------------------------------------------------------------------

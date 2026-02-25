@@ -68,14 +68,15 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       return baseUrl;
     },
     async jwt({ token, trigger, account, profile }) {
-      // Re-read plan from DB when session.update() is called (e.g. after billing change)
+      // Re-read plan + avatar from DB when session.update() is called
       if (trigger === "update" && token.userId) {
         const result = await pool.query(
-          "SELECT plan FROM users WHERE id = $1",
+          "SELECT plan, avatar_url FROM users WHERE id = $1",
           [token.userId],
         );
         if (result.rows[0]) {
           token.plan = result.rows[0].plan;
+          token.avatarUrl = result.rows[0].avatar_url;
         }
       }
 

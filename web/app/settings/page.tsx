@@ -5,7 +5,7 @@ import { useSession, signOut, signIn } from "next-auth/react";
 import { toast } from "sonner";
 import { PLAN_PRO } from "@/lib/plans";
 import { listTileSets } from "@/lib/api";
-import { useLinkedAccounts, useUnlinkAccount } from "@/hooks/use-accounts";
+import { useLinkedAccounts, useUnlinkAccount, useUpdateAvatar } from "@/hooks/use-accounts";
 import { useDeactivate } from "@/hooks/use-deactivate";
 import { useTileDefaults } from "@/hooks/use-tile-defaults";
 import { ApiKeyCard } from "@/components/api-key-card";
@@ -137,6 +137,8 @@ function SettingsContent() {
   const { data: session } = useSession();
   const deactivate = useDeactivate();
   const { defaults, update, reset: resetDefaults } = useTileDefaults();
+  const { data: accounts } = useLinkedAccounts();
+  const updateAvatar = useUpdateAvatar();
   const [confirmDeactivate, setConfirmDeactivate] = useState(false);
   const [exporting, setExporting] = useState(false);
 
@@ -219,6 +221,48 @@ function SettingsContent() {
             )}
           </div>
         </div>
+        {(() => {
+          const avatarAccounts = accounts?.filter((a) => a.avatar_url) ?? [];
+          if (avatarAccounts.length < 2) return null;
+          return (
+            <div className="mt-4">
+              <p className="text-muted-foreground mb-2 text-xs font-medium uppercase tracking-wider">
+                Choose avatar
+              </p>
+              <div className="flex gap-2">
+                {avatarAccounts.map((account) => {
+                  const isActive = account.avatar_url === session.user.image;
+                  return (
+                    <button
+                      key={account.provider}
+                      type="button"
+                      className={`relative rounded-full transition-all ${
+                        isActive
+                          ? "ring-primary ring-2 ring-offset-2 ring-offset-background"
+                          : "opacity-60 hover:opacity-100"
+                      }`}
+                      disabled={isActive || updateAvatar.isPending}
+                      onClick={() => updateAvatar.mutate(account.provider)}
+                      title={`Use ${account.provider} avatar`}
+                    >
+                      <img
+                        src={account.avatar_url!}
+                        alt={`${account.provider} avatar`}
+                        className="h-8 w-8 rounded-full"
+                        referrerPolicy="no-referrer"
+                      />
+                      <span className="absolute -bottom-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-background shadow-sm ring-1 ring-border">
+                        {account.provider === "github" && <GithubIcon className="h-2.5 w-2.5" />}
+                        {account.provider === "discord" && <DiscordIcon className="h-2.5 w-2.5" />}
+                        {account.provider === "google" && <GoogleIcon className="h-2.5 w-2.5" />}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })()}
         {session.user.id && (
           <button
             type="button"
