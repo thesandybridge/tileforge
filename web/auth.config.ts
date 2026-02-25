@@ -14,6 +14,9 @@ export default {
   providers: [GitHub, Discord, Google],
   trustHost: true,
   session: { strategy: "jwt" },
+  pages: {
+    signIn: "/signin",
+  },
   cookies: {
     sessionToken: {
       name: "tileforge.session-token",
