@@ -1,4 +1,6 @@
 import GitHub from "next-auth/providers/github";
+import Discord from "next-auth/providers/discord";
+import Google from "next-auth/providers/google";
 import { SignJWT, jwtVerify } from "jose";
 import type { NextAuthConfig } from "next-auth";
 
@@ -7,7 +9,7 @@ import type { NextAuthConfig } from "next-auth";
  * Used by middleware. The full auth.ts extends this with DB callbacks.
  */
 export default {
-  providers: [GitHub],
+  providers: [GitHub, Discord, Google],
   trustHost: true,
   session: { strategy: "jwt" },
   jwt: {
