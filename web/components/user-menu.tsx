@@ -61,15 +61,15 @@ export function UserMenu({ mobile, onAction }: UserMenuProps = {}) {
     if (mobile) {
       return (
         <div className="flex flex-col gap-2">
-          <Button variant="default" className="w-full" onClick={() => { onAction?.(); signIn("github"); }}>
+          <Button variant="default" className="w-full" onClick={() => { onAction?.(); signIn("github", { callbackUrl: "/" }); }}>
             <GithubIcon className="mr-2 h-4 w-4" />
             Sign in with GitHub
           </Button>
-          <Button variant="outline" className="w-full" onClick={() => { onAction?.(); signIn("discord"); }}>
+          <Button variant="outline" className="w-full" onClick={() => { onAction?.(); signIn("discord", { callbackUrl: "/" }); }}>
             <DiscordIcon className="mr-2 h-4 w-4" />
             Sign in with Discord
           </Button>
-          <Button variant="outline" className="w-full" onClick={() => { onAction?.(); signIn("google"); }}>
+          <Button variant="outline" className="w-full" onClick={() => { onAction?.(); signIn("google", { callbackUrl: "/" }); }}>
             <GoogleIcon className="mr-2 h-4 w-4" />
             Sign in with Google
           </Button>
@@ -86,15 +86,15 @@ export function UserMenu({ mobile, onAction }: UserMenuProps = {}) {
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-48">
-          <DropdownMenuItem onClick={() => signIn("github")} className="cursor-pointer">
+          <DropdownMenuItem onClick={() => signIn("github", { callbackUrl: "/" })} className="cursor-pointer">
             <GithubIcon className="mr-2 h-4 w-4" />
             GitHub
           </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => signIn("discord")} className="cursor-pointer">
+          <DropdownMenuItem onClick={() => signIn("discord", { callbackUrl: "/" })} className="cursor-pointer">
             <DiscordIcon className="mr-2 h-4 w-4" />
             Discord
           </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => signIn("google")} className="cursor-pointer">
+          <DropdownMenuItem onClick={() => signIn("google", { callbackUrl: "/" })} className="cursor-pointer">
             <GoogleIcon className="mr-2 h-4 w-4" />
             Google
           </DropdownMenuItem>

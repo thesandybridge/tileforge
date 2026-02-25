@@ -61,6 +61,12 @@ function extractProfile(provider: string, profile: Profile) {
 export const { handlers, auth, signIn, signOut } = NextAuth({
   ...authConfig,
   callbacks: {
+    async redirect({ url, baseUrl }) {
+      // Allow relative URLs and same-origin redirects
+      if (url.startsWith("/")) return `${baseUrl}${url}`;
+      if (url.startsWith(baseUrl)) return url;
+      return baseUrl;
+    },
     async jwt({ token, trigger, account, profile }) {
       // Re-read plan from DB when session.update() is called (e.g. after billing change)
       if (trigger === "update" && token.userId) {
