@@ -1,8 +1,11 @@
 import NextAuth from "next-auth";
 import { SignJWT } from "jose";
+import { cookies } from "next/headers";
 import pool from "@/lib/db";
 import authConfig from "@/auth.config";
 import { PLAN_FREE } from "@/lib/plans";
+
+export const LINK_COOKIE = "tileforge-link-user-id";
 
 const jwtSecret = new TextEncoder().encode(process.env.JWT_SECRET);
 
@@ -97,44 +100,72 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           );
         }
 
-        // 1b. Already signed in — this is a "Link" flow from settings
-        if (!row && token.userId) {
+        // 1b. Link flow — cookie set by settings page before signIn()
+        const cookieStore = await cookies();
+        const linkUserId = cookieStore.get(LINK_COOKIE)?.value;
+        if (linkUserId) {
+          cookieStore.delete(LINK_COOKIE);
+        }
+
+        if (!row && linkUserId) {
           await pool.query(
             `INSERT INTO accounts (user_id, provider, provider_account_id, username, avatar_url, email)
              VALUES ($1, $2, $3, $4, $5, $6)
              ON CONFLICT (provider, provider_account_id) DO NOTHING`,
-            [token.userId, provider, providerAccountId, username, avatarUrl, email],
+            [linkUserId, provider, providerAccountId, username, avatarUrl, email],
           );
-          // Keep existing session — don't overwrite token fields
-          return token;
+          // Restore the original user's session
+          const userResult = await pool.query(
+            "SELECT id, plan FROM users WHERE id = $1",
+            [linkUserId],
+          );
+          const original = userResult.rows[0];
+          if (original) {
+            token.userId = original.id;
+            token.plan = original.plan;
+            token.sub = original.id;
+            // Keep the original user's username/avatar
+            const primaryAccount = await pool.query(
+              "SELECT username, avatar_url FROM accounts WHERE user_id = $1 ORDER BY created_at LIMIT 1",
+              [original.id],
+            );
+            if (primaryAccount.rows[0]) {
+              token.username = primaryAccount.rows[0].username;
+              token.avatarUrl = primaryAccount.rows[0].avatar_url;
+            }
+          }
+          // Skip steps 2 and 3 — already linked
+          // Fall through to mint API token
         }
 
         // 2. No existing link — try auto-link by email (only if verified)
         // GitHub always verifies emails. Google sets email_verified=true.
         // Discord does NOT verify email ownership — skip auto-link for unverified.
-        const emailVerified =
-          provider === "github" ||
-          (profile as Record<string, unknown>).email_verified === true;
+        if (!row && !linkUserId) {
+          const emailVerified =
+            provider === "github" ||
+            (profile as Record<string, unknown>).email_verified === true;
 
-        if (!row && email && emailVerified) {
-          const emailResult = await pool.query(
-            "SELECT id, plan, deactivated_at FROM users WHERE email = $1",
-            [email],
-          );
-          row = emailResult.rows[0];
-
-          if (row) {
-            await pool.query(
-              `INSERT INTO accounts (user_id, provider, provider_account_id, username, avatar_url, email)
-               VALUES ($1, $2, $3, $4, $5, $6)
-               ON CONFLICT (provider, provider_account_id) DO NOTHING`,
-              [row.id, provider, providerAccountId, username, avatarUrl, email],
+          if (email && emailVerified) {
+            const emailResult = await pool.query(
+              "SELECT id, plan, deactivated_at FROM users WHERE email = $1",
+              [email],
             );
+            row = emailResult.rows[0];
+
+            if (row) {
+              await pool.query(
+                `INSERT INTO accounts (user_id, provider, provider_account_id, username, avatar_url, email)
+                 VALUES ($1, $2, $3, $4, $5, $6)
+                 ON CONFLICT (provider, provider_account_id) DO NOTHING`,
+                [row.id, provider, providerAccountId, username, avatarUrl, email],
+              );
+            }
           }
         }
 
         // 3. Still no match — create new user + account link (transactional)
-        if (!row) {
+        if (!row && !linkUserId) {
           const client = await pool.connect();
           try {
             await client.query("BEGIN");

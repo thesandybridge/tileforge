@@ -57,6 +57,7 @@ function GoogleIcon({ className }: { className?: string }) {
 }
 
 function ConnectedAccounts() {
+  const { data: session } = useSession();
   const { data: accounts, isLoading } = useLinkedAccounts();
   const unlink = useUnlinkAccount();
 
@@ -119,7 +120,10 @@ function ConnectedAccounts() {
             variant="outline"
             size="sm"
             className="h-7 text-xs"
-            onClick={() => signIn(provider, { callbackUrl: "/settings" })}
+            onClick={() => {
+              document.cookie = `tileforge-link-user-id=${session?.user?.id}; path=/; max-age=300; samesite=lax`;
+              signIn(provider, { callbackUrl: "/settings" });
+            }}
           >
             Link
           </Button>
