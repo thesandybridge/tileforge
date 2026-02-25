@@ -238,6 +238,36 @@ export async function clearNotifications(token: string): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// Linked accounts (multi-provider)
+// ---------------------------------------------------------------------------
+
+export interface LinkedAccount {
+  provider: string;
+  username: string | null;
+  avatar_url: string | null;
+  email: string | null;
+  created_at: string;
+}
+
+export async function listLinkedAccounts(token: string): Promise<LinkedAccount[]> {
+  const res = await fetch(`${API_URL}/api/user/accounts`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return handleResponse<LinkedAccount[]>(res);
+}
+
+export async function unlinkAccount(provider: string, token: string): Promise<void> {
+  const res = await fetch(`${API_URL}/api/user/accounts/${encodeURIComponent(provider)}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok && res.status !== 204) {
+    const body = await res.json().catch(() => ({ error: "Unknown error" }));
+    throw new ApiError(res.status, body.error ?? `HTTP ${res.status}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Account deactivation
 // ---------------------------------------------------------------------------
 
