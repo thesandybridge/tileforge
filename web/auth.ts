@@ -1,6 +1,6 @@
 import NextAuth from "next-auth";
 import { SignJWT } from "jose";
-import { headers } from "next/headers";
+import { linkStore } from "@/lib/link-store";
 import pool from "@/lib/db";
 import authConfig from "@/auth.config";
 import { PLAN_FREE } from "@/lib/plans";
@@ -106,18 +106,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           );
         }
 
-        // 1b. Link flow — cookie set by settings page before signIn()
-        let linkUserId: string | undefined;
-        try {
-          const hdrs = await headers();
-          const cookieHeader = hdrs.get("cookie") ?? "";
-          const match = cookieHeader.match(
-            new RegExp(`(?:^|;\\s*)${LINK_COOKIE}=([^;]+)`),
-          );
-          linkUserId = match?.[1];
-        } catch {
-          // headers() may not be available in all Auth.js contexts
-        }
+        // 1b. Link flow — cookie read by route handler, passed via AsyncLocalStorage
+        const linkUserId = linkStore.getStore();
 
         if (!row && linkUserId) {
           await pool.query(
