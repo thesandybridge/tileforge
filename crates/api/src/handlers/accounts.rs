@@ -9,7 +9,7 @@ use crate::auth::{parse_user_id, Claims};
 use crate::error::ApiError;
 use crate::state::{require_db, AppState};
 
-#[derive(Serialize)]
+#[derive(Serialize, sqlx::FromRow)]
 pub struct LinkedAccount {
     pub provider: String,
     pub username: Option<String>,
@@ -25,13 +25,7 @@ pub async fn list_accounts(
     let db = require_db(&state)?;
     let user_id = parse_user_id(&user)?;
 
-    let rows: Vec<(
-        String,
-        Option<String>,
-        Option<String>,
-        Option<String>,
-        chrono::DateTime<chrono::Utc>,
-    )> = sqlx::query_as(
+    let accounts: Vec<LinkedAccount> = sqlx::query_as(
         "SELECT provider, username, avatar_url, email, created_at
          FROM accounts WHERE user_id = $1 ORDER BY created_at",
     )
@@ -39,17 +33,6 @@ pub async fn list_accounts(
     .fetch_all(&db)
     .await
     .map_err(|e| ApiError::Db(e.to_string()))?;
-
-    let accounts = rows
-        .into_iter()
-        .map(|(provider, username, avatar_url, email, created_at)| LinkedAccount {
-            provider,
-            username,
-            avatar_url,
-            email,
-            created_at,
-        })
-        .collect();
 
     Ok(Json(accounts))
 }
