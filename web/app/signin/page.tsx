@@ -56,9 +56,9 @@ export default function SignInPage() {
   }
 
   return (
-    <div className="mx-auto grid w-full max-w-6xl flex-1 md:grid-cols-2">
+    <div className="mx-auto grid w-full max-w-6xl flex-1 overflow-hidden md:grid-cols-2">
       {/* Left panel — brand hero */}
-      <div className="relative hidden overflow-hidden bg-card md:flex md:flex-col md:items-center md:justify-center md:p-12">
+      <div className="relative hidden bg-card md:flex md:flex-col md:items-center md:justify-center md:p-12">
         <TileParticles active />
         <div className="relative z-10 max-w-md">
           {/* Logo */}
