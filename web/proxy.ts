@@ -4,7 +4,7 @@ import authConfig from "@/auth.config";
 const { auth } = NextAuth(authConfig);
 import { NextResponse } from "next/server";
 
-const publicPaths = ["/", "/gallery", "/changelog", "/api/auth", "/billing", "/pricing"];
+const publicPaths = ["/", "/gallery", "/changelog", "/api/auth", "/billing", "/pricing", "/signin"];
 
 function isPublic(pathname: string): boolean {
   if (publicPaths.includes(pathname)) return true;
@@ -22,7 +22,7 @@ export const proxy = auth((req) => {
 
   // Require auth for protected routes (e.g. /my-tilesets)
   if (!req.auth) {
-    const signInUrl = new URL("/api/auth/signin", req.url);
+    const signInUrl = new URL("/signin", req.url);
     signInUrl.searchParams.set("callbackUrl", req.url);
     return NextResponse.redirect(signInUrl);
   }
