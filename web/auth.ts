@@ -137,8 +137,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
               token.avatarUrl = primaryAccount.rows[0].avatar_url;
             }
           }
-          // Skip steps 2 and 3 — already linked
-          // Fall through to mint API token
+          // Skip steps 2, 3, and reactivation — token fields already set
         }
 
         // 2. No existing link — try auto-link by email (only if verified)
@@ -195,23 +194,25 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         }
 
         // Reactivate if within 30-day window — reset to free plan
-        if (row!.deactivated_at) {
-          const daysSince =
-            (Date.now() - new Date(row!.deactivated_at).getTime()) / 86_400_000;
-          if (daysSince <= 30) {
-            await pool.query(
-              "UPDATE users SET deactivated_at = NULL, plan = 'free' WHERE id = $1",
-              [row!.id],
-            );
-            row!.plan = "free";
+        if (row) {
+          if (row.deactivated_at) {
+            const daysSince =
+              (Date.now() - new Date(row.deactivated_at).getTime()) / 86_400_000;
+            if (daysSince <= 30) {
+              await pool.query(
+                "UPDATE users SET deactivated_at = NULL, plan = 'free' WHERE id = $1",
+                [row.id],
+              );
+              row.plan = "free";
+            }
           }
-        }
 
-        token.userId = row!.id;
-        token.plan = row!.plan;
-        token.username = username;
-        token.avatarUrl = avatarUrl;
-        token.sub = row!.id;
+          token.userId = row.id;
+          token.plan = row.plan;
+          token.username = username;
+          token.avatarUrl = avatarUrl;
+          token.sub = row.id;
+        }
         } catch (err) {
           console.error("[auth] jwt callback error:", err);
           throw err;
