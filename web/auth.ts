@@ -97,6 +97,18 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           );
         }
 
+        // 1b. Already signed in — this is a "Link" flow from settings
+        if (!row && token.userId) {
+          await pool.query(
+            `INSERT INTO accounts (user_id, provider, provider_account_id, username, avatar_url, email)
+             VALUES ($1, $2, $3, $4, $5, $6)
+             ON CONFLICT (provider, provider_account_id) DO NOTHING`,
+            [token.userId, provider, providerAccountId, username, avatarUrl, email],
+          );
+          // Keep existing session — don't overwrite token fields
+          return token;
+        }
+
         // 2. No existing link — try auto-link by email (only if verified)
         // GitHub always verifies emails. Google sets email_verified=true.
         // Discord does NOT verify email ownership — skip auto-link for unverified.
