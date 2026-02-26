@@ -867,9 +867,9 @@ dependencies = [
 
 [[package]]
 name = "devforge"
-version = "0.2.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6f132f28ad1c20bcf110b7fccb4eb18085f287f9297a13df73c9613c3b89f764"
+checksum = "18a81494b021d3591e4882705566ec56db653d81ad43553d4ae72f10ce3605a0"
 dependencies = [
  "ctrlc",
  "serde",
