@@ -23,7 +23,7 @@ rust-s3 = { version = "=0.37.1", default-features = false, features = ["tokio-ru
 sha2 = "0.10"
 subtle = "2"
 hex = "0.4"
-rand = "0.8"
+rand = "0.10"
 async-nats = "0.38"
 utoipa = { version = "5", features = ["axum_extras", "chrono", "uuid"] }
 utoipa-swagger-ui = { version = "9", features = ["axum", "reqwest"] }
