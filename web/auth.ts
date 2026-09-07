@@ -4,6 +4,7 @@ import { linkStore } from "@/lib/link-store";
 import pool from "@/lib/db";
 import authConfig from "@/auth.config";
 import { PLAN_FREE } from "@/lib/plans";
+import { safeRedirect } from "@/lib/auth-policy";
 
 export const LINK_COOKIE = "tileforge-link-user-id";
 
@@ -62,10 +63,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   ...authConfig,
   callbacks: {
     async redirect({ url, baseUrl }) {
-      // Allow relative URLs and same-origin redirects
-      if (url.startsWith("/")) return `${baseUrl}${url}`;
-      if (url.startsWith(baseUrl)) return url;
-      return baseUrl;
+      return safeRedirect(url, baseUrl);
     },
     async jwt({ token, trigger, account, profile }) {
       // Re-read plan + avatar from DB when session.update() is called
@@ -111,13 +109,21 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         // 1b. Link flow — cookie read by route handler, passed via AsyncLocalStorage
         const linkUserId = linkStore.getStore();
 
+        if (linkUserId && row && row.id !== linkUserId) {
+          throw new Error("This provider account is already linked to another user");
+        }
+
         if (!row && linkUserId) {
-          await pool.query(
+          const linked = await pool.query(
             `INSERT INTO accounts (user_id, provider, provider_account_id, username, avatar_url, email)
              VALUES ($1, $2, $3, $4, $5, $6)
-             ON CONFLICT (provider, provider_account_id) DO NOTHING`,
+             ON CONFLICT (provider, provider_account_id) DO NOTHING
+             RETURNING user_id`,
             [linkUserId, provider, providerAccountId, username, avatarUrl, email],
           );
+          if (!linked.rows[0]) {
+            throw new Error("Provider account was linked concurrently; please try again");
+          }
           // Restore the original user's session
           const userResult = await pool.query(
             "SELECT id, plan FROM users WHERE id = $1",

@@ -7,6 +7,13 @@ export function SessionProvider({
   ...props
 }: React.ComponentProps<typeof NextAuthSessionProvider>) {
   return (
-    <NextAuthSessionProvider {...props}>{children}</NextAuthSessionProvider>
+    <NextAuthSessionProvider
+      refetchInterval={5 * 60}
+      refetchOnWindowFocus
+      refetchWhenOffline={false}
+      {...props}
+    >
+      {children}
+    </NextAuthSessionProvider>
   );
 }

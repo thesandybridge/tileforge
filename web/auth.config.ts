@@ -16,6 +16,7 @@ export default {
   session: { strategy: "jwt" },
   pages: {
     signIn: "/signin",
+    error: "/signin",
   },
   cookies: {
     sessionToken: {
@@ -32,7 +33,7 @@ export default {
     },
   },
   jwt: {
-    async encode({ token, salt, secret }) {
+    async encode({ token, secret, maxAge = 30 * 24 * 60 * 60 }) {
       if (!token) return "";
       const secretKey =
         typeof secret === "string"
@@ -41,23 +42,23 @@ export default {
       return new SignJWT(token as Record<string, unknown>)
         .setProtectedHeader({ alg: "HS256" })
         .setIssuedAt()
-        .setExpirationTime("30d")
+        .setExpirationTime(Math.floor(Date.now() / 1000) + maxAge)
         .sign(secretKey);
     },
-    async decode({ token, salt, secret }) {
+    async decode({ token, secret }) {
       if (!token) return null;
-      try {
-        const secretKey =
-          typeof secret === "string"
-            ? new TextEncoder().encode(secret)
-            : new TextEncoder().encode(secret[0]);
-        const { payload } = await jwtVerify(token, secretKey, {
-          algorithms: ["HS256"],
-        });
-        return payload as any;
-      } catch {
-        return null;
+      // Sign with the current key, but accept previous keys during rotation.
+      for (const candidate of typeof secret === "string" ? [secret] : secret) {
+        try {
+          const { payload } = await jwtVerify(token, new TextEncoder().encode(candidate), {
+            algorithms: ["HS256"],
+          });
+          return payload;
+        } catch {
+          // Try the next configured key.
+        }
       }
+      return null;
     },
   },
 } satisfies NextAuthConfig;

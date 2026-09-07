@@ -2,7 +2,8 @@
 
 import { useSession, signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import { safeRedirect } from "@/lib/auth-policy";
 import { Monitor, Layers, Globe } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -42,16 +43,28 @@ const features = [
 ];
 
 export default function SignInPage() {
-  const { data: session, status } = useSession();
+  const { status } = useSession();
   const router = useRouter();
+  const [callbackUrl, setCallbackUrl] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    setCallbackUrl(safeRedirect(params.get("callbackUrl") ?? "/", window.location.origin));
+    if (params.has("error")) {
+      setError(params.get("error") === "Configuration"
+        ? "Sign-in is unavailable because of a server configuration problem. Please contact support."
+        : "Sign-in could not be completed. Please try again or choose another provider.");
+    }
+  }, []);
 
   useEffect(() => {
     if (status === "authenticated") {
-      router.replace("/");
+      if (!error && callbackUrl) router.replace(callbackUrl);
     }
-  }, [status, router]);
+  }, [status, router, callbackUrl, error]);
 
-  if (status === "loading" || status === "authenticated") {
+  if (!callbackUrl || status === "loading" || (status === "authenticated" && !error)) {
     return null;
   }
 
@@ -133,10 +146,11 @@ export default function SignInPage() {
               Choose a provider to continue
             </p>
 
+            {error && <p role="alert" className="mt-4 text-sm text-destructive">{error}</p>}
             <div className="mt-8 flex flex-col gap-3">
               <Button
                 className="w-full"
-                onClick={() => signIn("github", { callbackUrl: "/" })}
+                onClick={() => signIn("github", { callbackUrl })}
               >
                 <GithubIcon className="mr-2 h-5 w-5" />
                 Continue with GitHub
@@ -144,7 +158,7 @@ export default function SignInPage() {
               <Button
                 variant="outline"
                 className="w-full"
-                onClick={() => signIn("discord", { callbackUrl: "/" })}
+                onClick={() => signIn("discord", { callbackUrl })}
               >
                 <DiscordIcon className="mr-2 h-5 w-5" />
                 Continue with Discord
@@ -152,7 +166,7 @@ export default function SignInPage() {
               <Button
                 variant="outline"
                 className="w-full"
-                onClick={() => signIn("google", { callbackUrl: "/" })}
+                onClick={() => signIn("google", { callbackUrl })}
               >
                 <GoogleIcon className="mr-2 h-5 w-5" />
                 Continue with Google

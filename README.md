@@ -272,6 +272,8 @@ Requires Redis and S3 to be configured. See environment variables below.
 
 ### API Documentation
 
+For authentication troubleshooting and the current improvement backlog, see [the repository review](REVIEW.md).
+
 Interactive API documentation is available via Swagger UI at `/swagger-ui` when the API is running. The OpenAPI spec is served at `/api-docs/openapi.json`.
 
 ### API Endpoints
