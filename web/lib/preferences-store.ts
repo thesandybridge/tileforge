@@ -72,7 +72,7 @@ export const usePreferencesStore = create<PreferencesState>()(persist((set) => (
 
 let hydration: Promise<void> | undefined;
 export function hydratePreferences() {
-  hydration ??= usePreferencesStore.persist.rehydrate().then(() => {
+  hydration ??= Promise.resolve(usePreferencesStore.persist.rehydrate()).then(() => {
     usePreferencesStore.getState().setHydrated(true);
   });
   return hydration;
