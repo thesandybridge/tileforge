@@ -58,6 +58,7 @@ struct RateLimitInfo {
 }
 
 impl RateLimit {
+    #[allow(clippy::result_large_err)]
     async fn check(
         &self,
         ip: &str,
