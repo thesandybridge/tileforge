@@ -26,6 +26,11 @@ Validation: all 10 auth policy/token tests passed in a temporary fixture using p
 
 ## Prioritized follow-up work
 
+Production npm dependencies were audited on September 9, 2026. Next.js, Auth.js,
+fflate, PostCSS, and affected transitive packages were upgraded; `npm audit
+--omit=dev` reports zero known vulnerabilities. Remaining npm advisories belong
+to local build and scaffolding tools and are not shipped by the web service.
+
 | Priority | Finding | Recommended change |
 | --- | --- | --- |
 | Done | Private React Query data is scoped to the authenticated user ID and stale private cache entries are removed when identity changes. | Implemented in the query provider and private-data hooks. |
