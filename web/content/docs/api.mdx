@@ -113,7 +113,7 @@ Tilesets are persistent records of processed tile jobs, identified by a unique s
 ### Create Tileset
 
 <CalloutCard title="Internal Endpoint" variant="warning">
-  Tilesets are automatically created by the background worker after processing completes. You typically don't call this directly.
+  Tilesets are automatically created by the background worker after processing completes. Existing API consumers may use this endpoint to finalize the name, slug, and visibility of their own completed job. The API verifies job ownership and derives storage usage from the stored objects.
 </CalloutCard>
 
 ```http
@@ -130,7 +130,7 @@ Content-Type: application/json
   "max_zoom": 5,
   "tile_count": 1365,
   "size_bytes": 2400000,
-  "storage_path": "tiles/job-id",
+  "storage_path": "tiles/550e8400-e29b-41d4-a716-446655440000",
   "public": true
 }
 ```

@@ -19,16 +19,18 @@ API keys provide a convenient way to authenticate with the TileForge API without
 
 ## Using API Keys
 
-API keys can be used in two ways:
-
-### As a Bearer Token
+Send API keys as bearer tokens:
 
 ```bash
 curl https://api.tileforge.sandybridge.io/api/tilesets \
   -H "Authorization: Bearer tf_your_api_key_here"
 ```
 
-### As a Query Parameter
+<CalloutCard title="Query parameter authentication is deprecated" variant="warning">
+  Existing integrations using `?key=` continue to work temporarily, but URLs can leak credentials through logs, browser history, and referrer headers. Migrate them to the Authorization header.
+</CalloutCard>
+
+Legacy form:
 
 ```bash
 curl "https://api.tileforge.sandybridge.io/api/tilesets?key=tf_your_api_key_here"

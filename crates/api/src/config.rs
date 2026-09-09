@@ -33,9 +33,13 @@ impl AppConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn default_port() {
+        let _guard = ENV_LOCK.lock().unwrap();
         std::env::remove_var("PORT");
         let config = AppConfig::from_env();
         assert_eq!(config.port, 8080);
@@ -43,6 +47,7 @@ mod tests {
 
     #[test]
     fn port_from_env() {
+        let _guard = ENV_LOCK.lock().unwrap();
         std::env::set_var("PORT", "3000");
         let config = AppConfig::from_env();
         assert_eq!(config.port, 3000);
@@ -51,6 +56,7 @@ mod tests {
 
     #[test]
     fn invalid_port_falls_back_to_default() {
+        let _guard = ENV_LOCK.lock().unwrap();
         std::env::set_var("PORT", "not_a_number");
         let config = AppConfig::from_env();
         assert_eq!(config.port, 8080);
@@ -59,6 +65,7 @@ mod tests {
 
     #[test]
     fn max_upload_bytes_from_env() {
+        let _guard = ENV_LOCK.lock().unwrap();
         std::env::set_var("MAX_UPLOAD_BYTES", "1048576");
         let config = AppConfig::from_env();
         assert_eq!(config.max_upload_bytes, 1048576);

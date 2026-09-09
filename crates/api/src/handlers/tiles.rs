@@ -331,6 +331,8 @@ async fn verify_job_owner(
     user: &crate::auth::UserClaims,
     db: Option<&PgPool>,
 ) -> Result<(), ApiError> {
+    // Job IDs are generated UUIDs. Reject arbitrary S3 key fragments early.
+    Uuid::parse_str(job_id).map_err(|_| ApiError::NotFound)?;
     let key = progress_key(job_id);
     let val: Option<String> = redis.get(&key).await.ok().flatten();
     if let Some(json) = val {
@@ -338,7 +340,7 @@ async fn verify_job_owner(
             match data.get("user_id").and_then(|v| v.as_str()) {
                 Some(owner_id) if owner_id != user.sub => return Err(ApiError::NotFound),
                 Some(_) => return Ok(()), // owner matches
-                None => return Ok(()),    // anonymous job — no owner to check
+                None => {} // Older progress records fall back to the database.
             }
         }
     }
@@ -351,15 +353,15 @@ async fn verify_job_owner(
         .bind(&storage_path)
         .fetch_optional(db)
         .await
-        .ok()
-        .flatten();
+        .map_err(|e| ApiError::Db(e.to_string()))?;
         if let Some((owner_id,)) = row {
             if owner_id != user.sub {
                 return Err(ApiError::NotFound);
             }
+            return Ok(());
         }
     }
-    Ok(())
+    Err(ApiError::NotFound)
 }
 
 pub async fn job_download(
@@ -402,17 +404,16 @@ pub async fn job_thumbnail(
         .bind(&storage_path)
         .fetch_optional(db)
         .await
-        .ok()
-        .flatten();
-        if let Some((is_public, owner_id)) = row {
-            if !is_public {
-                let caller_id = claims.0.as_ref().map(|c| c.sub.as_str());
-                if caller_id != Some(&*owner_id) {
-                    return Err(ApiError::NotFound);
-                }
+        .map_err(|e| ApiError::Db(e.to_string()))?;
+        let Some((is_public, owner_id)) = row else {
+            return Err(ApiError::NotFound);
+        };
+        if !is_public {
+            let caller_id = claims.0.as_ref().map(|c| c.sub.as_str());
+            if caller_id != Some(&*owner_id) {
+                return Err(ApiError::NotFound);
             }
         }
-        // No tileset row — transient job thumbnail, allow (S3 404 will handle missing)
     }
 
     let bucket = require_bucket(&state)?;

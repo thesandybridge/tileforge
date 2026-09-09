@@ -67,6 +67,8 @@ pub struct JobProgress {
     #[serde(default)]
     pub last_updated: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub user_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub zoom: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tiles_done: Option<u32>,
@@ -129,6 +131,7 @@ mod tests {
         let progress = JobProgress {
             status: "processing".into(),
             last_updated: 1234567890,
+            user_id: Some("user-1".into()),
             zoom: Some(3),
             tiles_done: Some(10),
             tiles_total: Some(100),
@@ -141,6 +144,7 @@ mod tests {
         let parsed: JobProgress = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.status, "processing");
         assert_eq!(parsed.tiles_done, Some(10));
+        assert_eq!(parsed.user_id.as_deref(), Some("user-1"));
     }
 
     #[test]

@@ -194,6 +194,7 @@ async fn run_nats_loop(
                 let progress = JobProgress {
                     status: "failed".into(),
                     last_updated: unix_now(),
+                    user_id: job.user_id.clone(),
                     error: Some(e.to_string()),
                     ..Default::default()
                 };
@@ -291,6 +292,7 @@ async fn run_redis_loop(
             let progress = JobProgress {
                 status: "failed".into(),
                 last_updated: unix_now(),
+                user_id: job.user_id.clone(),
                 error: Some(e.to_string()),
                 ..Default::default()
             };
@@ -333,6 +335,7 @@ async fn process_job(
     let initial = JobProgress {
         status: "processing".into(),
         last_updated: unix_now(),
+        user_id: job.user_id.clone(),
         tiles_done: Some(0),
         tiles_total: Some(0),
         ..Default::default()
@@ -405,6 +408,7 @@ async fn process_job(
     let poller_key = pkey.clone();
     let poller_progress = Arc::clone(&shared_progress);
     let poller_done = Arc::clone(&shared_done);
+    let poller_user_id = job.user_id.clone();
     let poller = tokio::spawn(async move {
         let mut conn = poller_conn;
         loop {
@@ -416,6 +420,7 @@ async fn process_job(
                 let update = JobProgress {
                     status: "processing".into(),
                     last_updated: unix_now(),
+                    user_id: poller_user_id.clone(),
                     zoom: Some(p.zoom),
                     tiles_done: Some(p.tiles_done),
                     tiles_total: Some(p.tiles_total),
@@ -509,17 +514,6 @@ async fn process_job(
         "PMTiles uploaded to S3"
     );
 
-    // Set final progress
-    let final_progress = JobProgress {
-        status: "complete".into(),
-        last_updated: unix_now(),
-        download_url: Some(format!("/api/tiles/{}/download", job.job_id)),
-        pmtiles_url: Some(format!("/api/tiles/{}/download/pmtiles", job.job_id)),
-        ..Default::default()
-    };
-    conn.set_ex::<_, _, ()>(&pkey, serde_json::to_string(&final_progress)?, 3600u64)
-        .await?;
-
     // Insert tile_set row if we have a user_id and DB connection
     if let (Some(user_id_str), Some(pool)) = (&job.user_id, db) {
         if let Ok(user_id) = uuid::Uuid::parse_str(user_id_str) {
@@ -585,6 +579,19 @@ async fn process_job(
             }
         }
     }
+
+    // Publish completion only after the database row exists. API consumers can
+    // safely finalize its display metadata as soon as they observe this state.
+    let final_progress = JobProgress {
+        status: "complete".into(),
+        last_updated: unix_now(),
+        user_id: job.user_id.clone(),
+        download_url: Some(format!("/api/tiles/{}/download", job.job_id)),
+        pmtiles_url: Some(format!("/api/tiles/{}/download/pmtiles", job.job_id)),
+        ..Default::default()
+    };
+    conn.set_ex::<_, _, ()>(&pkey, serde_json::to_string(&final_progress)?, 3600u64)
+        .await?;
 
     tracing::info!(job_id = %job.job_id, "job complete");
 

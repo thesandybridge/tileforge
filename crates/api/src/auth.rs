@@ -72,6 +72,7 @@ pub async fn optional_auth(
     mut req: Request<axum::body::Body>,
     next: Next,
 ) -> Response {
+    let mut used_query_key = false;
     let bearer_token = req
         .headers()
         .get(header::AUTHORIZATION)
@@ -106,12 +107,26 @@ pub async fn optional_auth(
                 tracing::warn!("API key used via query parameter (deprecated) — use Authorization header instead");
                 if let Some(claims) = validate_api_key(db, &api_key).await {
                     req.extensions_mut().insert(claims);
+                    used_query_key = true;
                 }
             }
         }
     }
 
-    next.run(req).await
+    let mut response = next.run(req).await;
+    if used_query_key {
+        response.headers_mut().insert(
+            "deprecation",
+            axum::http::HeaderValue::from_static("true"),
+        );
+        response.headers_mut().insert(
+            "warning",
+            axum::http::HeaderValue::from_static(
+                "299 Tileforge \"API keys in query parameters are deprecated; use Authorization: Bearer\"",
+            ),
+        );
+    }
+    response
 }
 
 /// Verify admin secret from Authorization header. Returns error if invalid.
@@ -148,20 +163,19 @@ async fn validate_jwt(secret: &str, token: &str, state: &AppState) -> Option<Use
         }
     };
 
-    // Verify user is not deactivated
+    // When a database is configured, require an active user. Database errors and
+    // deleted users must not turn into successful authentication.
     if let Some(ref db) = state.db {
-        if let Ok(user_id) = Uuid::parse_str(&data.claims.sub) {
-            let deactivated: Option<(bool,)> = sqlx::query_as(
-                "SELECT deactivated_at IS NOT NULL FROM users WHERE id = $1",
-            )
-            .bind(user_id)
-            .fetch_optional(db)
-            .await
-            .ok()
-            .flatten();
-            if let Some((true,)) = deactivated {
-                return None;
-            }
+        let user_id = Uuid::parse_str(&data.claims.sub).ok()?;
+        let active: Option<(bool,)> = sqlx::query_as(
+            "SELECT deactivated_at IS NULL FROM users WHERE id = $1",
+        )
+        .bind(user_id)
+        .fetch_optional(db)
+        .await
+        .ok()?;
+        if !active.is_some_and(|(is_active,)| is_active) {
+            return None;
         }
     }
 

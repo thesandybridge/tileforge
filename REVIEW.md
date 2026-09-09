@@ -28,11 +28,7 @@ Validation: all 10 auth policy/token tests passed in a temporary fixture using p
 
 | Priority | Finding | Recommended change |
 | --- | --- | --- |
-| High | `crates/api/src/handlers/tilesets.rs` inserts client-provided `storage_path` and later uses it for presigning and deletion without proving ownership. | Derive storage paths from a server-owned completed job, verify job ownership, and test cross-user reads/deletes before releasing this endpoint. |
-| High | `crates/api/src/auth.rs` ignores DB failures and missing user rows during JWT validation. | Fail closed for missing/deactivated users; return a service error for DB outages rather than accepting unverifiable account status. |
 | Medium | Private React Query keys such as `["user"]`, `["api-key"]`, and `["tilesets"]` do not include account identity. | Scope private queries to user IDs and clear private cached data when identity changes. |
-| Medium | `use-tile-defaults.ts` parses a new object on every `useSyncExternalStore` snapshot read. | Cache stable snapshots or migrate preferences to Zustand; cover saved-preference rendering in a regression test. |
-| Medium | Presets use per-hook state and storage writes inside React state updaters. | Share a single preferences store with pure updates, runtime validation, and storage-error handling. |
 | Medium | CI runs on main pushes only; browser tests are not executed. | Add PR checks and auth regression tests; configure package access appropriately for trusted CI contexts. |
 | Medium | Account auto-linking and explicit linking are intertwined in one large JWT callback. | Extract a transactional account service; test ownership conflicts, concurrent sign-ins, verified-email policy, and deactivation behavior against Postgres. |
 | Low | README describes browser-only processing as universal despite optional server processing; auth and deployment documentation also drifted. | Document browser/server privacy separately and reconcile deployed behavior with setup instructions. |
