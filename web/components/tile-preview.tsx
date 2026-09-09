@@ -184,7 +184,7 @@ export default function TilePreview({
         style={{ aspectRatio: "1 / 1", width: "100%", background: "var(--background)" }}
         attributionControl={false}
       >
-        <BlobTileLayer tiles={tiles} tileSize={tileSize} maxZoom={maxZoom} projection={projection} />
+        <BlobTileLayer tiles={tiles} tileSize={tileSize} maxZoom={maxZoom} projection={projection} format={format} />
       </MapContainer>
     </div>
   );
