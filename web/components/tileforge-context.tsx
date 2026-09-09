@@ -269,7 +269,9 @@ export function TileforgeProvider({ children }: { children: ReactNode }) {
 
   // Boot WASM worker once
   useEffect(() => {
-    const worker = new Worker("/tileforge.worker.js");
+    // Public engine assets have stable filenames, so version the request to
+    // prevent a browser or CDN from pairing a new UI with an old decoder.
+    const worker = new Worker("/tileforge.worker.js?v=3");
     workerRef.current = worker;
 
     worker.onmessage = (e: MessageEvent<WorkerResponse>) => {
@@ -303,8 +305,9 @@ export function TileforgeProvider({ children }: { children: ReactNode }) {
           break;
         }
         case "error": {
-          const friendly = toFriendlyError(msg.message);
-          dispatch({ type: "error", message: `${friendly.title}: ${friendly.message}` });
+          // Keep the decoder's original message. InlineError turns it into a
+          // friendly explanation while retaining useful technical details.
+          dispatch({ type: "error", message: msg.message });
           break;
         }
       }

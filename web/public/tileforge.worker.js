@@ -1,4 +1,4 @@
-importScripts("/wasm/tileforge_wasm.js");
+importScripts("/wasm/tileforge_wasm.js?v=3");
 
 let ready = false;
 
@@ -8,7 +8,7 @@ function post(msg, transfer) {
 
 async function init() {
   try {
-    await wasm_bindgen("/wasm/tileforge_wasm_bg.wasm");
+    await wasm_bindgen("/wasm/tileforge_wasm_bg.wasm?v=3");
     ready = true;
     post({ type: "ready" });
   } catch (e) {

@@ -1,8 +1,8 @@
-const CACHE_NAME = "tileforge-v2";
+const CACHE_NAME = "tileforge-v3";
 const PRECACHE_ASSETS = [
-  "/wasm/tileforge_wasm.js",
-  "/wasm/tileforge_wasm_bg.wasm",
-  "/tileforge.worker.js",
+  "/wasm/tileforge_wasm.js?v=3",
+  "/wasm/tileforge_wasm_bg.wasm?v=3",
+  "/tileforge.worker.js?v=3",
 ];
 
 // Install: precache WASM and worker files
@@ -31,8 +31,8 @@ self.addEventListener("activate", (event) => {
   self.clients.claim();
 });
 
-  // Engine assets change independently of the Next.js bundle. Always check the
-  // network first so a deploy cannot keep running an old decoder indefinitely.
+// Engine assets change independently of the Next.js bundle. Always check the
+// network first so a deploy cannot keep running an old decoder indefinitely.
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
 
