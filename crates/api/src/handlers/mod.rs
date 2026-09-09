@@ -3,6 +3,7 @@ pub mod admin;
 pub mod api_keys;
 pub mod jobs;
 pub mod notifications;
+pub mod projects;
 pub mod tiles;
 pub mod tilesets;
 pub mod user;

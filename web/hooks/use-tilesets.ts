@@ -16,12 +16,12 @@ import {
 
 const PER_PAGE = 20;
 
-export function useTilesets() {
+export function useTilesets(projectId?: string | "unfiled") {
   const { data: session } = useSession();
   return useInfiniteQuery({
-    queryKey: ["tilesets"],
+    queryKey: ["tilesets", session?.user?.id, projectId ?? "all"],
     queryFn: ({ pageParam }) =>
-      listTileSets(undefined, session?.accessToken, { page: pageParam, perPage: PER_PAGE }),
+      listTileSets(undefined, session?.accessToken, { page: pageParam, perPage: PER_PAGE, projectId: projectId !== "unfiled" ? projectId : undefined, unfiled: projectId === "unfiled" }),
     initialPageParam: 1,
     getNextPageParam: (lastPage, _allPages, lastPageParam) =>
       lastPage.length === PER_PAGE ? lastPageParam + 1 : undefined,

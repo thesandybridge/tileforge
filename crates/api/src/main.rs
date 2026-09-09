@@ -340,6 +340,19 @@ fn build_router(state: AppState, rate_limit: RateLimit, config: &AppConfig) -> R
         )
         // Persistent processing jobs
         .route(
+            "/api/projects",
+            get(projects::list_projects).post(projects::create_project).layer(
+                middleware::from_fn_with_state(rate_limit.clone(), rate_limit_mutations),
+            ),
+        )
+        .route(
+            "/api/projects/{project_id}",
+            patch(projects::update_project).delete(projects::delete_project).layer(
+                middleware::from_fn_with_state(rate_limit.clone(), rate_limit_mutations),
+            ),
+        )
+        // Persistent processing jobs
+        .route(
             "/api/jobs",
             get(jobs::list_jobs).layer(middleware::from_fn_with_state(
                 rate_limit.clone(),

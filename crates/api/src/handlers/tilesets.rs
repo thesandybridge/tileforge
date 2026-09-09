@@ -15,7 +15,7 @@ use tileforge_shared::{progress_key, tile_s3_prefix};
 
 const TILESET_COLUMNS: &str =
     "id, user_id, name, slug, projection, tile_size, min_zoom, max_zoom, \
-     tile_count, size_bytes, storage_path, public, created_at, width, height, source_epsg, source_bounds, tile_format, tile_quality";
+     tile_count, size_bytes, storage_path, public, created_at, width, height, source_epsg, source_bounds, tile_format, tile_quality, project_id";
 
 #[derive(Serialize, sqlx::FromRow, utoipa::ToSchema)]
 pub struct TileSetRow {
@@ -38,6 +38,7 @@ pub struct TileSetRow {
     pub source_bounds: Option<Vec<f64>>,
     pub tile_format: String,
     pub tile_quality: i16,
+    pub project_id: Option<Uuid>,
 }
 
 #[derive(Deserialize)]
@@ -60,6 +61,8 @@ pub struct CreateTileSet {
 pub struct UpdateTileSet {
     name: Option<String>,
     public: Option<bool>,
+    project_id: Option<Uuid>,
+    clear_project: Option<bool>,
 }
 
 #[derive(Deserialize, utoipa::IntoParams)]
@@ -68,6 +71,8 @@ pub struct ListTileSetsQuery {
     page: Option<i64>,
     per_page: Option<i64>,
     search: Option<String>,
+    project_id: Option<Uuid>,
+    unfiled: Option<bool>,
 }
 
 fn pagination(page: Option<i64>, per_page: Option<i64>) -> (i64, i64) {
@@ -273,12 +278,16 @@ pub async fn list_tilesets(
          WHERE ($1::uuid IS NULL OR user_id = $1)
            AND ($2 OR public = true)
            AND ($3::text IS NULL OR name ILIKE $3)
+           AND ($4::uuid IS NULL OR project_id = $4)
+           AND (NOT $5 OR project_id IS NULL)
          ORDER BY created_at DESC
-         LIMIT $4 OFFSET $5"
+         LIMIT $6 OFFSET $7"
     ))
     .bind(target_user_id)
     .bind(show_private)
     .bind(search_pattern)
+    .bind(params.project_id)
+    .bind(params.unfiled.unwrap_or(false))
     .bind(limit)
     .bind(offset)
     .fetch_all(&db)
@@ -329,17 +338,22 @@ pub async fn update_tileset(
     Path(slug): Path<String>,
     Json(body): Json<UpdateTileSet>,
 ) -> Result<Json<TileSetRow>, ApiError> {
+    user.require_scope("manage")?;
     let db = require_db(&state)?;
     let user_id = parse_user_id(&user)?;
 
     let row = sqlx::query_as::<_, TileSetRow>(&format!(
         "UPDATE tile_sets
-         SET name = COALESCE($1, name), public = COALESCE($2, public)
-         WHERE slug = $3 AND user_id = $4
+         SET name = COALESCE($1, name), public = COALESCE($2, public),
+             project_id = CASE WHEN $3 THEN NULL WHEN $4::uuid IS NOT NULL THEN $4 ELSE project_id END
+         WHERE slug = $5 AND user_id = $6
+           AND ($4::uuid IS NULL OR EXISTS (SELECT 1 FROM projects WHERE id = $4 AND user_id = $6))
          RETURNING {TILESET_COLUMNS}"
     ))
     .bind(&body.name)
     .bind(body.public)
+    .bind(body.clear_project.unwrap_or(false))
+    .bind(body.project_id)
     .bind(&slug)
     .bind(user_id)
     .fetch_optional(&db)
@@ -355,6 +369,7 @@ pub async fn delete_tileset(
     Claims(user): Claims,
     Path(slug): Path<String>,
 ) -> Result<StatusCode, ApiError> {
+    user.require_scope("manage")?;
     let db = require_db(&state)?;
     let user_id = parse_user_id(&user)?;
 

@@ -1,10 +1,11 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
 import { useSession } from "next-auth/react";
 import {
   Map, Globe, Grid3X3, Trash2, ImageIcon, ArrowRight,
-  GitCompareArrows, Clock3, CircleCheck, CircleX,
+  GitCompareArrows, Clock3, CircleCheck, CircleX, FolderPlus,
 } from "lucide-react";
 import { API_URL } from "@/lib/api";
 import { PLAN_PRO } from "@/lib/plans";
@@ -30,9 +31,16 @@ import { UpgradeInlineBanner } from "@/components/upgrade-banner";
 import { ScrollReveal } from "@/components/scroll-reveal";
 import { TilesetGridSkeleton } from "@/components/tileset-skeleton";
 import { Progress } from "@/components/ui/progress";
+import { useProjects, useProjectActions } from "@/hooks/use-projects";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 export default function MyTilesetsPage() {
   const { data: session } = useSession();
+  const [projectFilter, setProjectFilter] = useState<string>("all");
+  const [newProjectOpen, setNewProjectOpen] = useState(false);
+  const [newProjectName, setNewProjectName] = useState("");
   const {
     data,
     isLoading,
@@ -40,7 +48,7 @@ export default function MyTilesetsPage() {
     hasNextPage,
     fetchNextPage,
     isFetchingNextPage,
-  } = useTilesets();
+  } = useTilesets(projectFilter === "all" ? undefined : projectFilter as string | "unfiled");
   const tilesets = data?.pages.flat() ?? [];
   const { data: user } = useCurrentUser();
   const deleteTileset = useDeleteTileset();
@@ -50,6 +58,8 @@ export default function MyTilesetsPage() {
     (job) => job.status !== "complete" || !tilesets.some((ts) => ts.slug === job.id),
   );
   const isFree = session?.user && session.user.plan !== PLAN_PRO;
+  const { data: projects = [] } = useProjects();
+  const projectActions = useProjectActions();
 
   return (
     <div className="flex flex-1 flex-col py-10">
@@ -78,6 +88,26 @@ export default function MyTilesetsPage() {
       </ScrollReveal>
 
       <main className="mx-auto mt-10 max-w-4xl px-6">
+        <div className="mb-6 flex flex-wrap items-center gap-3">
+          <Select value={projectFilter} onValueChange={setProjectFilter}>
+            <SelectTrigger className="w-52"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All projects</SelectItem>
+              <SelectItem value="unfiled">Unfiled</SelectItem>
+              {projects.map((project) => <SelectItem key={project.id} value={project.id}>{project.name} ({project.tileset_count})</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <Button variant="outline" onClick={() => setNewProjectOpen(true)}><FolderPlus className="mr-2 h-4 w-4" />New project</Button>
+          {projectFilter !== "all" && projectFilter !== "unfiled" && (
+            <AlertDialog>
+              <AlertDialogTrigger asChild><Button variant="ghost" size="icon"><Trash2 className="text-muted-foreground h-4 w-4" /><span className="sr-only">Delete project</span></Button></AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader><AlertDialogTitle>Delete project?</AlertDialogTitle><AlertDialogDescription>Tilesets in this project will become unfiled. The tilesets themselves will not be deleted.</AlertDialogDescription></AlertDialogHeader>
+                <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction className="bg-destructive text-destructive-foreground" onClick={() => projectActions.remove.mutate(projectFilter, { onSuccess: () => setProjectFilter("all") })}>Delete project</AlertDialogAction></AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          )}
+        </div>
         {visibleJobs.length > 0 && (
           <section className="mb-8" aria-labelledby="processing-jobs-heading">
             <h2 id="processing-jobs-heading" className="mb-3 text-lg font-semibold">
@@ -136,6 +166,15 @@ export default function MyTilesetsPage() {
                   <Link key={job.id} href={`/tilesets/${encodeURIComponent(job.id)}`}>
                     {content}
                   </Link>
+                  <div className="px-6 pb-5">
+                    <Select value={ts.project_id ?? "unfiled"} onValueChange={(value) => projectActions.assign.mutate({ slug: ts.slug, projectId: value === "unfiled" ? null : value })}>
+                      <SelectTrigger className="h-8"><SelectValue placeholder="Unfiled" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="unfiled">Unfiled</SelectItem>
+                        {projects.map((project) => <SelectItem key={project.id} value={project.id}>{project.name}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
                 ) : (
                   <div key={job.id}>{content}</div>
                 );
@@ -287,6 +326,15 @@ export default function MyTilesetsPage() {
           </ScrollReveal>
         )}
       </main>
+      <Dialog open={newProjectOpen} onOpenChange={setNewProjectOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader><DialogTitle>New project</DialogTitle></DialogHeader>
+          <Input value={newProjectName} onChange={(event) => setNewProjectName(event.target.value)} placeholder="Project name" autoFocus onKeyDown={(event) => {
+            if (event.key === "Enter" && newProjectName.trim()) projectActions.create.mutate({ name: newProjectName.trim() }, { onSuccess: () => { setNewProjectOpen(false); setNewProjectName(""); } });
+          }} />
+          <DialogFooter><Button variant="outline" onClick={() => setNewProjectOpen(false)}>Cancel</Button><Button disabled={!newProjectName.trim() || projectActions.create.isPending} onClick={() => projectActions.create.mutate({ name: newProjectName.trim() }, { onSuccess: () => { setNewProjectOpen(false); setNewProjectName(""); } })}>Create</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

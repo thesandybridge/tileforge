@@ -20,6 +20,16 @@ export interface TileSet {
   source_bounds: number[] | null;
   tile_format: "png" | "jpeg" | "webp";
   tile_quality: number;
+  project_id: string | null;
+}
+
+export interface Project {
+  id: string;
+  name: string;
+  description: string | null;
+  tileset_count: number;
+  created_at: string;
+  updated_at: string;
 }
 
 export type JobStatus = "queued" | "processing" | "complete" | "failed" | "cancelled";
@@ -81,6 +91,8 @@ export interface CreateTileSetInput {
 export interface UpdateTileSetInput {
   name?: string;
   public?: boolean;
+  project_id?: string;
+  clear_project?: boolean;
 }
 
 class ApiError extends Error {
@@ -110,17 +122,34 @@ async function handleResponse<T>(res: Response): Promise<T> {
 export async function listTileSets(
   userId?: string,
   token?: string,
-  opts?: { page?: number; perPage?: number; search?: string },
+  opts?: { page?: number; perPage?: number; search?: string; projectId?: string; unfiled?: boolean },
 ): Promise<TileSet[]> {
   const params = new URLSearchParams();
   if (userId) params.set("user_id", userId);
   if (opts?.page) params.set("page", String(opts.page));
   if (opts?.perPage) params.set("per_page", String(opts.perPage));
   if (opts?.search) params.set("search", opts.search);
+  if (opts?.projectId) params.set("project_id", opts.projectId);
+  if (opts?.unfiled) params.set("unfiled", "true");
   const headers: Record<string, string> = {};
   if (token) headers["Authorization"] = `Bearer ${token}`;
   const res = await fetch(`${API_URL}/api/tilesets?${params}`, { headers });
   return handleResponse<TileSet[]>(res);
+}
+
+export async function listProjects(token: string): Promise<Project[]> {
+  const res = await fetch(`${API_URL}/api/projects`, { headers: authHeaders(token) });
+  return handleResponse<Project[]>(res);
+}
+
+export async function createProject(input: { name: string; description?: string }, token: string): Promise<Project> {
+  const res = await fetch(`${API_URL}/api/projects`, { method: "POST", headers: authHeaders(token), body: JSON.stringify(input) });
+  return handleResponse<Project>(res);
+}
+
+export async function deleteProject(id: string, token: string): Promise<void> {
+  const res = await fetch(`${API_URL}/api/projects/${encodeURIComponent(id)}`, { method: "DELETE", headers: authHeaders(token) });
+  if (!res.ok && res.status !== 204) throw new ApiError(res.status, "Failed to delete project");
 }
 
 export async function searchTileSets(
