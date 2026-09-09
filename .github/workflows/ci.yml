@@ -38,6 +38,20 @@ jobs:
 
   web-checks:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: tileforge_test
+          POSTGRES_USER: tileforge
+          POSTGRES_PASSWORD: tileforge
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U tileforge -d tileforge_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v5
 
@@ -61,3 +75,5 @@ jobs:
       - name: Run auth policy tests
         run: npm run test:auth
         working-directory: web
+        env:
+          TEST_DATABASE_URL: postgres://tileforge:tileforge@localhost:5432/tileforge_test

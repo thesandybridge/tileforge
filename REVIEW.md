@@ -20,9 +20,9 @@ The checkout contains no deployment environment files or production auth logs. M
 5. Verify the web database connection and that migration `011_multi_provider_accounts.sql` has run. OAuth callbacks now query `accounts`, including for returning GitHub users.
 6. Inspect server-side Auth.js errors for configuration, callback, token exchange, or database failures. Do not log cookies, tokens, or secrets.
 
-The dependency install failed with GitHub Packages `401` for `@thesandybridge/ui`. `web/.npmrc` expects `NPM_TOKEN` with package read access. This is independent of login OAuth credentials. Full build/typecheck verification requires restoring package access.
+`web/.npmrc` expects `NPM_TOKEN` with GitHub Packages read access for `@thesandybridge/ui`. This token is independent of the GitHub OAuth credentials used for sign-in.
 
-Validation: all 10 auth policy/token tests passed in a temporary fixture using public dependencies (Playwright 1.58.2 and Auth.js 5.0.0-beta.30). `git diff --check` passed. Full application typecheck, build, browser flows, and live OAuth/database integration remain unverified.
+Validation runs the production web build, isolated auth policy/token tests, and account-resolution integration tests against PostgreSQL 17 in CI. Live OAuth remains dependent on the deployed provider configuration.
 
 ## Prioritized follow-up work
 
@@ -35,7 +35,7 @@ to local build and scaffolding tools and are not shipped by the web service.
 | --- | --- | --- |
 | Done | Private React Query data is scoped to the authenticated user ID and stale private cache entries are removed when identity changes. | Implemented in the query provider and private-data hooks. |
 | Done | CI runs for pushes and pull requests, cancels superseded runs, and executes the isolated auth regression suite after the web build. | Forked pull requests still require a package-install strategy that does not expose the private `NPM_TOKEN`. |
-| Done | Account resolution now runs in a dedicated transaction with advisory locks for provider identities and verified emails. | Add deployed Postgres integration coverage when CI has a database service. |
+| Done | Account resolution runs in a dedicated transaction with advisory locks for provider identities and verified emails. PostgreSQL integration tests cover concurrent verified-email linking, ownership conflicts, rollback, and expired reactivation. | Keep these tests aligned with account schema and linking policy changes. |
 | Done | README now distinguishes Local and Server mode privacy and reflects current CLI, API, CI, and WASM deployment behavior. | Keep command and endpoint examples synchronized as features change. |
 
 ## Zustand persistence
