@@ -86,3 +86,11 @@ unzip tileset.zip -d ./tiles
 ## Server Processing Output
 
 When using the API (Pro), both ZIP and PMTiles are generated automatically in a single pass. You can download either format after processing completes.
+
+Public tilesets also have a stable, range-enabled PMTiles URL:
+
+```
+GET /api/tilesets/{slug}/tiles.pmtiles
+```
+
+Use that URL directly with the PMTiles protocol in MapLibre or Protomaps. Private tilesets use the authenticated `pmtiles-url` endpoint to obtain a temporary signed URL.

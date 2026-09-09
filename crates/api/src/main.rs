@@ -180,7 +180,8 @@ fn build_router(state: AppState, rate_limit: RateLimit, config: &AppConfig) -> R
                     Method::DELETE,
                     Method::OPTIONS,
                 ])
-                .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION])
+                .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION, header::RANGE])
+                .expose_headers([header::ACCEPT_RANGES, header::CONTENT_LENGTH, header::CONTENT_RANGE])
         }
         None => {
             tracing::warn!(
@@ -342,6 +343,13 @@ fn build_router(state: AppState, rate_limit: RateLimit, config: &AppConfig) -> R
         .route(
             "/api/tilesets/{slug}/pmtiles-url",
             get(tilesets::tileset_pmtiles_url).layer(middleware::from_fn_with_state(
+                rate_limit.clone(),
+                rate_limit_download,
+            )),
+        )
+        .route(
+            "/api/tilesets/{slug}/tiles.pmtiles",
+            get(tilesets::tileset_pmtiles).layer(middleware::from_fn_with_state(
                 rate_limit.clone(),
                 rate_limit_download,
             )),

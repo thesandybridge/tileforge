@@ -158,7 +158,9 @@ export default function TileSetDetailPage() {
     );
   }
 
-  const tileUrl = `${API_URL}/api/tilesets/${tileset.slug}/pmtiles-url`;
+  const tileUrl = tileset.public
+    ? `${API_URL}/api/tilesets/${encodeURIComponent(tileset.slug)}/tiles.pmtiles`
+    : (pmtiles.data ?? `${API_URL}/api/tilesets/${encodeURIComponent(tileset.slug)}/pmtiles-url`);
 
   const leafletSnippet = `import "pmtiles";
 import * as protomapsL from "protomaps-leaflet";

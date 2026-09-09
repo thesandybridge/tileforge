@@ -1,6 +1,6 @@
 use axum::{
     extract::{Path, Query, State},
-    http::StatusCode,
+    http::{header, HeaderMap, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
     Json,
 };
@@ -414,6 +414,66 @@ pub async fn tileset_pmtiles_url(
     Ok(Json(serde_json::json!({ "url": url })))
 }
 
+fn parse_byte_range(value: &str, size: u64) -> Option<(u64, u64)> {
+    let range = value.strip_prefix("bytes=")?;
+    if range.contains(',') { return None; }
+    let (start, end) = range.split_once('-')?;
+    let start: u64 = start.parse().ok()?;
+    let end = if end.is_empty() { size.checked_sub(1)? } else { end.parse().ok()? };
+    (start <= end && end < size).then_some((start, end))
+}
+
+pub async fn tileset_pmtiles(
+    State(state): State<AppState>,
+    claims: OptionalClaims,
+    Path(slug): Path<String>,
+    request_headers: HeaderMap,
+) -> Result<Response, ApiError> {
+    let db = require_db(&state)?;
+    let bucket = require_bucket(&state)?;
+    let row = sqlx::query_as::<_, TileSetRow>(&format!(
+        "SELECT {TILESET_COLUMNS} FROM tile_sets WHERE slug = $1"
+    ))
+    .bind(&slug)
+    .fetch_optional(&db)
+    .await
+    .map_err(|e| ApiError::Db(e.to_string()))?
+    .ok_or(ApiError::NotFound)?;
+    if !row.public && !is_owner(&claims, row.user_id) {
+        return Err(ApiError::NotFound);
+    }
+
+    let key = format!("{}/tiles.pmtiles", row.storage_path);
+    let size = bucket.head_object(&key).await
+        .map_err(|_| ApiError::NotFound)?
+        .0.content_length
+        .and_then(|value| u64::try_from(value).ok())
+        .ok_or(ApiError::NotFound)?;
+    let requested_range = request_headers.get(header::RANGE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| parse_byte_range(value, size));
+    let (status, bytes, content_range) = if let Some((start, end)) = requested_range {
+        let response = bucket.get_object_range(&key, start, Some(end)).await
+            .map_err(|_| ApiError::NotFound)?;
+        (StatusCode::PARTIAL_CONTENT, response.to_vec(), Some(format!("bytes {start}-{end}/{size}")))
+    } else {
+        let response = bucket.get_object(&key).await.map_err(|_| ApiError::NotFound)?;
+        (StatusCode::OK, response.to_vec(), None)
+    };
+    let mut headers = HeaderMap::new();
+    headers.insert(header::CONTENT_TYPE, HeaderValue::from_static("application/vnd.pmtiles"));
+    headers.insert(header::ACCEPT_RANGES, HeaderValue::from_static("bytes"));
+    headers.insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static(if row.public { "public, max-age=3600" } else { "private, no-store" }),
+    );
+    headers.insert(header::CONTENT_LENGTH, HeaderValue::from_str(&bytes.len().to_string()).unwrap());
+    if let Some(value) = content_range {
+        headers.insert(header::CONTENT_RANGE, HeaderValue::from_str(&value).unwrap());
+    }
+    Ok((status, headers, bytes).into_response())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -431,6 +491,14 @@ mod tests {
             storage_path: "tiles/550e8400-e29b-41d4-a716-446655440000".into(),
             public: Some(false),
         }
+    }
+
+    #[test]
+    fn parses_single_byte_ranges() {
+        assert_eq!(parse_byte_range("bytes=10-19", 100), Some((10, 19)));
+        assert_eq!(parse_byte_range("bytes=90-", 100), Some((90, 99)));
+        assert_eq!(parse_byte_range("bytes=100-", 100), None);
+        assert_eq!(parse_byte_range("bytes=0-1,4-5", 100), None);
     }
 
     #[test]

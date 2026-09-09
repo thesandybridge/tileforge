@@ -122,6 +122,30 @@ paths:
         '429':
           description: Rate limit exceeded
 
+  /api/tilesets/{slug}/tiles.pmtiles:
+    get:
+      tags: [Tilesets]
+      summary: Stream a hosted PMTiles archive
+      description: Supports HTTP byte ranges. Public tilesets can be embedded directly; private tilesets require owner authentication.
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: Range
+          in: header
+          schema:
+            type: string
+            example: bytes=0-16383
+      responses:
+        '200':
+          description: Complete PMTiles archive
+        '206':
+          description: Requested PMTiles byte range
+        '404':
+          description: Tileset not found or inaccessible
+
   /api/tiles/{job_id}/progress:
     get:
       tags: [Tiles]
