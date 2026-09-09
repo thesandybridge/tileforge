@@ -2,12 +2,16 @@
 
 import Link from "next/link";
 import { useSession } from "next-auth/react";
-import { Map, Globe, Grid3X3, Trash2, ImageIcon, ArrowRight, GitCompareArrows } from "lucide-react";
+import {
+  Map, Globe, Grid3X3, Trash2, ImageIcon, ArrowRight,
+  GitCompareArrows, Clock3, CircleCheck, CircleX,
+} from "lucide-react";
 import { API_URL } from "@/lib/api";
 import { PLAN_PRO } from "@/lib/plans";
 import { formatBytes, timeAgo } from "@/lib/utils";
 import { useTilesets, useDeleteTileset } from "@/hooks/use-tilesets";
 import { useCurrentUser } from "@/hooks/use-user";
+import { useJobs } from "@/hooks/use-jobs";
 import { StorageUsage } from "@/components/storage-usage";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -25,6 +29,7 @@ import {
 import { UpgradeInlineBanner } from "@/components/upgrade-banner";
 import { ScrollReveal } from "@/components/scroll-reveal";
 import { TilesetGridSkeleton } from "@/components/tileset-skeleton";
+import { Progress } from "@/components/ui/progress";
 
 export default function MyTilesetsPage() {
   const { data: session } = useSession();
@@ -39,6 +44,10 @@ export default function MyTilesetsPage() {
   const tilesets = data?.pages.flat() ?? [];
   const { data: user } = useCurrentUser();
   const deleteTileset = useDeleteTileset();
+  const { data: jobs = [] } = useJobs();
+  const visibleJobs = jobs.filter(
+    (job) => job.status !== "complete" || !tilesets.some((ts) => ts.slug === job.id),
+  );
   const isFree = session?.user && session.user.plan !== PLAN_PRO;
 
   return (
@@ -68,6 +77,58 @@ export default function MyTilesetsPage() {
       </ScrollReveal>
 
       <main className="mx-auto mt-10 max-w-4xl px-6">
+        {visibleJobs.length > 0 && (
+          <section className="mb-8" aria-labelledby="processing-jobs-heading">
+            <h2 id="processing-jobs-heading" className="mb-3 text-lg font-semibold">
+              Processing history
+            </h2>
+            <div className="space-y-3">
+              {visibleJobs.map((job) => {
+                const active =
+                  job.status === "queued" || job.status === "processing";
+                const content = (
+                  <Card className="border-border/50">
+                    <CardContent className="flex items-center gap-4 py-4">
+                      {job.status === "complete" ? (
+                        <CircleCheck className="h-5 w-5 shrink-0 text-emerald-500" />
+                      ) : job.status === "failed" ? (
+                        <CircleX className="text-destructive h-5 w-5 shrink-0" />
+                      ) : (
+                        <Clock3 className="text-primary h-5 w-5 shrink-0" />
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center justify-between gap-3 text-sm">
+                          <span className="truncate font-medium">
+                            {job.file_name ?? `Job ${job.id.slice(0, 8)}`}
+                          </span>
+                          <span className="text-muted-foreground capitalize">{job.status}</span>
+                        </div>
+                        {active && (
+                          <Progress value={job.progress} className="mt-2 h-1.5" />
+                        )}
+                        {job.error && (
+                          <p className="text-destructive mt-1 line-clamp-2 text-xs">
+                            {job.error}
+                          </p>
+                        )}
+                        <p className="text-muted-foreground mt-1 text-xs">
+                          {timeAgo(job.updated_at)}
+                        </p>
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+                return job.status === "complete" ? (
+                  <Link key={job.id} href={`/tilesets/${encodeURIComponent(job.id)}`}>
+                    {content}
+                  </Link>
+                ) : (
+                  <div key={job.id}>{content}</div>
+                );
+              })}
+            </div>
+          </section>
+        )}
         {user && user.storage_quota > 0 && (
           <div className="mb-6">
             <StorageUsage used={user.storage_used} quota={user.storage_quota} />

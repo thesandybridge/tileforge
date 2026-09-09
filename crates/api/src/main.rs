@@ -304,6 +304,21 @@ fn build_router(state: AppState, rate_limit: RateLimit, config: &AppConfig) -> R
                     rate_limit_mutations,
                 )),
         )
+        // Persistent processing jobs
+        .route(
+            "/api/jobs",
+            get(jobs::list_jobs).layer(middleware::from_fn_with_state(
+                rate_limit.clone(),
+                rate_limit_mutations,
+            )),
+        )
+        .route(
+            "/api/jobs/{job_id}",
+            get(jobs::get_job).layer(middleware::from_fn_with_state(
+                rate_limit.clone(),
+                rate_limit_progress,
+            )),
+        )
         // Tilesets
         .route(
             "/api/tilesets",

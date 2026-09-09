@@ -18,6 +18,30 @@ export interface TileSet {
   height: number | null;
 }
 
+export type JobStatus = "queued" | "processing" | "complete" | "failed";
+
+export interface ProcessingJob {
+  id: string;
+  status: JobStatus;
+  file_name: string | null;
+  parameters: Record<string, unknown>;
+  progress: number;
+  tiles_done: number | null;
+  tiles_total: number | null;
+  error: string | null;
+  retry_count: number;
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
+}
+
+export async function listJobs(token: string): Promise<ProcessingJob[]> {
+  const res = await fetch(`${API_URL}/api/jobs?per_page=20`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return handleResponse<ProcessingJob[]>(res);
+}
+
 export interface CreateTileSetInput {
   name: string;
   slug: string;

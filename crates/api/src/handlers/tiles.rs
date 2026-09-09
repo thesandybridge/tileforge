@@ -111,6 +111,34 @@ async fn enqueue_async(
         .await
         .map_err(|e| ApiError::Processing(format!("S3 upload failed: {e}")))?;
 
+    // Create the durable record before publishing so progress survives a
+    // browser disconnect and the worker can update it immediately.
+    if let (Some(db), Some(user_id)) = (&state.db, &job.user_id) {
+        let user_id = Uuid::parse_str(user_id).map_err(|_| ApiError::Unauthorized)?;
+        let job_id = Uuid::parse_str(&job.job_id)
+            .map_err(|_| ApiError::Processing("invalid generated job id".into()))?;
+        let parameters = serde_json::json!({
+            "tile_size": job.tile_size,
+            "min_zoom": job.min_zoom,
+            "max_zoom": job.max_zoom,
+            "projection": job.projection,
+            "scale": job.scale,
+            "background_color": job.background_color,
+        });
+        sqlx::query(
+            "INSERT INTO jobs (id, user_id, status, file_name, parameters)
+             VALUES ($1, $2, 'queued', $3, $4)
+             ON CONFLICT (id) DO NOTHING",
+        )
+        .bind(job_id)
+        .bind(user_id)
+        .bind(&job.file_name)
+        .bind(parameters)
+        .execute(db)
+        .await
+        .map_err(|error| ApiError::Db(error.to_string()))?;
+    }
+
     // Set initial progress in Redis
     let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
     let initial_progress = serde_json::json!({

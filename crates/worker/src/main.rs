@@ -24,6 +24,30 @@ fn unix_now() -> u64 {
         .as_secs()
 }
 
+struct PersistentJobUpdate<'a> {
+    status: &'a str,
+    progress: i32,
+    tiles_done: Option<i64>,
+    tiles_total: Option<i64>,
+    error: Option<&'a str>,
+    retry_count: Option<i32>,
+}
+
+async fn update_persistent_job(db: Option<&PgPool>, job_id: &str, update: PersistentJobUpdate<'_>) {
+    let (Some(pool), Ok(id)) = (db, Uuid::parse_str(job_id)) else { return; };
+    if let Err(error) = sqlx::query(
+        "UPDATE jobs SET status = $2, progress = $3, tiles_done = COALESCE($4, tiles_done),
+         tiles_total = COALESCE($5, tiles_total), error = $6,
+         retry_count = COALESCE($7, retry_count), updated_at = now(),
+         completed_at = CASE WHEN $2 = 'complete' THEN now() ELSE completed_at END WHERE id = $1",
+    )
+    .bind(id).bind(update.status).bind(update.progress.clamp(0, 100))
+    .bind(update.tiles_done).bind(update.tiles_total).bind(update.error)
+    .bind(update.retry_count).execute(pool).await {
+        tracing::warn!(job_id, "failed to persist job status: {error}");
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Config
 // ---------------------------------------------------------------------------
@@ -206,6 +230,16 @@ async fn run_nats_loop(
                     )
                     .await;
 
+                let error = e.to_string();
+                update_persistent_job(db, &job.job_id, PersistentJobUpdate {
+                    status: if delivery_count >= 5 { "failed" } else { "queued" },
+                    progress: 0,
+                    tiles_done: None,
+                    tiles_total: None,
+                    error: Some(&error),
+                    retry_count: Some(delivery_count as i32),
+                }).await;
+
                 if delivery_count >= 5 {
                     tracing::warn!(job_id = %job.job_id, "max retries reached, terminating");
                     let _ = msg.ack_with(AckKind::Term).await;
@@ -303,6 +337,15 @@ async fn run_redis_loop(
                     3600,
                 )
                 .await;
+            let error = e.to_string();
+            update_persistent_job(db, &job.job_id, PersistentJobUpdate {
+                status: "failed",
+                progress: 0,
+                tiles_done: None,
+                tiles_total: None,
+                error: Some(&error),
+                retry_count: Some(1),
+            }).await;
             // Release storage reservation on failure
             if let (Some(pool), Some(uid), Some(reserved)) =
                 (db, &job.user_id, job.reserved_bytes)
@@ -342,6 +385,14 @@ async fn process_job(
     };
     conn.set_ex::<_, _, ()>(&pkey, serde_json::to_string(&initial)?, 3600u64)
         .await?;
+    update_persistent_job(db, &job.job_id, PersistentJobUpdate {
+        status: "processing",
+        progress: 0,
+        tiles_done: Some(0),
+        tiles_total: Some(0),
+        error: None,
+        retry_count: None,
+    }).await;
 
     // Download image from S3
     let resp = bucket
@@ -409,8 +460,11 @@ async fn process_job(
     let poller_progress = Arc::clone(&shared_progress);
     let poller_done = Arc::clone(&shared_done);
     let poller_user_id = job.user_id.clone();
+    let poller_db = db.cloned();
+    let poller_job_id = job.job_id.clone();
     let poller = tokio::spawn(async move {
         let mut conn = poller_conn;
+        let mut last_db_update = Instant::now() - Duration::from_secs(2);
         loop {
             tokio::time::sleep(std::time::Duration::from_millis(250)).await;
 
@@ -433,6 +487,21 @@ async fn process_job(
                         3600u64,
                     )
                     .await;
+                if last_db_update.elapsed() >= Duration::from_secs(2) {
+                    let percent = p.tiles_done.saturating_mul(100)
+                        .checked_div(p.tiles_total)
+                        .unwrap_or(0)
+                        .min(99) as i32;
+                    update_persistent_job(poller_db.as_ref(), &poller_job_id, PersistentJobUpdate {
+                        status: "processing",
+                        progress: percent,
+                        tiles_done: Some(p.tiles_done as i64),
+                        tiles_total: Some(p.tiles_total as i64),
+                        error: None,
+                        retry_count: None,
+                    }).await;
+                    last_db_update = Instant::now();
+                }
             }
 
             if poller_done.load(std::sync::atomic::Ordering::Relaxed) {
@@ -592,6 +661,14 @@ async fn process_job(
     };
     conn.set_ex::<_, _, ()>(&pkey, serde_json::to_string(&final_progress)?, 3600u64)
         .await?;
+    update_persistent_job(db, &job.job_id, PersistentJobUpdate {
+        status: "complete",
+        progress: 100,
+        tiles_done: None,
+        tiles_total: None,
+        error: None,
+        retry_count: None,
+    }).await;
 
     tracing::info!(job_id = %job.job_id, "job complete");
 
