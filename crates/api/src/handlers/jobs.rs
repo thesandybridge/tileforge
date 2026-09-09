@@ -27,6 +27,40 @@ pub struct JobRow {
     created_at: chrono::DateTime<chrono::Utc>,
     updated_at: chrono::DateTime<chrono::Utc>,
     completed_at: Option<chrono::DateTime<chrono::Utc>>,
+    cancelled_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+pub async fn cancel_job(
+    State(state): State<AppState>,
+    Claims(user): Claims,
+    Path(job_id): Path<Uuid>,
+) -> Result<Json<JobRow>, ApiError> {
+    let db = require_db(&state)?;
+    let user_id = parse_user_id(&user)?;
+    let changed = sqlx::query(
+        "UPDATE jobs SET status = 'cancelled', error = NULL, cancelled_at = now(), updated_at = now()
+         WHERE id = $1 AND user_id = $2 AND status IN ('queued', 'processing')",
+    )
+    .bind(job_id).bind(user_id).execute(&db).await
+    .map_err(|error| ApiError::Db(error.to_string()))?;
+    if changed.rows_affected() == 0 {
+        let exists: Option<(String,)> = sqlx::query_as("SELECT status FROM jobs WHERE id = $1 AND user_id = $2")
+            .bind(job_id).bind(user_id).fetch_optional(&db).await
+            .map_err(|error| ApiError::Db(error.to_string()))?;
+        return match exists {
+            None => Err(ApiError::NotFound),
+            Some(_) => Err(ApiError::Conflict("only queued or processing jobs can be cancelled".into())),
+        };
+    }
+    sqlx::query("SELECT release_job_storage_reservation($1)").bind(job_id).execute(&db).await
+        .map_err(|error| ApiError::Db(error.to_string()))?;
+    if let Some(mut redis) = state.redis.clone() {
+        let progress = serde_json::json!({
+            "status": "cancelled", "last_updated": chrono::Utc::now().timestamp(), "user_id": user_id,
+        });
+        let _: redis::RedisResult<()> = redis.set_ex(progress_key(&job_id.to_string()), progress.to_string(), 3600).await;
+    }
+    get_job(State(state), Claims(user), Path(job_id)).await
 }
 
 pub async fn retry_job(
@@ -49,29 +83,47 @@ pub async fn retry_job(
     bucket.head_object(upload_s3_key(&job.job_id)).await
         .map_err(|_| ApiError::Conflict("source upload is no longer available".into()))?;
 
+    let claimed = sqlx::query(
+        "UPDATE jobs SET status = 'queued', progress = 0, error = NULL, updated_at = now(),
+         completed_at = NULL, cancelled_at = NULL, reservation_released = false
+         WHERE id = $1 AND user_id = $2 AND status = 'failed'",
+    ).bind(job_id).bind(user_id).execute(&db).await
+        .map_err(|error| ApiError::Db(error.to_string()))?;
+    if claimed.rows_affected() == 0 {
+        return Err(ApiError::Conflict("job retry was already claimed".into()));
+    }
+
     if let Some(reserved) = job.reserved_bytes {
         let allowed: (bool,) = sqlx::query_as("SELECT reserve_storage($1, $2, $3)")
             .bind(user_id).bind(reserved).bind(QUOTA_PRO_BYTES).fetch_one(&db).await
             .map_err(|error| ApiError::Db(error.to_string()))?;
-        if !allowed.0 { return Err(ApiError::QuotaExceeded); }
+        if !allowed.0 {
+            let _ = sqlx::query("UPDATE jobs SET status = 'failed', error = 'storage quota exceeded' WHERE id = $1")
+                .bind(job_id).execute(&db).await;
+            return Err(ApiError::QuotaExceeded);
+        }
     }
 
     let job_json = serde_json::to_string(&job).map_err(|error| ApiError::Processing(error.to_string()))?;
-    if let Some(ref nats) = state.nats {
+    let publish_result = if let Some(ref nats) = state.nats {
         nats.publish(NATS_JOBS_SUBJECT, job_json.into()).await
             .map_err(|error| ApiError::Processing(error.to_string()))?.await
-            .map_err(|error| ApiError::Processing(error.to_string()))?;
+            .map(|_| ()).map_err(|error| ApiError::Processing(error.to_string()))
     } else if let Some(mut redis) = state.redis.clone() {
-        let _: () = redis.lpush(REDIS_JOBS_KEY, job_json).await
-            .map_err(|error| ApiError::Processing(error.to_string()))?;
-        let _: () = redis.del(progress_key(&job.job_id)).await
-            .map_err(|error| ApiError::Processing(error.to_string()))?;
+        redis.lpush::<_, _, ()>(REDIS_JOBS_KEY, job_json).await
+            .map_err(|error| ApiError::Processing(error.to_string()))
     } else {
-        return Err(ApiError::ServiceUnavailable("job queue unavailable".into()));
+        Err(ApiError::ServiceUnavailable("job queue unavailable".into()))
+    };
+    if let Err(error) = publish_result {
+        let _ = sqlx::query("UPDATE jobs SET status = 'failed', error = $2, updated_at = now() WHERE id = $1")
+            .bind(job_id).bind("failed to publish retried job").execute(&db).await;
+        let _ = sqlx::query("SELECT release_job_storage_reservation($1)").bind(job_id).execute(&db).await;
+        return Err(error);
     }
-
-    sqlx::query("UPDATE jobs SET status = 'queued', progress = 0, error = NULL, updated_at = now(), completed_at = NULL WHERE id = $1")
-        .bind(job_id).execute(&db).await.map_err(|error| ApiError::Db(error.to_string()))?;
+    if let Some(mut redis) = state.redis.clone() {
+        let _: redis::RedisResult<()> = redis.del(progress_key(&job.job_id)).await;
+    }
     get_job(State(state), Claims(user), Path(job_id)).await
 }
 
@@ -83,7 +135,21 @@ pub struct ListJobsQuery {
 }
 
 const JOB_COLUMNS: &str = "id, status, file_name, parameters, progress, tiles_done, \
-    tiles_total, error, retry_count, created_at, updated_at, completed_at";
+    tiles_total, error, retry_count, created_at, updated_at, completed_at, cancelled_at";
+
+pub async fn reap_stale_jobs(db: &sqlx::PgPool, timeout_seconds: i64) -> Result<u64, sqlx::Error> {
+    let stale_ids: Vec<Uuid> = sqlx::query_scalar(
+        "UPDATE jobs SET status = 'failed', error = 'worker stopped updating this job', updated_at = now()
+         WHERE status = 'processing' AND updated_at < now() - ($1 * interval '1 second')
+         RETURNING id",
+    )
+    .bind(timeout_seconds).fetch_all(db).await?;
+    for job_id in &stale_ids {
+        sqlx::query("SELECT release_job_storage_reservation($1)")
+            .bind(job_id).execute(db).await?;
+    }
+    Ok(stale_ids.len() as u64)
+}
 
 pub async fn list_jobs(
     State(state): State<AppState>,
@@ -97,7 +163,7 @@ pub async fn list_jobs(
     if query
         .status
         .as_deref()
-        .is_some_and(|status| !matches!(status, "queued" | "processing" | "complete" | "failed"))
+        .is_some_and(|status| !matches!(status, "queued" | "processing" | "complete" | "failed" | "cancelled"))
     {
         return Err(ApiError::InvalidField("invalid job status".into()));
     }

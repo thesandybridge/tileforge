@@ -171,6 +171,25 @@ paths:
         '409':
           description: Job is not failed or its source upload has expired
 
+  /api/jobs/{job_id}/cancel:
+    post:
+      tags: [Tiles]
+      summary: Cancel a queued or processing job
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: job_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Job cancelled
+        '409':
+          description: Job is already terminal
+
   /api/tiles/{job_id}/progress:
     get:
       tags: [Tiles]

@@ -111,6 +111,20 @@ async fn init_postgres(url: &str) -> Option<sqlx::PgPool> {
     }
 }
 
+fn spawn_stale_job_reaper(db: sqlx::PgPool) {
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
+        loop {
+            interval.tick().await;
+            match handlers::jobs::reap_stale_jobs(&db, state::STALE_JOB_TIMEOUT_SECS as i64).await {
+                Ok(count) if count > 0 => tracing::warn!(count, "marked stale processing jobs as failed"),
+                Ok(_) => {}
+                Err(error) => tracing::warn!("stale job cleanup failed: {error}"),
+            }
+        }
+    });
+}
+
 async fn init_nats(url: &str) -> Option<async_nats::jetstream::Context> {
     match async_nats::connect(url).await {
         Ok(client) => {
@@ -327,6 +341,13 @@ fn build_router(state: AppState, rate_limit: RateLimit, config: &AppConfig) -> R
                 rate_limit_mutations,
             )),
         )
+        .route(
+            "/api/jobs/{job_id}/cancel",
+            post(jobs::cancel_job).layer(middleware::from_fn_with_state(
+                rate_limit.clone(),
+                rate_limit_mutations,
+            )),
+        )
         // Tilesets
         .route(
             "/api/tilesets",
@@ -402,6 +423,9 @@ async fn main() {
             None
         }
     };
+    if let Some(ref pool) = db {
+        spawn_stale_job_reaper(pool.clone());
+    }
 
     let nats = match config.nats_url {
         Some(ref url) => init_nats(url).await,

@@ -39,12 +39,28 @@ async fn update_persistent_job(db: Option<&PgPool>, job_id: &str, update: Persis
         "UPDATE jobs SET status = $2, progress = $3, tiles_done = COALESCE($4, tiles_done),
          tiles_total = COALESCE($5, tiles_total), error = $6,
          retry_count = COALESCE($7, retry_count), updated_at = now(),
-         completed_at = CASE WHEN $2 = 'complete' THEN now() ELSE completed_at END WHERE id = $1",
+         completed_at = CASE WHEN $2 = 'complete' THEN now() ELSE completed_at END
+         WHERE id = $1 AND status IN ('queued', 'processing')",
     )
     .bind(id).bind(update.status).bind(update.progress.clamp(0, 100))
     .bind(update.tiles_done).bind(update.tiles_total).bind(update.error)
     .bind(update.retry_count).execute(pool).await {
         tracing::warn!(job_id, "failed to persist job status: {error}");
+    }
+}
+
+async fn job_should_stop(db: Option<&PgPool>, job_id: &str) -> bool {
+    let (Some(pool), Ok(id)) = (db, Uuid::parse_str(job_id)) else { return false; };
+    sqlx::query_scalar::<_, String>("SELECT status FROM jobs WHERE id = $1")
+        .bind(id).fetch_optional(pool).await.ok().flatten()
+        .is_some_and(|status| !matches!(status.as_str(), "queued" | "processing"))
+}
+
+async fn release_job_reservation(db: Option<&PgPool>, job_id: &str) {
+    let (Some(pool), Ok(id)) = (db, Uuid::parse_str(job_id)) else { return; };
+    if let Err(error) = sqlx::query("SELECT release_job_storage_reservation($1)")
+        .bind(id).execute(pool).await {
+        tracing::warn!(job_id, "failed to release job storage reservation: {error}");
     }
 }
 
@@ -200,6 +216,13 @@ async fn run_nats_loop(
         let delivery_count = msg.info().map(|i| i.delivered).unwrap_or(1);
         tracing::info!(job_id = %job.job_id, delivery = delivery_count, "processing job");
 
+        if job_should_stop(db, &job.job_id).await {
+            let _ = msg.ack().await;
+            bucket.delete_object(&upload_s3_key(&job.job_id)).await.ok();
+            release_job_reservation(db, &job.job_id).await;
+            continue;
+        }
+
         let result = process_job(&job, bucket, conn, db).await;
 
         match result {
@@ -244,17 +267,7 @@ async fn run_nats_loop(
                     tracing::warn!(job_id = %job.job_id, "max retries reached, terminating");
                     let _ = msg.ack_with(AckKind::Term).await;
                     // Release storage reservation on permanent failure
-                    if let (Some(pool), Some(uid), Some(reserved)) =
-                        (db, &job.user_id, job.reserved_bytes)
-                    {
-                        if let Ok(user_id) = Uuid::parse_str(uid) {
-                            let _ = sqlx::query("SELECT release_storage_reservation($1, $2)")
-                                .bind(user_id)
-                                .bind(reserved)
-                                .execute(pool)
-                                .await;
-                        }
-                    }
+                    release_job_reservation(db, &job.job_id).await;
                 } else {
                     let delay = match delivery_count {
                         1 => Duration::from_secs(30),
@@ -309,6 +322,12 @@ async fn run_redis_loop(
 
         tracing::info!(job_id = %job.job_id, "processing job");
 
+        if job_should_stop(db, &job.job_id).await {
+            bucket.delete_object(&upload_s3_key(&job.job_id)).await.ok();
+            release_job_reservation(db, &job.job_id).await;
+            continue;
+        }
+
         let result = process_job(&job, bucket, conn, db).await;
 
         if let Err(e) = result {
@@ -337,17 +356,7 @@ async fn run_redis_loop(
                 retry_count: Some(1),
             }).await;
             // Release storage reservation on failure
-            if let (Some(pool), Some(uid), Some(reserved)) =
-                (db, &job.user_id, job.reserved_bytes)
-            {
-                if let Ok(user_id) = Uuid::parse_str(uid) {
-                    let _ = sqlx::query("SELECT release_storage_reservation($1, $2)")
-                        .bind(user_id)
-                        .bind(reserved)
-                        .execute(pool)
-                        .await;
-                }
-            }
+            release_job_reservation(db, &job.job_id).await;
         } else {
             bucket.delete_object(&upload_s3_key(&job.job_id)).await.ok();
         }
@@ -557,6 +566,10 @@ async fn process_job(
 
     // Upload both artifacts to S3
     let prefix = tile_s3_prefix(&job.job_id);
+    if job_should_stop(db, &job.job_id).await {
+        release_job_reservation(db, &job.job_id).await;
+        return Ok(());
+    }
     bucket
         .put_object(&format!("{prefix}/tiles.zip"), &zip_bytes)
         .await
@@ -567,6 +580,12 @@ async fn process_job(
         zip_size = zip_bytes.len(),
         "ZIP uploaded to S3"
     );
+
+    if job_should_stop(db, &job.job_id).await {
+        bucket.delete_object(&format!("{prefix}/tiles.zip")).await.ok();
+        release_job_reservation(db, &job.job_id).await;
+        return Ok(());
+    }
 
     bucket
         .put_object(&format!("{prefix}/tiles.pmtiles"), &pmtiles_bytes)
@@ -641,13 +660,7 @@ async fn process_job(
             }
 
             // Release storage reservation (storage_used is updated via trigger on INSERT)
-            if let Some(reserved) = job.reserved_bytes {
-                let _ = sqlx::query("SELECT release_storage_reservation($1, $2)")
-                    .bind(user_id)
-                    .bind(reserved)
-                    .execute(pool)
-                    .await;
-            }
+            release_job_reservation(db, &job.job_id).await;
         }
     }
 

@@ -20,7 +20,7 @@ export interface TileSet {
   source_bounds: number[] | null;
 }
 
-export type JobStatus = "queued" | "processing" | "complete" | "failed";
+export type JobStatus = "queued" | "processing" | "complete" | "failed" | "cancelled";
 
 export interface ProcessingJob {
   id: string;
@@ -35,6 +35,7 @@ export interface ProcessingJob {
   created_at: string;
   updated_at: string;
   completed_at: string | null;
+  cancelled_at: string | null;
 }
 
 export async function listJobs(token: string): Promise<ProcessingJob[]> {
@@ -42,6 +43,22 @@ export async function listJobs(token: string): Promise<ProcessingJob[]> {
     headers: { Authorization: `Bearer ${token}` },
   });
   return handleResponse<ProcessingJob[]>(res);
+}
+
+export async function cancelJob(jobId: string, token: string): Promise<ProcessingJob> {
+  const res = await fetch(`${API_URL}/api/jobs/${encodeURIComponent(jobId)}/cancel`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return handleResponse<ProcessingJob>(res);
+}
+
+export async function retryJob(jobId: string, token: string): Promise<ProcessingJob> {
+  const res = await fetch(`${API_URL}/api/jobs/${encodeURIComponent(jobId)}/retry`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return handleResponse<ProcessingJob>(res);
 }
 
 export interface CreateTileSetInput {

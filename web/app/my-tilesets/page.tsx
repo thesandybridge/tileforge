@@ -11,7 +11,7 @@ import { PLAN_PRO } from "@/lib/plans";
 import { formatBytes, timeAgo } from "@/lib/utils";
 import { useTilesets, useDeleteTileset } from "@/hooks/use-tilesets";
 import { useCurrentUser } from "@/hooks/use-user";
-import { useJobs } from "@/hooks/use-jobs";
+import { useJobActions, useJobs } from "@/hooks/use-jobs";
 import { StorageUsage } from "@/components/storage-usage";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -45,6 +45,7 @@ export default function MyTilesetsPage() {
   const { data: user } = useCurrentUser();
   const deleteTileset = useDeleteTileset();
   const { data: jobs = [] } = useJobs();
+  const jobActions = useJobActions();
   const visibleJobs = jobs.filter(
     (job) => job.status !== "complete" || !tilesets.some((ts) => ts.slug === job.id),
   );
@@ -110,6 +111,19 @@ export default function MyTilesetsPage() {
                           <p className="text-destructive mt-1 line-clamp-2 text-xs">
                             {job.error}
                           </p>
+                        )}
+                        {(active || job.status === "failed") && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="mt-2 h-7"
+                            disabled={jobActions.cancel.isPending || jobActions.retry.isPending}
+                            onClick={() => active
+                              ? jobActions.cancel.mutate(job.id)
+                              : jobActions.retry.mutate(job.id)}
+                          >
+                            {active ? "Cancel" : "Retry"}
+                          </Button>
                         )}
                         <p className="text-muted-foreground mt-1 text-xs">
                           {timeAgo(job.updated_at)}
