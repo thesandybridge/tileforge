@@ -1,7 +1,7 @@
 use image::{DynamicImage, RgbImage};
 use tileforge_core::{
-    BackgroundColor, PmTilesTileWriter, Projection, ScaleMetadata, SharedBuffer, TeeTileWriter,
-    TileConfig, TileFormat, TileWriter, Tiler, ZipTileWriter,
+    BackgroundColor, PmTilesTileWriter, Projection, ScaleMetadata, SharedBuffer, StreamingTiler,
+    TeeTileWriter, TileConfig, TileFormat, TileWriter, Tiler, ZipTileWriter, STREAMING_THRESHOLD,
 };
 use wasm_bindgen::prelude::*;
 
@@ -200,29 +200,34 @@ pub fn process_tiles(
 
 #[wasm_bindgen(js_name = processRgbTiles)]
 pub fn process_rgb_tiles(
-    rgb_bytes: &[u8],
+    rgb_bytes: Vec<u8>,
     width: u32,
     height: u32,
     config: &WasmTileConfig,
     on_progress: &js_sys::Function,
 ) -> Result<Vec<u8>, JsError> {
-    let image = RgbImage::from_raw(width, height, rgb_bytes.to_vec())
+    let use_streaming = rgb_bytes.len() > STREAMING_THRESHOLD;
+    let image = RgbImage::from_raw(width, height, rgb_bytes)
         .ok_or_else(|| JsError::new("GeoTIFF decoder returned incomplete RGB data"))?;
     let core_config = config.to_core_config();
     let format = core_config.format;
-    let tiler = Tiler::new(core_config);
     let mut writer = ZipTileWriter::with_format(std::io::Cursor::new(Vec::new()), format);
     let js_this = JsValue::NULL;
-    tiler
-        .process_image(&DynamicImage::ImageRgb8(image), &mut writer, |p| {
-            let _ = on_progress.call3(
-                &js_this,
-                &p.tiles_done.into(),
-                &p.tiles_total.into(),
-                &p.zoom.into(),
-            );
-        })
-        .map_err(|e| JsError::new(&e.to_string()))?;
+    let image = DynamicImage::ImageRgb8(image);
+    let on_progress = |p: tileforge_core::TileProgress| {
+        let _ = on_progress.call3(
+            &js_this,
+            &p.tiles_done.into(),
+            &p.tiles_total.into(),
+            &p.zoom.into(),
+        );
+    };
+    if use_streaming {
+        StreamingTiler::new(core_config).process_image(&image, &mut writer, on_progress)
+    } else {
+        Tiler::new(core_config).process_image(&image, &mut writer, on_progress)
+    }
+    .map_err(|e| JsError::new(&e.to_string()))?;
     Ok(writer.into_inner().unwrap().into_inner())
 }
 
@@ -290,19 +295,19 @@ pub fn process_tiles_with_pmtiles(
 
 #[wasm_bindgen(js_name = processRgbTilesWithPmtiles)]
 pub fn process_rgb_tiles_with_pmtiles(
-    rgb_bytes: &[u8],
+    rgb_bytes: Vec<u8>,
     width: u32,
     height: u32,
     config: &WasmTileConfig,
     on_progress: &js_sys::Function,
 ) -> Result<TileOutput, JsError> {
-    let image = RgbImage::from_raw(width, height, rgb_bytes.to_vec())
+    let use_streaming = rgb_bytes.len() > STREAMING_THRESHOLD;
+    let image = RgbImage::from_raw(width, height, rgb_bytes)
         .ok_or_else(|| JsError::new("GeoTIFF decoder returned incomplete RGB data"))?;
     let core_config = config.to_core_config();
     let format = core_config.format;
     let min_zoom = core_config.min_zoom.unwrap_or(0) as u8;
     let max_zoom = core_config.max_zoom.unwrap_or(8) as u8;
-    let tiler = Tiler::new(core_config);
     let zip_writer = ZipTileWriter::with_format(std::io::Cursor::new(Vec::new()), format);
     let pmtiles_buffer = SharedBuffer::new();
     let pmtiles_writer =
@@ -310,16 +315,21 @@ pub fn process_rgb_tiles_with_pmtiles(
             .map_err(|e| JsError::new(&e.to_string()))?;
     let mut writer = TeeTileWriter::new(zip_writer, pmtiles_writer);
     let js_this = JsValue::NULL;
-    tiler
-        .process_image(&DynamicImage::ImageRgb8(image), &mut writer, |p| {
-            let _ = on_progress.call3(
-                &js_this,
-                &p.tiles_done.into(),
-                &p.tiles_total.into(),
-                &p.zoom.into(),
-            );
-        })
-        .map_err(|e| JsError::new(&e.to_string()))?;
+    let image = DynamicImage::ImageRgb8(image);
+    let on_progress = |p: tileforge_core::TileProgress| {
+        let _ = on_progress.call3(
+            &js_this,
+            &p.tiles_done.into(),
+            &p.tiles_total.into(),
+            &p.zoom.into(),
+        );
+    };
+    if use_streaming {
+        StreamingTiler::new(core_config).process_image(&image, &mut writer, on_progress)
+    } else {
+        Tiler::new(core_config).process_image(&image, &mut writer, on_progress)
+    }
+    .map_err(|e| JsError::new(&e.to_string()))?;
     writer.finish().map_err(|e| JsError::new(&e.to_string()))?;
     let (zip_writer, _) = writer.into_inner();
     Ok(TileOutput {
