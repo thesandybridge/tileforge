@@ -24,6 +24,9 @@ jobs:
       - name: Run clippy
         run: cargo clippy --workspace --exclude tileforge-wasm -- -D warnings
 
+      - name: Check WASM bridge
+        run: cargo check --package tileforge-wasm
+
   web-checks:
     runs-on: ubuntu-latest
     steps:
