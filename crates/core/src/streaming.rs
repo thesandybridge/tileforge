@@ -6,7 +6,7 @@ use std::io::BufRead;
 use rayon::prelude::*;
 
 use crate::writer::TileWriter;
-use crate::{Projection, TileConfig, TileOutput, TileProgress, Tiler, TilerError};
+use crate::{Projection, TileConfig, TileFormat, TileOutput, TileProgress, Tiler, TilerError};
 
 /// Streaming tiler that processes PNG images row-by-row.
 ///
@@ -26,16 +26,20 @@ struct PyramidState {
     row_counters: Vec<u32>,
     min_zoom: u32,
     tile_size: u32,
+    format: TileFormat,
+    quality: u8,
 }
 
 impl PyramidState {
-    fn new(max_zoom: u32, min_zoom: u32, tile_size: u32) -> Self {
+    fn new(max_zoom: u32, min_zoom: u32, tile_size: u32, format: TileFormat, quality: u8) -> Self {
         let levels = (max_zoom + 1) as usize;
         Self {
             pending: vec![None; levels],
             row_counters: vec![0; levels],
             min_zoom,
             tile_size,
+            format,
+            quality,
         }
     }
 
@@ -72,6 +76,7 @@ impl PyramidState {
                     parent_tile_row,
                     tile,
                     self.tile_size,
+                    (self.format, self.quality),
                 )?;
                 *tiles_done += 1;
                 on_progress(TileProgress {
@@ -144,7 +149,7 @@ impl StreamingTiler {
         let mut tiles_done = 0u32;
 
         // 3. Pyramid state for cascading merges
-        let mut pyramid = PyramidState::new(max_zoom, min_zoom, tile_size);
+        let mut pyramid = PyramidState::new(max_zoom, min_zoom, tile_size, self.config.format, self.config.quality);
 
         // 4. Source row decode state
         let color_type = info.color_type;
@@ -181,7 +186,7 @@ impl StreamingTiler {
                     let tile = RgbaImage::new(tile_size, tile_size);
                     encode_and_write_tile(
                         tile_writer, max_zoom, tile_col, tile_row,
-                        &tile, tile_size,
+                        &tile, tile_size, (self.config.format, self.config.quality),
                     )?;
                     tiles_done += 1;
                     on_progress(TileProgress {
@@ -259,6 +264,7 @@ impl StreamingTiler {
                     tile_row,
                     &tile,
                     tile_size,
+                    (self.config.format, self.config.quality),
                 )?;
 
                 tiles_done += 1;
@@ -334,7 +340,7 @@ impl StreamingTiler {
         let total_tiles = Tiler::calc_total_tiles(min_zoom, max_zoom);
         let mut tiles_done = 0u32;
 
-        let mut pyramid = PyramidState::new(max_zoom, min_zoom, tile_size);
+        let mut pyramid = PyramidState::new(max_zoom, min_zoom, tile_size, self.config.format, self.config.quality);
 
         // Convert to RGBA once — no per-zoom-level resize
         let source = img.to_rgba8();
@@ -358,10 +364,9 @@ impl StreamingTiler {
                         canvas,
                         projection,
                     );
-                    let png_bytes = encode_tile_to_png(&tile, tile_size);
-                    (tile, png_bytes)
+                    crate::tiler::encode_tile(&tile, tile_size, self.config.format, self.config.quality).map(|bytes| (tile, bytes))
                 })
-                .collect();
+                .collect::<Result<_, _>>()?;
 
             #[cfg(not(feature = "parallel"))]
             let row_results: Vec<(RgbaImage, Vec<u8>)> = (0..grid)
@@ -377,10 +382,9 @@ impl StreamingTiler {
                         canvas,
                         projection,
                     );
-                    let png_bytes = encode_tile_to_png(&tile, tile_size);
-                    (tile, png_bytes)
+                    crate::tiler::encode_tile(&tile, tile_size, self.config.format, self.config.quality).map(|bytes| (tile, bytes))
                 })
-                .collect();
+                .collect::<Result<_, _>>()?;
 
             // Write tiles sequentially (TileWriter is not thread-safe)
             let mut row_tiles = Vec::with_capacity(grid as usize);
@@ -509,25 +513,7 @@ fn extract_tile(
 }
 
 /// Encode a tile as PNG bytes (used for parallel encoding).
-fn encode_tile_to_png(tile: &RgbaImage, tile_size: u32) -> Vec<u8> {
-    let mut png_buf = Vec::new();
-    let encoder = image::codecs::png::PngEncoder::new_with_quality(
-        &mut png_buf,
-        image::codecs::png::CompressionType::Fast,
-        image::codecs::png::FilterType::Adaptive,
-    );
-    // This should not fail for valid RGBA data
-    let _ = image::ImageEncoder::write_image(
-        encoder,
-        tile.as_raw(),
-        tile_size,
-        tile_size,
-        image::ExtendedColorType::Rgba8,
-    );
-    png_buf
-}
-
-/// Encode a tile as PNG and write it via the TileWriter.
+/// Encode and write a tile using the configured raster format.
 fn encode_and_write_tile<TW: TileWriter>(
     tile_writer: &mut TW,
     zoom: u32,
@@ -535,9 +521,10 @@ fn encode_and_write_tile<TW: TileWriter>(
     y: u32,
     tile: &RgbaImage,
     tile_size: u32,
+    encoding: (TileFormat, u8),
 ) -> Result<(), TilerError> {
-    let png_buf = encode_tile_to_png(tile, tile_size);
-    tile_writer.write_tile(zoom, x, y, &png_buf)?;
+    let bytes = crate::tiler::encode_tile(tile, tile_size, encoding.0, encoding.1)?;
+    tile_writer.write_tile(zoom, x, y, &bytes)?;
     Ok(())
 }
 

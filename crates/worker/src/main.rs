@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tileforge_core::{
     streaming::should_use_streaming, BackgroundColor, PmTilesTileWriter, Projection, TeeTileWriter,
-    TileConfig, TileProgress, Tiler, ZipTileWriter, STREAMING_THRESHOLD,
+    TileConfig, TileFormat, TileProgress, Tiler, ZipTileWriter, STREAMING_THRESHOLD,
 };
 
 fn unix_now() -> u64 {
@@ -444,6 +444,7 @@ async fn process_job(
         }
         _ => Projection::Flat,
     };
+    let format = match job.format.as_deref() { Some("jpeg" | "jpg") => TileFormat::Jpeg, Some("webp") => TileFormat::Webp, _ => TileFormat::Png };
 
     let config = TileConfig {
         tile_size,
@@ -453,6 +454,8 @@ async fn process_job(
         scale: job.scale,
         background: job.background_color.as_deref().and_then(BackgroundColor::from_hex),
         scale_metadata: None,
+        format,
+        quality: job.quality.unwrap_or(85).clamp(1, 100),
     };
 
     // Shared progress state: the blocking task writes here, a poller reads + publishes to Redis
@@ -524,12 +527,12 @@ async fn process_job(
         let tiler = Tiler::new(config);
 
         // ZIP writer: in-memory
-        let zip_writer = ZipTileWriter::new(Cursor::new(Vec::new()));
+        let zip_writer = ZipTileWriter::with_format(Cursor::new(Vec::new()), format);
 
         // PMTiles writer: tempfile (finalize() consumes the writer)
         let tmp = tempfile::NamedTempFile::new()?;
         let file = tmp.reopen()?;
-        let pmtiles_writer = PmTilesTileWriter::new(file, min_zoom as u8, max_zoom as u8)?;
+        let pmtiles_writer = PmTilesTileWriter::with_format(file, min_zoom as u8, max_zoom as u8, format)?;
 
         let mut tee = TeeTileWriter::new(zip_writer, pmtiles_writer);
         let last_write = Cell::new(Instant::now());
@@ -633,8 +636,8 @@ async fn process_job(
             let height_i32 = img_height as i32;
 
             let result = sqlx::query(
-                "INSERT INTO tile_sets (user_id, name, slug, projection, tile_size, min_zoom, max_zoom, tile_count, size_bytes, storage_path, public, width, height, source_epsg, source_bounds)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, false, $11, $12, $13, $14)
+                "INSERT INTO tile_sets (user_id, name, slug, projection, tile_size, min_zoom, max_zoom, tile_count, size_bytes, storage_path, public, width, height, source_epsg, source_bounds, tile_format, tile_quality)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, false, $11, $12, $13, $14, $15, $16)
                  ON CONFLICT (user_id, slug) DO NOTHING",
             )
             .bind(user_id)
@@ -651,6 +654,8 @@ async fn process_job(
             .bind(height_i32)
             .bind(source_metadata.as_ref().and_then(|metadata| metadata.epsg).map(i32::from))
             .bind(source_metadata.as_ref().and_then(|metadata| metadata.bounds.map(Vec::from)))
+            .bind(job.format.as_deref().unwrap_or("png"))
+            .bind(i16::from(job.quality.unwrap_or(85).clamp(1, 100)))
             .execute(pool)
             .await;
 

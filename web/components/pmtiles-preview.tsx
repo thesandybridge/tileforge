@@ -13,6 +13,7 @@ interface PmtilesPreviewProps {
   maxZoom: number;
   tileSize: number;
   projection: "flat" | "mercator" | "isometric";
+  format: "png" | "jpeg" | "webp";
 }
 
 function PmtilesTileLayer({
@@ -20,11 +21,13 @@ function PmtilesTileLayer({
   tileSize,
   maxZoom,
   projection,
+  format,
 }: {
   pmtilesUrl: string;
   tileSize: number;
   maxZoom: number;
   projection: "flat" | "mercator" | "isometric";
+  format: "png" | "jpeg" | "webp";
 }) {
   const map = useMap();
   const layerRef = useRef<L.GridLayer | null>(null);
@@ -50,7 +53,7 @@ function PmtilesTileLayer({
 
           pm.getZxy(coords.z, coords.x, coords.y).then((result) => {
             if (result && result.data) {
-              const blob = new Blob([result.data], { type: "image/png" });
+              const blob = new Blob([result.data], { type: `image/${format}` });
               const url = URL.createObjectURL(blob);
               blobUrls.push(url);
               tile.src = url;
@@ -96,7 +99,7 @@ function PmtilesTileLayer({
       }
       pmtilesRef.current = null;
     };
-  }, [map, pmtilesUrl, tileSize, maxZoom, projection]);
+  }, [map, pmtilesUrl, tileSize, maxZoom, projection, format]);
 
   return null;
 }
@@ -108,6 +111,7 @@ export default function PmtilesPreview({
   maxZoom,
   tileSize,
   projection,
+  format,
 }: PmtilesPreviewProps) {
   const isMercator = projection === "mercator";
 
@@ -133,6 +137,7 @@ export default function PmtilesPreview({
             tileSize={tileSize}
             maxZoom={maxZoom}
             projection={projection}
+            format={format}
           />
         </MapContainer>
       </div>
@@ -164,6 +169,7 @@ export default function PmtilesPreview({
           tileSize={tileSize}
           maxZoom={maxZoom}
           projection={projection}
+          format={format}
         />
       </MapContainer>
     </div>

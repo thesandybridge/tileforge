@@ -321,6 +321,8 @@ tileforge <IMAGE> [OPTIONS]
 | `--min-zoom <N>` | `0` | Minimum zoom level |
 | `--max-zoom <N>` | auto | Maximum zoom level (calculated from image dimensions) |
 | `--projection <TYPE>` | `flat` | `flat` or `mercator` |
+| `--format <FORMAT>` | `png` | `png`, `jpeg`, or `webp` tile encoding |
+| `--quality <1-100>` | `85` | JPEG quality; ignored for PNG and lossless WebP |
 | `--streaming` | | Force streaming mode (lower memory) |
 | `--naive` | | Force naive mode (faster for small images) |
 

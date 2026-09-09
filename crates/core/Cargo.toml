@@ -9,7 +9,7 @@ parallel = ["rayon"]
 tiff = ["image/tiff", "dep:tiff"]
 
 [dependencies]
-image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
 png = "0.18"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 pmtiles = { version = "=0.19.2", default-features = false, features = ["write"] }

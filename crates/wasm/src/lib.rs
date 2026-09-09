@@ -1,6 +1,6 @@
 use tileforge_core::{
     BackgroundColor, PmTilesTileWriter, Projection, ScaleMetadata, SharedBuffer, TeeTileWriter,
-    TileConfig, TileWriter, Tiler, ZipTileWriter,
+    TileConfig, TileFormat, TileWriter, Tiler, ZipTileWriter,
 };
 use wasm_bindgen::prelude::*;
 
@@ -16,6 +16,8 @@ pub struct WasmTileConfig {
     scale_mode: Option<String>,
     scale_value: Option<f64>,
     scale_unit: Option<String>,
+    format: TileFormat,
+    quality: u8,
 }
 
 #[wasm_bindgen]
@@ -32,6 +34,8 @@ impl WasmTileConfig {
             scale_mode: None,
             scale_value: None,
             scale_unit: None,
+            format: TileFormat::Png,
+            quality: 85,
         }
     }
 
@@ -62,6 +66,12 @@ impl WasmTileConfig {
     pub fn set_background_color(&mut self, hex: String) {
         self.background_color = Some(hex);
     }
+
+    #[wasm_bindgen(js_name = setFormat)]
+    pub fn set_format(&mut self, format: u8) { self.format = match format { 1 => TileFormat::Jpeg, 2 => TileFormat::Webp, _ => TileFormat::Png }; }
+
+    #[wasm_bindgen(js_name = setQuality)]
+    pub fn set_quality(&mut self, quality: u8) { self.quality = quality.clamp(1, 100); }
 
     /// Set scale metadata mode: "pixels_per_unit" or "units_per_tile".
     #[wasm_bindgen(js_name = setScaleMode)]
@@ -115,6 +125,8 @@ impl WasmTileConfig {
             scale: self.scale,
             background,
             scale_metadata,
+            format: self.format,
+            quality: self.quality,
         }
     }
 }
@@ -158,9 +170,10 @@ pub fn process_tiles(
     on_progress: &js_sys::Function,
 ) -> Result<Vec<u8>, JsError> {
     let core_config = config.to_core_config();
+    let format = core_config.format;
     let tiler = Tiler::new(core_config);
     let buf = std::io::Cursor::new(Vec::new());
-    let mut zip_writer = ZipTileWriter::new(buf);
+    let mut zip_writer = ZipTileWriter::with_format(buf, format);
 
     let js_this = JsValue::NULL;
     tiler
@@ -186,6 +199,7 @@ pub fn process_tiles_with_pmtiles(
     on_progress: &js_sys::Function,
 ) -> Result<TileOutput, JsError> {
     let core_config = config.to_core_config();
+    let format = core_config.format;
     let min_zoom = core_config.min_zoom.unwrap_or(0) as u8;
 
     // Calculate max zoom if not specified - use a reasonable default
@@ -196,11 +210,11 @@ pub fn process_tiles_with_pmtiles(
 
     // Create ZIP writer
     let zip_buf = std::io::Cursor::new(Vec::new());
-    let zip_writer = ZipTileWriter::new(zip_buf);
+    let zip_writer = ZipTileWriter::with_format(zip_buf, format);
 
     // Create PMTiles writer with SharedBuffer so we can extract bytes after finalize
     let pmtiles_buffer = SharedBuffer::new();
-    let pmtiles_writer = PmTilesTileWriter::new(pmtiles_buffer.cursor(), min_zoom, max_zoom)
+    let pmtiles_writer = PmTilesTileWriter::with_format(pmtiles_buffer.cursor(), min_zoom, max_zoom, format)
         .map_err(|e| JsError::new(&e.to_string()))?;
 
     // Create tee writer to write to both

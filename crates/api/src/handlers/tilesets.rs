@@ -15,7 +15,7 @@ use tileforge_shared::{progress_key, tile_s3_prefix};
 
 const TILESET_COLUMNS: &str =
     "id, user_id, name, slug, projection, tile_size, min_zoom, max_zoom, \
-     tile_count, size_bytes, storage_path, public, created_at, width, height, source_epsg, source_bounds";
+     tile_count, size_bytes, storage_path, public, created_at, width, height, source_epsg, source_bounds, tile_format, tile_quality";
 
 #[derive(Serialize, sqlx::FromRow, utoipa::ToSchema)]
 pub struct TileSetRow {
@@ -36,6 +36,8 @@ pub struct TileSetRow {
     pub height: Option<i32>,
     pub source_epsg: Option<i32>,
     pub source_bounds: Option<Vec<f64>>,
+    pub tile_format: String,
+    pub tile_quality: i16,
 }
 
 #[derive(Deserialize)]
@@ -50,6 +52,8 @@ pub struct CreateTileSet {
     size_bytes: i64,
     storage_path: String,
     public: Option<bool>,
+    tile_format: Option<String>,
+    tile_quality: Option<i16>,
 }
 
 #[derive(Deserialize)]
@@ -100,6 +104,8 @@ fn validate_create(body: &CreateTileSet) -> Result<Uuid, ApiError> {
     if !matches!(body.tile_size.unwrap_or(256), 128 | 256 | 512) {
         return Err(ApiError::InvalidField("tile_size must be 128, 256, or 512".into()));
     }
+    if !matches!(body.tile_format.as_deref().unwrap_or("png"), "png" | "jpeg" | "webp") { return Err(ApiError::InvalidField("invalid tile_format".into())); }
+    if !(1..=100).contains(&body.tile_quality.unwrap_or(85)) { return Err(ApiError::InvalidField("tile_quality must be between 1 and 100".into())); }
     let min_zoom = body.min_zoom.unwrap_or(0);
     if min_zoom < 0 || body.max_zoom < min_zoom || body.max_zoom > 12 {
         return Err(ApiError::InvalidField("zoom range must be between 0 and 12".into()));
@@ -201,8 +207,8 @@ pub async fn create_tileset(
     }
 
     let row = sqlx::query_as::<_, TileSetRow>(&format!(
-        "INSERT INTO tile_sets (user_id, name, slug, projection, tile_size, min_zoom, max_zoom, tile_count, size_bytes, storage_path, public)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        "INSERT INTO tile_sets (user_id, name, slug, projection, tile_size, min_zoom, max_zoom, tile_count, size_bytes, storage_path, public, tile_format, tile_quality)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
          RETURNING {TILESET_COLUMNS}",
     ))
     .bind(user_id)
@@ -216,6 +222,8 @@ pub async fn create_tileset(
     .bind(actual_size)
     .bind(&body.storage_path)
     .bind(body.public.unwrap_or(false))
+    .bind(body.tile_format.as_deref().unwrap_or("png"))
+    .bind(body.tile_quality.unwrap_or(85))
     .fetch_one(&db)
     .await
     .map_err(|e| {
@@ -490,6 +498,8 @@ mod tests {
             size_bytes: 1024,
             storage_path: "tiles/550e8400-e29b-41d4-a716-446655440000".into(),
             public: Some(false),
+            tile_format: Some("png".into()),
+            tile_quality: Some(85),
         }
     }
 

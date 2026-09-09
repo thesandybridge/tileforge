@@ -24,6 +24,8 @@ export type WorkerRequest =
       scaleMetadata?: ScaleMetadata;
       /** Whether to also generate PMTiles output */
       includePmtiles?: boolean;
+      format?: "png" | "jpeg" | "webp";
+      quality?: number;
     };
 
 /** Messages sent from the worker to the main thread */

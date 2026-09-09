@@ -13,6 +13,7 @@ interface TilePreviewProps {
   maxZoom: number;
   tileSize: number;
   projection: "flat" | "mercator" | "isometric";
+  format: "png" | "jpeg" | "webp";
 }
 
 function BlobTileLayer({
@@ -20,11 +21,13 @@ function BlobTileLayer({
   tileSize,
   maxZoom,
   projection,
+  format,
 }: {
   tiles: Map<string, string>;
   tileSize: number;
   maxZoom: number;
   projection: "flat" | "mercator" | "isometric";
+  format: "png" | "jpeg" | "webp";
 }) {
   const map = useMap();
   const layerRef = useRef<L.GridLayer | null>(null);
@@ -46,7 +49,8 @@ function BlobTileLayer({
             "img",
             "leaflet-tile",
           ) as HTMLImageElement;
-          const key = `${coords.z}/${coords.x}/${coords.y}.png`;
+          const extension = format === "jpeg" ? "jpg" : format;
+          const key = `${coords.z}/${coords.x}/${coords.y}.${extension}`;
           const url = tiles.get(key);
           if (url) {
             tile.src = url;
@@ -85,7 +89,7 @@ function BlobTileLayer({
         layerRef.current = null;
       }
     };
-  }, [map, tiles, tileSize, maxZoom, projection]);
+  }, [map, tiles, tileSize, maxZoom, projection, format]);
 
   return null;
 }
@@ -97,6 +101,7 @@ export default function TilePreview({
   maxZoom,
   tileSize,
   projection,
+  format,
 }: TilePreviewProps) {
   const [tiles, setTiles] = useState<Map<string, string> | null>(null);
   const tilesRef = useRef<Map<string, string> | null>(null);
@@ -109,7 +114,7 @@ export default function TilePreview({
       const map = new Map<string, string>();
       for (const [path, data] of Object.entries(files)) {
         if (data.length > 0) {
-          const blob = new Blob([data.slice()], { type: "image/png" });
+          const blob = new Blob([data.slice()], { type: `image/${format}` });
           map.set(path, URL.createObjectURL(blob));
         }
       }
@@ -126,7 +131,7 @@ export default function TilePreview({
         tilesRef.current = null;
       }
     };
-  }, [zipBlob]);
+  }, [zipBlob, format]);
 
   if (!tiles) {
     return (
@@ -154,7 +159,7 @@ export default function TilePreview({
           style={{ aspectRatio: "1 / 1", width: "100%", background: "var(--background)" }}
           attributionControl={false}
         >
-          <BlobTileLayer tiles={tiles} tileSize={tileSize} maxZoom={maxZoom} projection={projection} />
+      <BlobTileLayer tiles={tiles} tileSize={tileSize} maxZoom={maxZoom} projection={projection} format={format} />
         </MapContainer>
       </div>
     );

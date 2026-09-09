@@ -12,7 +12,7 @@ use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
 use std::io::Cursor;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tileforge_core::{streaming::should_use_streaming, BackgroundColor, Projection, TileConfig, Tiler, ZipTileWriter, STREAMING_THRESHOLD};
+use tileforge_core::{streaming::should_use_streaming, BackgroundColor, Projection, TileConfig, TileFormat, Tiler, ZipTileWriter, STREAMING_THRESHOLD};
 use sqlx::PgPool;
 use tileforge_shared::{
     progress_key, tile_s3_prefix, upload_s3_key, JobProgress, TileJob,
@@ -35,6 +35,8 @@ pub struct TileParams {
     file_name: Option<String>,
     scale: Option<f64>,
     background_color: Option<String>,
+    format: Option<String>,
+    quality: Option<u8>,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -53,7 +55,7 @@ fn parse_projection(s: &str) -> Result<Projection, ApiError> {
     }
 }
 
-fn validate_tile_params(params: &TileParams) -> Result<(u32, Projection), ApiError> {
+fn validate_tile_params(params: &TileParams) -> Result<(u32, Projection, TileFormat, u8), ApiError> {
     let tile_size = params.tile_size.unwrap_or(256);
     if !matches!(tile_size, 128 | 256 | 512) {
         return Err(ApiError::InvalidField("tile_size must be 128, 256, or 512".into()));
@@ -66,7 +68,10 @@ fn validate_tile_params(params: &TileParams) -> Result<(u32, Projection), ApiErr
         }
     }
     let projection = parse_projection(params.projection.as_deref().unwrap_or("flat"))?;
-    Ok((tile_size, projection))
+    let format = match params.format.as_deref().unwrap_or("png") { "png" => TileFormat::Png, "jpeg" | "jpg" => TileFormat::Jpeg, "webp" => TileFormat::Webp, _ => return Err(ApiError::InvalidField("format must be 'png', 'jpeg', or 'webp'".into())) };
+    let quality = params.quality.unwrap_or(85);
+    if !(1..=100).contains(&quality) { return Err(ApiError::InvalidField("quality must be between 1 and 100".into())); }
+    Ok((tile_size, projection, format, quality))
 }
 
 fn validate_idempotency_key(key: Option<&str>) -> Result<Option<&str>, ApiError> {
@@ -130,6 +135,8 @@ async fn enqueue_async(
             "projection": job.projection,
             "scale": job.scale,
             "background_color": job.background_color,
+            "format": job.format,
+            "quality": job.quality,
         });
         let inserted: Option<(Uuid,)> = sqlx::query_as(
             "INSERT INTO jobs (id, user_id, status, file_name, parameters, payload, idempotency_key)
@@ -230,20 +237,12 @@ async fn enqueue_async(
     Ok((StatusCode::ACCEPTED, Json(AcceptedResponse { job_id })).into_response())
 }
 
-fn process_sync(body: Bytes, tile_size: u32, min_zoom: Option<u32>, max_zoom: Option<u32>, projection: Projection, scale: Option<f64>, background_color: Option<String>) -> Result<Vec<u8>, ApiError> {
+fn process_sync(body: Bytes, config: TileConfig) -> Result<Vec<u8>, ApiError> {
     let image_bytes = body.to_vec();
-    let config = TileConfig {
-        tile_size,
-        min_zoom,
-        max_zoom,
-        projection,
-        scale,
-        background: background_color.as_deref().and_then(BackgroundColor::from_hex),
-        scale_metadata: None,
-    };
+    let format = config.format;
     let tiler = Tiler::new(config);
     let buf = Cursor::new(Vec::new());
-    let mut zip_writer = ZipTileWriter::new(buf);
+    let mut zip_writer = ZipTileWriter::with_format(buf, format);
     tiler
         .process_bytes(&image_bytes, &mut zip_writer, |_| {})
         .map_err(|e| ApiError::Processing(e.to_string()))?;
@@ -278,7 +277,7 @@ pub async fn process_tiles(
         return Err(ApiError::ImageTooLarge { limit: state.max_upload_bytes });
     }
 
-    let (tile_size, projection) = validate_tile_params(&params)?;
+    let (tile_size, projection, format, quality) = validate_tile_params(&params)?;
     let projection_str = params.projection.as_deref().unwrap_or("flat");
 
     let is_pro = claims.0.as_ref().is_some_and(|c| c.plan == Plan::Pro);
@@ -319,6 +318,8 @@ pub async fn process_tiles(
             reserved_bytes,
             scale: params.scale,
             background_color: params.background_color.clone(),
+            format: params.format.clone(),
+            quality: params.quality,
         };
         return enqueue_async(&state, &body, job, idempotency_key).await;
     }
@@ -328,8 +329,9 @@ pub async fn process_tiles(
     let max_zoom = params.max_zoom;
     let scale = params.scale;
     let background_color = params.background_color.clone();
+    let config = TileConfig { tile_size, min_zoom, max_zoom, projection, scale, background: background_color.as_deref().and_then(BackgroundColor::from_hex), scale_metadata: None, format, quality };
     let zip_bytes = tokio::task::spawn_blocking(move || {
-        process_sync(body, tile_size, min_zoom, max_zoom, projection, scale, background_color)
+        process_sync(body, config)
     })
     .await
     .map_err(|e| ApiError::Processing(format!("task join error: {e}")))?;
@@ -578,6 +580,8 @@ mod tests {
             file_name: None,
             scale: None,
             background_color: None,
+            format: None,
+            quality: None,
         }
     }
 
@@ -593,9 +597,11 @@ mod tests {
 
     #[test]
     fn default_params() {
-        let (size, proj) = validate_tile_params(&params(None, None, None)).unwrap();
+        let (size, proj, format, quality) = validate_tile_params(&params(None, None, None)).unwrap();
         assert_eq!(size, 256);
         assert!(matches!(proj, Projection::Flat));
+        assert_eq!(format, TileFormat::Png);
+        assert_eq!(quality, 85);
     }
 
     #[test]
@@ -649,7 +655,7 @@ mod tests {
 
     #[test]
     fn projection_from_params() {
-        let (_, proj) = validate_tile_params(&params(None, None, Some("mercator"))).unwrap();
+        let (_, proj, _, _) = validate_tile_params(&params(None, None, Some("mercator"))).unwrap();
         assert!(matches!(proj, Projection::Mercator));
     }
 
@@ -665,7 +671,7 @@ mod tests {
         img.write_to(&mut buf, image::ImageFormat::Png).unwrap();
         let bytes = Bytes::from(buf.into_inner());
 
-        let result = process_sync(bytes, 256, None, None, Projection::Flat, None, None);
+        let result = process_sync(bytes, TileConfig::default());
         assert!(result.is_ok());
         let zip_bytes = result.unwrap();
         assert!(!zip_bytes.is_empty());

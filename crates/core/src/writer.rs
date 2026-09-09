@@ -4,7 +4,7 @@ use std::rc::Rc;
 use zip::write::SimpleFileOptions;
 use zip::ZipWriter;
 
-use crate::TilerError;
+use crate::{TileFormat, TilerError};
 
 /// A shared buffer that can be used with writers that consume ownership.
 /// After the writer is done, the buffer contents can be extracted.
@@ -104,6 +104,7 @@ pub struct ZipTileWriter<W: Write + Seek> {
     zip: Option<ZipWriter<W>>,
     inner: Option<W>,
     options: SimpleFileOptions,
+    extension: &'static str,
 }
 
 impl<W: Write + Seek> ZipTileWriter<W> {
@@ -113,7 +114,14 @@ impl<W: Write + Seek> ZipTileWriter<W> {
             inner: None,
             options: SimpleFileOptions::default()
                 .compression_method(zip::CompressionMethod::Stored),
+            extension: "png",
         }
+    }
+
+    pub fn with_format(writer: W, format: TileFormat) -> Self {
+        let mut value = Self::new(writer);
+        value.extension = format.extension();
+        value
     }
 
     /// Consume the writer and return the underlying `W` (available after `finish()`).
@@ -124,7 +132,7 @@ impl<W: Write + Seek> ZipTileWriter<W> {
 
 impl<W: Write + Seek> TileWriter for ZipTileWriter<W> {
     fn write_tile(&mut self, zoom: u32, x: u32, y: u32, png_bytes: &[u8]) -> Result<(), TilerError> {
-        let path = format!("{zoom}/{x}/{y}.png");
+        let path = format!("{zoom}/{x}/{y}.{}", self.extension);
         let zip = self.zip.as_mut().expect("write_tile called after finish");
         zip.start_file(&path, self.options)?;
         zip.write_all(png_bytes)?;
@@ -183,7 +191,12 @@ pub struct PmTilesTileWriter<W: Write + Seek> {
 
 impl<W: Write + Seek> PmTilesTileWriter<W> {
     pub fn new(writer: W, min_zoom: u8, max_zoom: u8) -> Result<Self, TilerError> {
-        let stream_writer = pmtiles::PmTilesWriter::new(pmtiles::TileType::Png)
+        Self::with_format(writer, min_zoom, max_zoom, TileFormat::Png)
+    }
+
+    pub fn with_format(writer: W, min_zoom: u8, max_zoom: u8, format: TileFormat) -> Result<Self, TilerError> {
+        let tile_type = match format { TileFormat::Png => pmtiles::TileType::Png, TileFormat::Jpeg => pmtiles::TileType::Jpeg, TileFormat::Webp => pmtiles::TileType::Webp };
+        let stream_writer = pmtiles::PmTilesWriter::new(tile_type)
             .tile_compression(pmtiles::Compression::None)
             .internal_compression(pmtiles::Compression::Gzip)
             .min_zoom(min_zoom)

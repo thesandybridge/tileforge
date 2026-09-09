@@ -1,7 +1,7 @@
 use clap::{Parser, Subcommand};
 use std::fs;
 use std::path::PathBuf;
-use tileforge_core::{StreamingTiler, TileConfig, Tiler, ZipTileWriter};
+use tileforge_core::{StreamingTiler, TileConfig, TileFormat, Tiler, ZipTileWriter};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use rand::{rngs::OsRng, RngCore};
@@ -91,6 +91,10 @@ struct CloudSubmitArgs {
     max_zoom: Option<u32>,
     #[arg(long)]
     projection: Option<String>,
+    #[arg(long, value_parser = ["png", "jpeg", "webp"], default_value = "png")]
+    format: String,
+    #[arg(long, default_value_t = 85, value_parser = clap::value_parser!(u8).range(1..=100))]
+    quality: u8,
     /// Stable key used to make repeated submissions safe
     #[arg(long)]
     idempotency_key: Option<String>,
@@ -146,6 +150,12 @@ struct TilesArgs {
     /// Map projection: flat (equirectangular) or mercator (Web Mercator)
     #[arg(long, default_value = "flat")]
     projection: String,
+    /// Tile encoding: png, jpeg, or webp
+    #[arg(long, value_parser = ["png", "jpeg", "webp"], default_value = "png")]
+    format: String,
+    /// JPEG quality (1-100); ignored for PNG and lossless WebP
+    #[arg(long, default_value_t = 85, value_parser = clap::value_parser!(u8).range(1..=100))]
+    quality: u8,
 }
 
 #[derive(Parser)]
@@ -251,6 +261,8 @@ fn run_cloud(args: CloudArgs) {
                 if let Some(value) = submit.min_zoom { query.append_pair("min_zoom", &value.to_string()); }
                 if let Some(value) = submit.max_zoom { query.append_pair("max_zoom", &value.to_string()); }
                 if let Some(value) = submit.projection.as_deref() { query.append_pair("projection", value); }
+                query.append_pair("format", &submit.format);
+                query.append_pair("quality", &submit.quality.to_string());
             }
             let mut request = cloud_request(&client, reqwest::Method::POST, url.as_str(), &api_key)
                 .header(reqwest::header::CONTENT_TYPE, "application/octet-stream").body(bytes);
@@ -453,13 +465,15 @@ fn run_tiles(args: TilesArgs) {
         scale: None,
         background: None,
         scale_metadata: None,
+        format: match args.format.as_str() { "jpeg" => TileFormat::Jpeg, "webp" => TileFormat::Webp, _ => TileFormat::Png },
+        quality: args.quality,
     };
 
     let file = fs::File::create(&args.output).unwrap_or_else(|e| {
         eprintln!("Failed to create {}: {e}", args.output.display());
         std::process::exit(1);
     });
-    let mut zip_writer = ZipTileWriter::new(file);
+    let mut zip_writer = ZipTileWriter::with_format(file, config.format);
 
     let output = if args.streaming {
         let is_png = tileforge_core::streaming::read_png_dimensions(&bytes).is_some();

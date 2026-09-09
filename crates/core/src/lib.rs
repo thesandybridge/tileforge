@@ -7,7 +7,7 @@ pub mod geotiff;
 
 pub use streaming::{is_tiff, StreamingTiler};
 pub use tiler::{
-    BackgroundColor, Projection, ScaleMetadata, TileConfig, TileOutput, TileProgress, Tiler,
+    BackgroundColor, Projection, ScaleMetadata, TileConfig, TileFormat, TileOutput, TileProgress, Tiler,
     TilerError, STREAMING_THRESHOLD,
 };
 pub use writer::{PmTilesTileWriter, SharedBuffer, TeeTileWriter, TileWriter, ZipTileWriter};

@@ -18,6 +18,8 @@ export interface TileSet {
   height: number | null;
   source_epsg: number | null;
   source_bounds: number[] | null;
+  tile_format: "png" | "jpeg" | "webp";
+  tile_quality: number;
 }
 
 export type JobStatus = "queued" | "processing" | "complete" | "failed" | "cancelled";
@@ -72,6 +74,8 @@ export interface CreateTileSetInput {
   size_bytes: number;
   storage_path: string;
   public?: boolean;
+  tile_format?: "png" | "jpeg" | "webp";
+  tile_quality?: number;
 }
 
 export interface UpdateTileSetInput {

@@ -315,6 +315,7 @@ const map = new maplibregl.Map({
               maxZoom={tileset.max_zoom}
               tileSize={tileset.tile_size}
               projection={tileset.projection as "flat" | "mercator"}
+              format={tileset.tile_format}
             />
           ) : (
             <Button

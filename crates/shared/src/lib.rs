@@ -55,6 +55,10 @@ pub struct TileJob {
     pub scale: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub background_color: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub format: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub quality: Option<u8>,
 }
 
 // ---------------------------------------------------------------------------
@@ -118,6 +122,8 @@ mod tests {
             reserved_bytes: None,
             scale: None,
             background_color: None,
+            format: None,
+            quality: None,
         };
         let json = serde_json::to_string(&job).unwrap();
         let parsed: TileJob = serde_json::from_str(&json).unwrap();

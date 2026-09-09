@@ -131,6 +131,8 @@ interface FormState {
   scale: number | null;
   backgroundColor: string | null;
   includePmtiles: boolean;
+  format: "png" | "jpeg" | "webp";
+  quality: number;
   // Scale metadata for measurements
   scaleMode: "none" | "pixels_per_unit" | "units_per_tile";
   scaleValue: number;
@@ -148,6 +150,8 @@ type FormAction =
   | { type: "SCALE_CHANGED"; scale: number | null }
   | { type: "BACKGROUND_COLOR_CHANGED"; backgroundColor: string | null }
   | { type: "INCLUDE_PMTILES_CHANGED"; includePmtiles: boolean }
+  | { type: "FORMAT_CHANGED"; format: "png" | "jpeg" | "webp" }
+  | { type: "QUALITY_CHANGED"; quality: number }
   | { type: "SCALE_MODE_CHANGED"; scaleMode: "none" | "pixels_per_unit" | "units_per_tile" }
   | { type: "SCALE_VALUE_CHANGED"; scaleValue: number }
   | { type: "SCALE_UNIT_CHANGED"; scaleUnit: string }
@@ -169,6 +173,8 @@ const initialFormState: FormState = {
   scale: null,
   backgroundColor: null,
   includePmtiles: true,
+  format: "png",
+  quality: 85,
   scaleMode: "none",
   scaleValue: 1,
   scaleUnit: "meters",
@@ -206,6 +212,10 @@ function formReducer(state: FormState, action: FormAction): FormState {
       return { ...state, backgroundColor: action.backgroundColor };
     case "INCLUDE_PMTILES_CHANGED":
       return { ...state, includePmtiles: action.includePmtiles };
+    case "FORMAT_CHANGED":
+      return { ...state, format: action.format };
+    case "QUALITY_CHANGED":
+      return { ...state, quality: action.quality };
     case "SCALE_MODE_CHANGED":
       return { ...state, scaleMode: action.scaleMode };
     case "SCALE_VALUE_CHANGED":
@@ -327,13 +337,15 @@ export default function Home() {
       scale: form.scale ?? undefined,
       backgroundColor: form.backgroundColor ?? undefined,
       scaleMetadata,
+      format: form.format,
+      quality: form.quality,
     };
     if (form.mode === "server") {
       processServer(copy, { ...baseOpts, token: session?.accessToken });
     } else {
       process(copy, { ...baseOpts, includePmtiles: form.includePmtiles });
     }
-  }, [process, processServer, form.tileSize, form.minZoom, form.maxZoom, form.projection, form.mode, form.fileName, form.scale, form.backgroundColor, form.includePmtiles, form.scaleMode, form.scaleValue, form.scaleUnit, session?.accessToken]);
+  }, [process, processServer, form.tileSize, form.minZoom, form.maxZoom, form.projection, form.mode, form.fileName, form.scale, form.backgroundColor, form.includePmtiles, form.scaleMode, form.scaleValue, form.scaleUnit, form.format, form.quality, session?.accessToken]);
 
   const onDownload = useCallback(() => {
     if (!zipBlob) return;
@@ -376,8 +388,10 @@ export default function Home() {
       projection: form.projection,
       token: session?.accessToken,
       concurrency,
+      format: form.format,
+      quality: form.quality,
     });
-  }, [processQueue, form.tileSize, form.minZoom, form.maxZoom, form.projection, session?.accessToken, session?.user?.plan]);
+  }, [processQueue, form.tileSize, form.minZoom, form.maxZoom, form.projection, form.format, form.quality, session?.accessToken, session?.user?.plan]);
 
   const onReset = useCallback(() => {
     fileRef.current = null;
@@ -714,7 +728,32 @@ export default function Home() {
                   Advanced Options
                 </summary>
                 <div className="mt-4 space-y-4">
-                  <div className="grid gap-4 sm:grid-cols-3">
+                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                    <div className="space-y-2">
+                      <label className="text-muted-foreground text-xs font-medium uppercase tracking-wider">Tile encoding</label>
+                      <Select value={form.format} onValueChange={(value) => dispatch({ type: "FORMAT_CHANGED", format: value as "png" | "jpeg" | "webp" })}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="png">PNG</SelectItem>
+                          <SelectItem value="jpeg">JPEG</SelectItem>
+                          <SelectItem value="webp">WebP (lossless)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {form.format === "jpeg" && (
+                      <div className="space-y-2">
+                        <label className="text-muted-foreground text-xs font-medium uppercase tracking-wider">JPEG quality</label>
+                        <Select value={String(form.quality)} onValueChange={(value) => dispatch({ type: "QUALITY_CHANGED", quality: Number(value) })}>
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="70">70 · Smaller</SelectItem>
+                            <SelectItem value="85">85 · Balanced</SelectItem>
+                            <SelectItem value="95">95 · Highest</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
                     {/* Pre-scale */}
                     <div className="space-y-2">
                       <label className="text-muted-foreground flex items-center gap-1 text-xs font-medium uppercase tracking-wider">
@@ -1035,7 +1074,8 @@ export default function Home() {
               imageHeight={form.imageInfo?.height ?? form.tileSize * (1 << form.maxZoom)}
               maxZoom={form.maxZoom}
               tileSize={form.tileSize}
-              projection={form.projection}
+            projection={form.projection}
+            format={form.format}
           />
         </div>
       )}

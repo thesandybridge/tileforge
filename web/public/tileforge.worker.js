@@ -35,6 +35,9 @@ function process(msg) {
     // New options
     if (msg.scale !== undefined) config.setScale(msg.scale);
     if (msg.backgroundColor) config.setBackgroundColor(msg.backgroundColor);
+    if (msg.format === "jpeg") config.setFormat(1);
+    else if (msg.format === "webp") config.setFormat(2);
+    if (msg.quality !== undefined) config.setQuality(msg.quality);
 
     // Scale metadata
     if (msg.scaleMetadata) {

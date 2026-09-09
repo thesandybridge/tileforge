@@ -47,6 +47,8 @@ export interface ProcessOpts {
   scaleMetadata?: ScaleMetadata;
   /** Whether to also generate PMTiles output (WASM only) */
   includePmtiles?: boolean;
+  format?: "png" | "jpeg" | "webp";
+  quality?: number;
 }
 
 export type { ScaleMetadata };
@@ -338,6 +340,8 @@ export function TileforgeProvider({ children }: { children: ReactNode }) {
         backgroundColor: opts.backgroundColor,
         scaleMetadata: opts.scaleMetadata,
         includePmtiles: opts.includePmtiles,
+        format: opts.format,
+        quality: opts.quality,
       };
       workerRef.current.postMessage(msg, [imageBytes]);
     },
@@ -375,6 +379,8 @@ export function TileforgeProvider({ children }: { children: ReactNode }) {
       if (opts.fileName) params.set("file_name", opts.fileName);
       if (opts.scale != null) params.set("scale", String(opts.scale));
       if (opts.backgroundColor) params.set("background_color", opts.backgroundColor);
+      if (opts.format) params.set("format", opts.format);
+      if (opts.quality != null) params.set("quality", String(opts.quality));
 
       try {
         const headers: Record<string, string> = { "content-type": "application/octet-stream" };
@@ -569,6 +575,8 @@ export function TileforgeProvider({ children }: { children: ReactNode }) {
     params.set("file_name", file.fileName);
     if (opts.scale != null) params.set("scale", String(opts.scale));
     if (opts.backgroundColor) params.set("background_color", opts.backgroundColor);
+    if (opts.format) params.set("format", opts.format);
+    if (opts.quality != null) params.set("quality", String(opts.quality));
 
     const startTime = performance.now();
 

@@ -41,6 +41,20 @@ pub enum Projection {
     Isometric,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum TileFormat {
+    #[default]
+    Png,
+    Jpeg,
+    Webp,
+}
+
+impl TileFormat {
+    pub fn extension(self) -> &'static str {
+        match self { Self::Png => "png", Self::Jpeg => "jpg", Self::Webp => "webp" }
+    }
+}
+
 /// Scale metadata for accurate measurements on the output tileset.
 #[derive(Debug, Clone, Default)]
 pub struct ScaleMetadata {
@@ -111,6 +125,8 @@ pub struct TileConfig {
     pub background: Option<BackgroundColor>,
     /// Scale metadata for measurements
     pub scale_metadata: Option<ScaleMetadata>,
+    pub format: TileFormat,
+    pub quality: u8,
 }
 
 impl Default for TileConfig {
@@ -123,6 +139,8 @@ impl Default for TileConfig {
             scale: None,
             background: None,
             scale_metadata: None,
+            format: TileFormat::Png,
+            quality: 85,
         }
     }
 }
@@ -463,22 +481,9 @@ impl Tiler {
                             tile_size,
                         );
                         let rgba: RgbaImage = tile.to_rgba8();
-                        let mut png_buf = Vec::new();
-                        let encoder = image::codecs::png::PngEncoder::new_with_quality(
-                            &mut png_buf,
-                            image::codecs::png::CompressionType::Fast,
-                            image::codecs::png::FilterType::Adaptive,
-                        );
-                        let _ = image::ImageEncoder::write_image(
-                            encoder,
-                            rgba.as_raw(),
-                            tile_size,
-                            tile_size,
-                            image::ExtendedColorType::Rgba8,
-                        );
-                        png_buf
+                        encode_tile(&rgba, tile_size, self.config.format, self.config.quality)
                     })
-                    .collect();
+                    .collect::<Result<_, _>>()?;
 
                 #[cfg(not(feature = "parallel"))]
                 let row_tiles: Vec<Vec<u8>> = (0..grid_size)
@@ -490,22 +495,9 @@ impl Tiler {
                             tile_size,
                         );
                         let rgba: RgbaImage = tile.to_rgba8();
-                        let mut png_buf = Vec::new();
-                        let encoder = image::codecs::png::PngEncoder::new_with_quality(
-                            &mut png_buf,
-                            image::codecs::png::CompressionType::Fast,
-                            image::codecs::png::FilterType::Adaptive,
-                        );
-                        let _ = image::ImageEncoder::write_image(
-                            encoder,
-                            rgba.as_raw(),
-                            tile_size,
-                            tile_size,
-                            image::ExtendedColorType::Rgba8,
-                        );
-                        png_buf
+                        encode_tile(&rgba, tile_size, self.config.format, self.config.quality)
                     })
-                    .collect();
+                    .collect::<Result<_, _>>()?;
 
                 // Write tiles sequentially
                 for (x, png_buf) in row_tiles.into_iter().enumerate() {
@@ -534,6 +526,26 @@ impl Tiler {
             max_zoom,
         })
     }
+}
+
+pub(crate) fn encode_tile(tile: &RgbaImage, tile_size: u32, format: TileFormat, quality: u8) -> Result<Vec<u8>, TilerError> {
+    use image::ImageEncoder;
+    let mut bytes = Vec::new();
+    match format {
+        TileFormat::Png => image::codecs::png::PngEncoder::new_with_quality(&mut bytes, image::codecs::png::CompressionType::Fast, image::codecs::png::FilterType::Adaptive).write_image(tile.as_raw(), tile_size, tile_size, image::ExtendedColorType::Rgba8)?,
+        TileFormat::Jpeg => {
+            let mut opaque = tile.clone();
+            for pixel in opaque.pixels_mut() {
+                let alpha = u16::from(pixel[3]);
+                for channel in &mut pixel.0[..3] { *channel = ((u16::from(*channel) * alpha + 255 * (255 - alpha)) / 255) as u8; }
+                pixel[3] = 255;
+            }
+            let rgb = DynamicImage::ImageRgba8(opaque).to_rgb8();
+            image::codecs::jpeg::JpegEncoder::new_with_quality(&mut bytes, quality.clamp(1, 100)).write_image(rgb.as_raw(), tile_size, tile_size, image::ExtendedColorType::Rgb8)?;
+        }
+        TileFormat::Webp => image::codecs::webp::WebPEncoder::new_lossless(&mut bytes).write_image(tile.as_raw(), tile_size, tile_size, image::ExtendedColorType::Rgba8)?,
+    }
+    Ok(bytes)
 }
 
 #[cfg(test)]
