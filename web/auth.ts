@@ -5,6 +5,7 @@ import pool from "@/lib/db";
 import authConfig from "@/auth.config";
 import { PLAN_FREE } from "@/lib/plans";
 import { safeRedirect } from "@/lib/auth-policy";
+import { resolveProviderAccount } from "@/lib/account-service";
 
 export const LINK_COOKIE = "tileforge-link-user-id";
 
@@ -80,146 +81,33 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
 
       if (trigger === "signIn" && account && profile) {
         try {
-        const provider = account.provider;
-        const { providerAccountId, username, avatarUrl, email } =
-          extractProfile(provider, profile as Profile);
+          const provider = account.provider;
+          const { providerAccountId, username, avatarUrl, email } =
+            extractProfile(provider, profile as Profile);
+          if (!providerAccountId || providerAccountId === "undefined") {
+            throw new Error(`Missing account identifier for ${provider}`);
+          }
 
-        let row: { id: string; plan: string; deactivated_at: string | null } | undefined;
-
-        // 1. Check for existing account link
-        const linkResult = await pool.query(
-          `SELECT u.id, u.plan, u.deactivated_at
-           FROM accounts a
-           JOIN users u ON u.id = a.user_id
-           WHERE a.provider = $1 AND a.provider_account_id = $2`,
-          [provider, providerAccountId],
-        );
-        row = linkResult.rows[0];
-
-        if (row) {
-          // Update profile info on the existing account link
-          await pool.query(
-            `UPDATE accounts
-             SET username = $1, avatar_url = $2, email = $3
-             WHERE provider = $4 AND provider_account_id = $5`,
-            [username, avatarUrl, email, provider, providerAccountId],
+          const linkUserId = linkStore.getStore();
+          const resolved = await resolveProviderAccount(
+            pool,
+            {
+              provider,
+              providerAccountId,
+              username,
+              avatarUrl,
+              email,
+              emailVerified:
+                provider === "github" ||
+                (profile as Record<string, unknown>).email_verified === true,
+            },
+            linkUserId,
           );
-        }
-
-        // 1b. Link flow — cookie read by route handler, passed via AsyncLocalStorage
-        const linkUserId = linkStore.getStore();
-
-        if (linkUserId && row && row.id !== linkUserId) {
-          throw new Error("This provider account is already linked to another user");
-        }
-
-        if (!row && linkUserId) {
-          const linked = await pool.query(
-            `INSERT INTO accounts (user_id, provider, provider_account_id, username, avatar_url, email)
-             VALUES ($1, $2, $3, $4, $5, $6)
-             ON CONFLICT (provider, provider_account_id) DO NOTHING
-             RETURNING user_id`,
-            [linkUserId, provider, providerAccountId, username, avatarUrl, email],
-          );
-          if (!linked.rows[0]) {
-            throw new Error("Provider account was linked concurrently; please try again");
-          }
-          // Restore the original user's session
-          const userResult = await pool.query(
-            "SELECT id, plan FROM users WHERE id = $1",
-            [linkUserId],
-          );
-          const original = userResult.rows[0];
-          if (original) {
-            token.userId = original.id;
-            token.plan = original.plan;
-            token.sub = original.id;
-            // Keep the original user's username/avatar
-            const primaryAccount = await pool.query(
-              "SELECT username, avatar_url FROM accounts WHERE user_id = $1 ORDER BY created_at LIMIT 1",
-              [original.id],
-            );
-            if (primaryAccount.rows[0]) {
-              token.username = primaryAccount.rows[0].username;
-              token.avatarUrl = primaryAccount.rows[0].avatar_url;
-            }
-          }
-          // Skip steps 2, 3, and reactivation — token fields already set
-        }
-
-        // 2. No existing link — try auto-link by email (only if verified)
-        // GitHub always verifies emails. Google sets email_verified=true.
-        // Discord does NOT verify email ownership — skip auto-link for unverified.
-        if (!row && !linkUserId) {
-          const emailVerified =
-            provider === "github" ||
-            (profile as Record<string, unknown>).email_verified === true;
-
-          if (email && emailVerified) {
-            const emailResult = await pool.query(
-              "SELECT id, plan, deactivated_at FROM users WHERE email = $1",
-              [email],
-            );
-            row = emailResult.rows[0];
-
-            if (row) {
-              await pool.query(
-                `INSERT INTO accounts (user_id, provider, provider_account_id, username, avatar_url, email)
-                 VALUES ($1, $2, $3, $4, $5, $6)
-                 ON CONFLICT (provider, provider_account_id) DO NOTHING`,
-                [row.id, provider, providerAccountId, username, avatarUrl, email],
-              );
-            }
-          }
-        }
-
-        // 3. Still no match — create new user + account link (transactional)
-        if (!row && !linkUserId) {
-          const client = await pool.connect();
-          try {
-            await client.query("BEGIN");
-            const userResult = await client.query(
-              `INSERT INTO users (username, avatar_url, email)
-               VALUES ($1, $2, $3)
-               RETURNING id, plan, deactivated_at`,
-              [username, avatarUrl, email],
-            );
-            row = userResult.rows[0];
-
-            await client.query(
-              `INSERT INTO accounts (user_id, provider, provider_account_id, username, avatar_url, email)
-               VALUES ($1, $2, $3, $4, $5, $6)`,
-              [row!.id, provider, providerAccountId, username, avatarUrl, email],
-            );
-            await client.query("COMMIT");
-          } catch (e) {
-            await client.query("ROLLBACK");
-            throw e;
-          } finally {
-            client.release();
-          }
-        }
-
-        // Reactivate if within 30-day window — reset to free plan
-        if (row) {
-          if (row.deactivated_at) {
-            const daysSince =
-              (Date.now() - new Date(row.deactivated_at).getTime()) / 86_400_000;
-            if (daysSince <= 30) {
-              await pool.query(
-                "UPDATE users SET deactivated_at = NULL, plan = 'free' WHERE id = $1",
-                [row.id],
-              );
-              row.plan = "free";
-            }
-          }
-
-          token.userId = row.id;
-          token.plan = row.plan;
-          token.username = username;
-          token.avatarUrl = avatarUrl;
-          token.sub = row.id;
-        }
+          token.userId = resolved.userId;
+          token.plan = resolved.plan;
+          token.username = resolved.username;
+          token.avatarUrl = resolved.avatarUrl;
+          token.sub = resolved.userId;
         } catch (err) {
           console.error("[auth] jwt callback error:", err);
           throw err;

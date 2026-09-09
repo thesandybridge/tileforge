@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { safeRedirect, verifiedLinkUserId } from "../../lib/auth-policy";
 import authConfig from "../../auth.config";
+import { isWithinReactivationWindow } from "../../lib/account-service";
 
 const base = "https://tileforge.example";
 
@@ -40,4 +41,12 @@ test("existing sessions survive signing-key rotation", async () => {
 test("session encoding honors maxAge and rejects expired tokens", async () => {
   const token = await authConfig.jwt.encode({ token: { sub: "user" }, secret: "secret", salt, maxAge: -1 });
   expect(await authConfig.jwt.decode({ token, secret: "secret", salt })).toBeNull();
+});
+
+test("reactivation is limited to the 30-day grace period", () => {
+  const now = Date.parse("2026-09-09T12:00:00Z");
+  expect(isWithinReactivationWindow("2026-08-10T12:00:00Z", now)).toBe(true);
+  expect(isWithinReactivationWindow("2026-08-10T11:59:59Z", now)).toBe(false);
+  expect(isWithinReactivationWindow("invalid", now)).toBe(false);
+  expect(isWithinReactivationWindow("2026-09-10T12:00:00Z", now)).toBe(false);
 });

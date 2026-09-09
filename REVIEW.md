@@ -35,7 +35,7 @@ to local build and scaffolding tools and are not shipped by the web service.
 | --- | --- | --- |
 | Done | Private React Query data is scoped to the authenticated user ID and stale private cache entries are removed when identity changes. | Implemented in the query provider and private-data hooks. |
 | Done | CI runs for pushes and pull requests, cancels superseded runs, and executes the isolated auth regression suite after the web build. | Forked pull requests still require a package-install strategy that does not expose the private `NPM_TOKEN`. |
-| Medium | Account auto-linking and explicit linking are intertwined in one large JWT callback. | Extract a transactional account service; test ownership conflicts, concurrent sign-ins, verified-email policy, and deactivation behavior against Postgres. |
+| Done | Account resolution now runs in a dedicated transaction with advisory locks for provider identities and verified emails. | Add deployed Postgres integration coverage when CI has a database service. |
 | Low | README describes browser-only processing as universal despite optional server processing; auth and deployment documentation also drifted. | Document browser/server privacy separately and reconcile deployed behavior with setup instructions. |
 
 ## Zustand persistence
