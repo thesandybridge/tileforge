@@ -12,7 +12,7 @@ use axum::{
     extract::DefaultBodyLimit,
     http::{header, HeaderValue, Method},
     middleware,
-    routing::{get, post},
+    routing::{delete, get, patch, post},
     Router,
 };
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
@@ -325,6 +325,18 @@ fn build_router(state: AppState, rate_limit: RateLimit, config: &AppConfig) -> R
                 rate_limit.clone(),
                 rate_limit_mutations,
             )),
+        )
+        .route(
+            "/api/keys/self",
+            delete(api_keys::revoke_current_api_key).layer(middleware::from_fn_with_state(
+                rate_limit.clone(), rate_limit_mutations,
+            )),
+        )
+        .route(
+            "/api/keys/{key_id}",
+            patch(api_keys::update_api_key)
+                .delete(api_keys::revoke_api_key_by_id)
+                .layer(middleware::from_fn_with_state(rate_limit.clone(), rate_limit_mutations)),
         )
         // Persistent processing jobs
         .route(

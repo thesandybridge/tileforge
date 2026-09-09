@@ -14,18 +14,18 @@ function validCallback(value: string): boolean {
   } catch { return false; }
 }
 
-export function CliAuth({ callback, state }: { callback: string; state: string }) {
+export function CliAuth({ callback, state, deviceName, os, arch }: { callback: string; state: string; deviceName: string; os: string; arch: string }) {
   const { data: session, status } = useSession();
   const [error, setError] = useState("");
   const valid = validCallback(callback) && /^[a-f0-9]{48}$/.test(state);
   const authorize = async () => {
     if (!session?.accessToken || !valid) return;
     try {
-      const result = await createCliApiKey(session.accessToken);
+      const result = await createCliApiKey(session.accessToken, { device_name: deviceName, os, arch });
       const form = document.createElement("form");
       form.method = "POST";
       form.action = callback;
-      for (const [name, value] of [["token", result.key], ["state", state]]) {
+      for (const [name, value] of [["token", result.key], ["key_id", result.id], ["state", state]]) {
         const input = document.createElement("input");
         input.type = "hidden";
         input.name = name;

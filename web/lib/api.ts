@@ -195,20 +195,23 @@ export async function getCurrentUser(token: string): Promise<CurrentUser> {
 
 export interface ApiKey {
   id: string;
+  name: string;
   key_prefix: string;
+  scopes: string[];
   created_at: string;
+  last_used_at: string | null;
+  device_info: { device_name?: string; os?: string; arch?: string } | null;
 }
 
 export interface ApiKeyCreated extends ApiKey {
   key: string;
 }
 
-export async function getApiKey(token: string): Promise<ApiKey | null> {
+export async function getApiKeys(token: string): Promise<ApiKey[]> {
   const res = await fetch(`${API_URL}/api/keys`, {
     headers: { Authorization: `Bearer ${token}` },
   });
-  if (res.status === 204) return null;
-  return handleResponse<ApiKey>(res);
+  return handleResponse<ApiKey[]>(res);
 }
 
 export async function createApiKey(token: string): Promise<ApiKeyCreated> {
@@ -219,12 +222,20 @@ export async function createApiKey(token: string): Promise<ApiKeyCreated> {
   return handleResponse<ApiKeyCreated>(res);
 }
 
-export async function createCliApiKey(token: string): Promise<ApiKeyCreated> {
+export async function createCliApiKey(token: string, device: { device_name: string; os: string; arch: string }): Promise<ApiKeyCreated> {
   const res = await fetch(`${API_URL}/api/keys/cli`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${token}` },
+    headers: authHeaders(token),
+    body: JSON.stringify(device),
   });
   return handleResponse<ApiKeyCreated>(res);
+}
+
+export async function revokeApiKeyById(token: string, keyId: string): Promise<void> {
+  const res = await fetch(`${API_URL}/api/keys/${encodeURIComponent(keyId)}`, {
+    method: "DELETE", headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok && res.status !== 204) throw new ApiError(res.status, "Failed to revoke API key");
 }
 
 export async function revokeApiKey(token: string): Promise<void> {

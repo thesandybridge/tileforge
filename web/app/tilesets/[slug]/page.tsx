@@ -10,7 +10,7 @@ import { formatBytes } from "@/lib/utils";
 import { copyToClipboard } from "@/lib/clipboard";
 import { API_URL } from "@/lib/api";
 import { useTileset, useUpdateTileset, useDeleteTileset, usePmtilesUrl } from "@/hooks/use-tilesets";
-import { useApiKey } from "@/hooks/use-api-key";
+import { useApiKeys } from "@/hooks/use-api-key";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
@@ -99,7 +99,7 @@ export default function TileSetDetailPage() {
   const updateTileset = useUpdateTileset(params.slug);
   const deleteTileset = useDeleteTileset();
   const pmtiles = usePmtilesUrl(params.slug);
-  const { data: apiKey } = useApiKey();
+  const { data: apiKeys } = useApiKeys();
 
   const isOwner = !!(session?.user?.id && tileset?.user_id === session.user.id);
   const backHref = isOwner || session?.user ? "/my-tilesets" : "/gallery";
@@ -337,7 +337,7 @@ const map = new maplibregl.Map({
           <div className="mt-8 space-y-6">
             <h2 className="text-lg font-semibold">Use this tile set</h2>
 
-            {apiKey ? (
+            {apiKeys?.length ? (
               <p className="text-muted-foreground text-sm">
                 Replace <code className="rounded bg-muted px-1 py-0.5 text-xs font-mono">YOUR_API_KEY</code> with
                 your full API key.{" "}

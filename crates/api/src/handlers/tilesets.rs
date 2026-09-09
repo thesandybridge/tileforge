@@ -579,6 +579,8 @@ mod tests {
             plan: crate::auth::Plan::Free,
             iat: None,
             exp: None,
+            scopes: vec![],
+            api_key_id: None,
         }));
         assert!(is_owner(&claims, owner_id));
     }
@@ -591,6 +593,8 @@ mod tests {
             plan: crate::auth::Plan::Free,
             iat: None,
             exp: None,
+            scopes: vec![],
+            api_key_id: None,
         }));
         assert!(!is_owner(&claims, owner_id));
     }

@@ -26,6 +26,19 @@ pub struct UserClaims {
     pub plan: Plan,
     pub iat: Option<u64>,
     pub exp: Option<u64>,
+    #[serde(default)]
+    pub scopes: Vec<String>,
+    #[serde(default)]
+    pub api_key_id: Option<Uuid>,
+}
+
+impl UserClaims {
+    pub fn require_scope(&self, scope: &str) -> Result<(), ApiError> {
+        if self.api_key_id.is_some() && !self.scopes.iter().any(|value| value == scope) {
+            return Err(ApiError::Forbidden);
+        }
+        Ok(())
+    }
 }
 
 /// Extractor: requires authenticated user (401 if absent).
@@ -196,8 +209,8 @@ pub(crate) fn extract_api_key_from_query(uri: &axum::http::Uri) -> Option<String
 
 pub(crate) async fn validate_api_key(db: &PgPool, raw_key: &str) -> Option<UserClaims> {
     let hash = hex::encode(Sha256::digest(raw_key.as_bytes()));
-    let row: Option<(String, String)> = sqlx::query_as(
-        "SELECT u.id::text, u.plan
+    let row: Option<(Uuid, String, String, Vec<String>)> = sqlx::query_as(
+        "SELECT ak.id, u.id::text, u.plan, ak.scopes
          FROM api_keys ak JOIN users u ON u.id = ak.user_id
          WHERE ak.key_hash = $1 AND ak.revoked_at IS NULL AND u.deactivated_at IS NULL",
     )
@@ -206,7 +219,10 @@ pub(crate) async fn validate_api_key(db: &PgPool, raw_key: &str) -> Option<UserC
     .await
     .ok()?;
 
-    let (user_id, plan_str) = row?;
+    let (key_id, user_id, plan_str, scopes) = row?;
+    let _ = sqlx::query(
+        "UPDATE api_keys SET last_used_at = now() WHERE id = $1 AND (last_used_at IS NULL OR last_used_at < now() - interval '5 minutes')",
+    ).bind(key_id).execute(db).await;
     let plan = match plan_str.as_str() {
         "pro" => Plan::Pro,
         _ => Plan::Free,
@@ -216,6 +232,8 @@ pub(crate) async fn validate_api_key(db: &PgPool, raw_key: &str) -> Option<UserC
         plan,
         iat: None,
         exp: None,
+        scopes,
+        api_key_id: Some(key_id),
     })
 }
 
@@ -299,6 +317,8 @@ mod tests {
             plan: Plan::Free,
             iat: None,
             exp: None,
+            scopes: vec![],
+            api_key_id: None,
         };
         assert!(parse_user_id(&claims).is_ok());
     }
@@ -310,6 +330,8 @@ mod tests {
             plan: Plan::Free,
             iat: None,
             exp: None,
+            scopes: vec![],
+            api_key_id: None,
         };
         assert!(parse_user_id(&claims).is_err());
     }

@@ -270,6 +270,7 @@ pub async fn process_tiles(
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Response, ApiError> {
+    if let Some(user) = claims.0.as_ref() { user.require_scope("process")?; }
     if body.is_empty() {
         return Err(ApiError::MissingImage);
     }

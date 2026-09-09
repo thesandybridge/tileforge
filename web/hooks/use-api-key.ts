@@ -1,40 +1,22 @@
 "use client";
 
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
-import { getApiKey, createApiKey, revokeApiKey, type ApiKey } from "@/lib/api";
+import { createApiKey, getApiKeys, revokeApiKeyById } from "@/lib/api";
 
-export function useApiKey() {
+export function useApiKeys() {
   const { data: session } = useSession();
-  return useQuery({
-    queryKey: ["api-key"],
-    queryFn: () => getApiKey(session!.accessToken!),
-    enabled: !!session?.accessToken,
-  });
+  return useQuery({ queryKey: ["api-keys", session?.user?.id], queryFn: () => getApiKeys(session!.accessToken!), enabled: !!session?.accessToken });
 }
 
 export function useCreateApiKey() {
   const { data: session } = useSession();
   const qc = useQueryClient();
-  return useMutation({
-    mutationFn: () => createApiKey(session!.accessToken!),
-    onSuccess: (data) => {
-      qc.setQueryData<ApiKey | null>(["api-key"], {
-        id: data.id,
-        key_prefix: data.key_prefix,
-        created_at: data.created_at,
-      });
-    },
-  });
+  return useMutation({ mutationFn: () => createApiKey(session!.accessToken!), onSuccess: () => qc.invalidateQueries({ queryKey: ["api-keys", session?.user?.id] }) });
 }
 
 export function useRevokeApiKey() {
   const { data: session } = useSession();
   const qc = useQueryClient();
-  return useMutation({
-    mutationFn: () => revokeApiKey(session!.accessToken!),
-    onSuccess: () => {
-      qc.setQueryData<ApiKey | null>(["api-key"], null);
-    },
-  });
+  return useMutation({ mutationFn: (keyId: string) => revokeApiKeyById(session!.accessToken!, keyId), onSuccess: () => qc.invalidateQueries({ queryKey: ["api-keys", session?.user?.id] }) });
 }

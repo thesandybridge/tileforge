@@ -89,6 +89,30 @@ function calcTotalTiles(minZoom: number, maxZoom: number): number {
   return total;
 }
 
+function SavePresetButton({ onSave }: { onSave: (name: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+  const save = () => {
+    if (!name.trim()) return;
+    onSave(name.trim());
+    setOpen(false);
+    setName("");
+  };
+  return <Dialog open={open} onOpenChange={setOpen}>
+    <Button variant="outline" size="sm" onClick={() => { setName(""); setOpen(true); }}>
+      <Save className="mr-1.5 h-3.5 w-3.5" />Save preset
+    </Button>
+    <DialogContent className="sm:max-w-md">
+      <DialogHeader><DialogTitle>Save Preset</DialogTitle></DialogHeader>
+      <div className="space-y-2 py-4">
+        <Label htmlFor="preset-name">Preset name</Label>
+        <Input id="preset-name" value={name} onChange={(event) => setName(event.target.value)} placeholder="My preset" onKeyDown={(event) => event.key === "Enter" && save()} autoFocus />
+      </div>
+      <DialogFooter><Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button><Button onClick={save} disabled={!name.trim()}>Save</Button></DialogFooter>
+    </DialogContent>
+  </Dialog>;
+}
+
 // --- Form state reducer ---
 
 type DragState = "idle" | "hovering" | "invalid";
@@ -212,8 +236,6 @@ export default function Home() {
   }));
   const fileRef = useRef<ArrayBuffer | null>(null);
   const { presets, addPreset, deletePreset, mounted: presetsMounted } = usePresets();
-  const [presetDialogOpen, setPresetDialogOpen] = useState(false);
-  const [presetName, setPresetName] = useState("");
 
   const loadPreset = useCallback((preset: Preset) => {
     dispatch({ type: "TILE_SIZE_CHANGED", tileSize: preset.tileSize });
@@ -222,23 +244,15 @@ export default function Home() {
     dispatch({ type: "PROJECTION_CHANGED", projection: preset.projection });
   }, []);
 
-  const openPresetDialog = useCallback(() => {
-    setPresetName("");
-    setPresetDialogOpen(true);
-  }, []);
-
-  const savePreset = useCallback(() => {
-    if (!presetName.trim()) return;
+  const savePreset = useCallback((name: string) => {
     addPreset({
-      name: presetName.trim(),
+      name,
       tileSize: form.tileSize,
       minZoom: form.minZoom,
       maxZoom: form.maxZoom,
       projection: form.projection,
     });
-    setPresetDialogOpen(false);
-    setPresetName("");
-  }, [addPreset, presetName, form.tileSize, form.minZoom, form.maxZoom, form.projection]);
+  }, [addPreset, form.tileSize, form.minZoom, form.maxZoom, form.projection]);
 
   const handleFile = useCallback(async (file: File) => {
     let imageInfo: ImageInfo | null = null;
@@ -530,10 +544,7 @@ export default function Home() {
                       </SelectContent>
                     </Select>
                   )}
-                  <Button variant="outline" size="sm" onClick={openPresetDialog}>
-                    <Save className="mr-1.5 h-3.5 w-3.5" />
-                    Save preset
-                  </Button>
+                  <SavePresetButton onSave={savePreset} />
                   {presets.length > 0 && (
                     <Select onValueChange={(id) => deletePreset(id)}>
                       <SelectTrigger className="w-10 px-2">
@@ -1080,34 +1091,6 @@ export default function Home() {
         </ScrollReveal>
       </div>
 
-      {/* Save Preset Dialog */}
-      <Dialog open={presetDialogOpen} onOpenChange={setPresetDialogOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Save Preset</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label htmlFor="preset-name">Preset name</Label>
-              <Input
-                id="preset-name"
-                value={presetName}
-                onChange={(e) => setPresetName(e.target.value)}
-                placeholder="My preset"
-                onKeyDown={(e) => e.key === "Enter" && savePreset()}
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setPresetDialogOpen(false)}>
-              Cancel
-            </Button>
-            <Button onClick={savePreset} disabled={!presetName.trim()}>
-              Save
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

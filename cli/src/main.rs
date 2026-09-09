@@ -2,7 +2,7 @@ use clap::{Parser, Subcommand};
 use std::fs;
 use std::path::PathBuf;
 use tileforge_core::{StreamingTiler, TileConfig, Tiler, ZipTileWriter};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use rand::{rngs::OsRng, RngCore};
 use std::io::{Read, Write};
@@ -110,6 +110,9 @@ struct CloudJob {
 
 #[derive(Deserialize)]
 struct AcceptedJob { job_id: String }
+
+#[derive(Serialize, Deserialize)]
+struct SavedCredential { key: String, key_id: String }
 
 #[derive(Parser)]
 struct TilesArgs {
@@ -298,13 +301,18 @@ fn credential_path() -> PathBuf {
 }
 
 fn read_saved_api_key() -> Option<String> {
-    fs::read_to_string(credential_path()).ok().map(|value| value.trim().to_owned()).filter(|value| !value.is_empty())
+    let value = fs::read_to_string(credential_path()).ok()?;
+    serde_json::from_str::<SavedCredential>(&value).map(|credential| credential.key).ok()
 }
 
-fn save_api_key(key: &str) -> std::io::Result<()> {
+fn read_saved_credential() -> Option<SavedCredential> {
+    serde_json::from_str(&fs::read_to_string(credential_path()).ok()?).ok()
+}
+
+fn save_api_key(key: &str, key_id: &str) -> std::io::Result<()> {
     let path = credential_path();
     if let Some(parent) = path.parent() { fs::create_dir_all(parent)?; }
-    fs::write(&path, format!("{key}\n"))?;
+    fs::write(&path, serde_json::to_vec(&SavedCredential { key: key.into(), key_id: key_id.into() }).unwrap())?;
     #[cfg(unix)] {
         use std::os::unix::fs::PermissionsExt;
         fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
@@ -325,6 +333,17 @@ fn open_browser(url: &str) -> std::io::Result<()> {
 fn run_auth(args: AuthArgs) {
     match args.command {
         AuthCommand::Logout => {
+            if let Some(credential) = read_saved_credential() {
+                let api_url = std::env::var("TILEFORGE_API_URL").unwrap_or_else(|_| "https://api.tileforge.sandybridge.io".into());
+                let client = reqwest::blocking::Client::new();
+                let response = client.delete(format!("{}/api/keys/self", api_url.trim_end_matches('/')))
+                    .bearer_auth(&credential.key).send();
+                match response {
+                    Ok(response) if !response.status().is_success() => eprintln!("Warning: server credential could not be revoked ({})", response.status()),
+                    Err(error) => eprintln!("Warning: server credential could not be revoked: {error}"),
+                    _ => {}
+                }
+            }
             match fs::remove_file(credential_path()) {
                 Ok(()) => println!("Signed out."),
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => println!("Already signed out."),
@@ -342,7 +361,10 @@ fn run_auth(args: AuthArgs) {
             let state = hex::encode(state_bytes);
             let mut url = reqwest::Url::parse(&format!("{}/cli-auth", app_url.trim_end_matches('/'))).unwrap();
             url.query_pairs_mut().append_pair("callback", &format!("http://127.0.0.1:{port}/callback"))
-                .append_pair("state", &state);
+                .append_pair("state", &state)
+                .append_pair("device_name", &std::env::var("HOSTNAME").unwrap_or_else(|_| "Unknown device".into()))
+                .append_pair("os", std::env::consts::OS)
+                .append_pair("arch", std::env::consts::ARCH);
             println!("Opening TileForge to authorize the CLI…\n{}", url);
             if let Err(error) = open_browser(url.as_str()) { eprintln!("Could not open browser: {error}"); }
             listener.set_nonblocking(false).ok();
@@ -355,8 +377,9 @@ fn run_auth(args: AuthArgs) {
             let params: std::collections::HashMap<_, _> = callback.query_pairs().into_owned().collect();
             let valid = params.get("state") == Some(&state);
             let key = params.get("token").filter(|_| valid);
-            let (status, message) = if let Some(key) = key {
-                match save_api_key(key) {
+            let key_id = params.get("key_id").filter(|_| valid);
+            let (status, message) = if let (Some(key), Some(key_id)) = (key, key_id) {
+                match save_api_key(key, key_id) {
                     Ok(()) => ("200 OK", "TileForge CLI is signed in. You can close this tab."),
                     Err(_) => ("500 Internal Server Error", "The CLI could not save the credential."),
                 }

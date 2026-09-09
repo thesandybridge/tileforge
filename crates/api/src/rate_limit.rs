@@ -292,6 +292,8 @@ mod tests {
             plan: Plan::Free,
             iat: None,
             exp: None,
+            scopes: vec![],
+            api_key_id: None,
         };
         let result = rl.check("1.2.3.4", Some(&user), "test", TIER_TILES).await;
         let info = result.expect("should allow without redis");

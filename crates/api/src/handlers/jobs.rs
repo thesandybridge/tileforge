@@ -35,6 +35,7 @@ pub async fn cancel_job(
     Claims(user): Claims,
     Path(job_id): Path<Uuid>,
 ) -> Result<Json<JobRow>, ApiError> {
+    user.require_scope("process")?;
     let db = require_db(&state)?;
     let user_id = parse_user_id(&user)?;
     let changed = sqlx::query(
@@ -68,6 +69,7 @@ pub async fn retry_job(
     Claims(user): Claims,
     Path(job_id): Path<Uuid>,
 ) -> Result<Json<JobRow>, ApiError> {
+    user.require_scope("process")?;
     let db = require_db(&state)?;
     let bucket = require_bucket(&state)?;
     let user_id = parse_user_id(&user)?;
@@ -156,6 +158,7 @@ pub async fn list_jobs(
     Claims(user): Claims,
     Query(query): Query<ListJobsQuery>,
 ) -> Result<Json<Vec<JobRow>>, ApiError> {
+    user.require_scope("read")?;
     let db = require_db(&state)?;
     let user_id = parse_user_id(&user)?;
     let per_page = query.per_page.unwrap_or(20).clamp(1, 100);
@@ -188,6 +191,7 @@ pub async fn get_job(
     Claims(user): Claims,
     Path(job_id): Path<Uuid>,
 ) -> Result<Json<JobRow>, ApiError> {
+    user.require_scope("read")?;
     let db = require_db(&state)?;
     let user_id = parse_user_id(&user)?;
     let row = sqlx::query_as::<_, JobRow>(&format!(

@@ -36,6 +36,12 @@ Legacy form:
 curl "https://api.tileforge.sandybridge.io/api/tilesets?key=tf_your_api_key_here"
 ```
 
+## Multiple keys and CLI devices
+
+The settings page lists service keys and authenticated CLI devices separately. Each credential has its own scopes, creation time, and last-used timestamp, and can be revoked without disrupting other integrations.
+
+CLI credentials receive `read` and `process` scopes. Service keys receive `read`, `process`, and `manage` scopes. Run `tileforge auth logout` to revoke the current CLI key on the server and remove the local credential.
+
 ## Key Format
 
 API keys are 35 characters long, starting with the `tf_` prefix followed by 32 hex characters:
