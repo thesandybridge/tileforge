@@ -22,11 +22,6 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Audit Rust dependencies
-        uses: rustsec/audit-check@v2.0.0
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -34,6 +29,15 @@ jobs:
 
       - name: Cache Rust
         uses: Swatinem/rust-cache@v2
+
+      # rust-s3 parses XML only from the operator-configured S3/MinIO endpoint.
+      # Its quick-xml 0.38 constraint cannot currently take the upstream fix;
+      # uploaded GeoTIFF contents never enter this parser.
+      - name: Audit Rust dependencies
+        uses: rustsec/audit-check@v2.0.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          ignore: RUSTSEC-2026-0194,RUSTSEC-2026-0195
 
       - name: Run tests
         run: RUSTFLAGS="-D warnings" cargo test --release --workspace --exclude tileforge-wasm

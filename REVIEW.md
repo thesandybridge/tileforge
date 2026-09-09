@@ -31,6 +31,12 @@ Next.js, Auth.js, fflate, PostCSS, Rust TLS/QUIC dependencies, and affected
 transitive packages were upgraded. Both dependency ecosystems are audited in CI;
 `npm audit` reports zero known vulnerabilities.
 
+RustSec advisories RUSTSEC-2026-0194 and RUSTSEC-2026-0195 are explicitly
+accepted until `rust-s3` permits `quick-xml >= 0.41`. The affected parser only
+handles responses from the operator-configured S3/MinIO service; uploaded image
+contents do not reach it. The unpatched RSA dependency was removed by compiling
+JWT support with HMAC only, matching the API's HS256 usage.
+
 | Priority | Finding | Recommended change |
 | --- | --- | --- |
 | Done | Private React Query data is scoped to the authenticated user ID and stale private cache entries are removed when identity changes. | Implemented in the query provider and private-data hooks. |
