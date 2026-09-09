@@ -16,8 +16,16 @@ concurrency:
 jobs:
   rust-tests:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: write
     steps:
       - uses: actions/checkout@v5
+
+      - name: Audit Rust dependencies
+        uses: rustsec/audit-check@v2.0.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -67,6 +75,10 @@ jobs:
         working-directory: web
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Audit npm dependencies
+        run: npm audit
+        working-directory: web
 
       - name: Build
         run: npm run build

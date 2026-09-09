@@ -26,10 +26,10 @@ Validation runs the production web build, isolated auth policy/token tests, and 
 
 ## Prioritized follow-up work
 
-Production npm dependencies were audited on September 9, 2026. Next.js, Auth.js,
-fflate, PostCSS, and affected transitive packages were upgraded; `npm audit
---omit=dev` reports zero known vulnerabilities. Remaining npm advisories belong
-to local build and scaffolding tools and are not shipped by the web service.
+Production and development dependencies were audited on September 9, 2026.
+Next.js, Auth.js, fflate, PostCSS, Rust TLS/QUIC dependencies, and affected
+transitive packages were upgraded. Both dependency ecosystems are audited in CI;
+`npm audit` reports zero known vulnerabilities.
 
 | Priority | Finding | Recommended change |
 | --- | --- | --- |

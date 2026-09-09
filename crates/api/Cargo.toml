@@ -24,7 +24,7 @@ sha2 = "0.10"
 subtle = "2"
 hex = "0.4"
 rand = "0.8"
-async-nats = "0.38"
+async-nats = "0.50"
 utoipa = { version = "5", features = ["axum_extras", "chrono", "uuid"] }
 # Embed the UI in the crate so builds do not depend on downloading GitHub assets.
 utoipa-swagger-ui = { version = "9", features = ["axum", "vendored"] }
