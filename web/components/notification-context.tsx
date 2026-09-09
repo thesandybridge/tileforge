@@ -77,7 +77,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   const [localNotifications, setLocalNotifications] = useState<Notification[]>([]);
 
   const { data: serverNotifications = [] } = useQuery({
-    queryKey: ["notifications"],
+    queryKey: ["notifications", session?.user?.id],
     queryFn: () => fetchNotifications(token),
     enabled: isAuthenticated,
     refetchInterval: 30_000,
@@ -86,17 +86,17 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   const createMutation = useMutation({
     mutationFn: (body: { type: string; title: string; message?: string }) =>
       createServerNotification(token, body),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["notifications"] }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["notifications", session?.user?.id] }),
   });
 
   const markReadMutation = useMutation({
     mutationFn: () => markNotificationsRead(token),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["notifications"] }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["notifications", session?.user?.id] }),
   });
 
   const clearMutation = useMutation({
     mutationFn: () => clearServerNotifications(token),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["notifications"] }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["notifications", session?.user?.id] }),
   });
 
   const notifications = useMemo(

@@ -7,7 +7,7 @@ import { getCurrentUser } from "@/lib/api";
 export function useCurrentUser() {
   const { data: session } = useSession();
   return useQuery({
-    queryKey: ["user"],
+    queryKey: ["user", session?.user?.id],
     queryFn: () => getCurrentUser(session!.accessToken!),
     enabled: !!session?.accessToken,
   });

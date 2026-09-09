@@ -44,7 +44,7 @@ export function usePublicTilesets() {
 export function useTileset(slug: string) {
   const { data: session } = useSession();
   return useQuery({
-    queryKey: ["tileset", slug],
+    queryKey: ["tileset", session?.user?.id ?? "anonymous", slug],
     queryFn: () => getTileSet(slug, session?.accessToken),
     enabled: !!slug,
   });
@@ -57,7 +57,7 @@ export function useUpdateTileset(slug: string) {
     mutationFn: (input: UpdateTileSetInput) =>
       updateTileSet(slug, input, session?.accessToken),
     onSuccess: (updated) => {
-      queryClient.setQueryData<TileSet>(["tileset", slug], updated);
+      queryClient.setQueryData<TileSet>(["tileset", session?.user?.id ?? "anonymous", slug], updated);
       queryClient.invalidateQueries({ queryKey: ["tilesets"] });
     },
     onError: (err: Error) => {
@@ -73,7 +73,7 @@ export function useDeleteTileset() {
     mutationFn: (slug: string) => deleteTileSet(slug, session?.accessToken),
     onSuccess: (_data, slug) => {
       queryClient.invalidateQueries({ queryKey: ["tilesets"] });
-      queryClient.invalidateQueries({ queryKey: ["tileset", slug] });
+      queryClient.invalidateQueries({ queryKey: ["tileset", session?.user?.id ?? "anonymous", slug] });
       queryClient.invalidateQueries({ queryKey: ["user"] });
       toast.success("Tileset deleted");
     },

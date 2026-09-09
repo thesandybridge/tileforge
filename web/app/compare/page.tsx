@@ -82,13 +82,13 @@ export default function ComparePage() {
   const rightTileset = tilesets.find((t) => t.slug === rightSlug) ?? null;
 
   const { data: leftUrl } = useQuery({
-    queryKey: ["pmtiles-url", leftSlug],
+    queryKey: ["pmtiles-url", session?.user?.id, leftSlug],
     queryFn: () => getPmtilesUrl(leftSlug!, session?.accessToken),
     enabled: !!leftSlug && !!session?.accessToken,
   });
 
   const { data: rightUrl } = useQuery({
-    queryKey: ["pmtiles-url", rightSlug],
+    queryKey: ["pmtiles-url", session?.user?.id, rightSlug],
     queryFn: () => getPmtilesUrl(rightSlug!, session?.accessToken),
     enabled: !!rightSlug && !!session?.accessToken,
   });

@@ -7,7 +7,7 @@ import { listLinkedAccounts, unlinkAccount, updateAvatar } from "@/lib/api";
 export function useLinkedAccounts() {
   const { data: session } = useSession();
   return useQuery({
-    queryKey: ["linked-accounts"],
+    queryKey: ["linked-accounts", session?.user?.id],
     queryFn: () => listLinkedAccounts(session!.accessToken!),
     enabled: !!session?.accessToken,
   });
@@ -19,7 +19,7 @@ export function useUnlinkAccount() {
   return useMutation({
     mutationFn: (provider: string) => unlinkAccount(provider, session!.accessToken!),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["linked-accounts"] });
+      queryClient.invalidateQueries({ queryKey: ["linked-accounts", session?.user?.id] });
     },
   });
 }
