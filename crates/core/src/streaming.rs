@@ -494,7 +494,14 @@ fn extract_tile(
     let avail_x = (src_w as f64 - src_x_start_f).min(tile_src_range).max(0.0);
     let avail_y = (src_h as f64 - src_y_start_f).min(tile_src_range).max(0.0);
     let frac_x = avail_x / tile_src_range;
-    let frac_y = avail_y / tile_src_range;
+    // Mercator source-row ranges are intentionally non-linear. Every valid
+    // row spans a complete output tile even though its source-height near the
+    // poles is much smaller than the flat-projection source range.
+    let frac_y = if projection == Projection::Mercator {
+        1.0
+    } else {
+        avail_y / tile_src_range
+    };
 
     let dest_w = (frac_x * tile_size as f64).round().max(1.0) as u32;
     let dest_h = (frac_y * tile_size as f64).round().max(1.0) as u32;
@@ -743,6 +750,25 @@ mod tests {
         assert_eq!(merged.len(), 1);
         assert_eq!(merged[0].width(), ts);
         assert_eq!(merged[0].height(), ts);
+    }
+
+    #[test]
+    fn mercator_bottom_row_fills_the_output_tile() {
+        let tile_size = 32;
+        let source = RgbaImage::from_pixel(256, 128, image::Rgba([20, 40, 60, 255]));
+        let tile = extract_tile(
+            &source,
+            0,
+            0,
+            7,
+            tile_size,
+            source.width(),
+            source.height(),
+            u64::from(tile_size * 8),
+            Projection::Mercator,
+        );
+
+        assert!(tile.pixels().all(|pixel| pixel[3] == 255));
     }
 
     #[test]

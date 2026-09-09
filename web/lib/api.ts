@@ -23,6 +23,13 @@ export interface TileSet {
   project_id: string | null;
 }
 
+export function getTilesetThumbnailUrl(tileset: Pick<TileSet, "storage_path">): string {
+  const jobId = tileset.storage_path.startsWith("tiles/")
+    ? tileset.storage_path.slice("tiles/".length)
+    : tileset.storage_path;
+  return `${API_URL}/api/tiles/${encodeURIComponent(jobId)}/thumbnail`;
+}
+
 export interface Project {
   id: string;
   name: string;

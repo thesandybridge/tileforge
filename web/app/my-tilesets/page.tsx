@@ -7,7 +7,7 @@ import {
   Map, Globe, Grid3X3, Trash2, ImageIcon, ArrowRight,
   GitCompareArrows, Clock3, CircleCheck, CircleX, FolderPlus,
 } from "lucide-react";
-import { API_URL } from "@/lib/api";
+import { getTilesetThumbnailUrl } from "@/lib/api";
 import { PLAN_PRO } from "@/lib/plans";
 import { formatBytes, timeAgo } from "@/lib/utils";
 import { useTilesets, useDeleteTileset } from "@/hooks/use-tilesets";
@@ -223,7 +223,7 @@ export default function MyTilesetsPage() {
                   <Link href={`/tilesets/${encodeURIComponent(ts.slug)}`}>
                     <div className="bg-muted/50 relative aspect-video">
                       <img
-                        src={`${API_URL}/api/tiles/${encodeURIComponent(ts.slug)}/thumbnail`}
+                        src={getTilesetThumbnailUrl(ts)}
                         alt={ts.name}
                         width={640}
                         height={360}
