@@ -29,7 +29,7 @@ Validation: all 10 auth policy/token tests passed in a temporary fixture using p
 | Priority | Finding | Recommended change |
 | --- | --- | --- |
 | Done | Private React Query data is scoped to the authenticated user ID and stale private cache entries are removed when identity changes. | Implemented in the query provider and private-data hooks. |
-| Medium | CI runs on main pushes only; browser tests are not executed. | Add PR checks and auth regression tests; configure package access appropriately for trusted CI contexts. |
+| Done | CI runs for pushes and pull requests, cancels superseded runs, and executes the isolated auth regression suite after the web build. | Forked pull requests still require a package-install strategy that does not expose the private `NPM_TOKEN`. |
 | Medium | Account auto-linking and explicit linking are intertwined in one large JWT callback. | Extract a transactional account service; test ownership conflicts, concurrent sign-ins, verified-email policy, and deactivation behavior against Postgres. |
 | Low | README describes browser-only processing as universal despite optional server processing; auth and deployment documentation also drifted. | Document browser/server privacy separately and reconcile deployed behavior with setup instructions. |
 
