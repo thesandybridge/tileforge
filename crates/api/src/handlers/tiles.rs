@@ -237,7 +237,12 @@ pub async fn process_tiles(
             tile_size: Some(tile_size),
             min_zoom: params.min_zoom,
             max_zoom: params.max_zoom,
-            projection: Some(projection_str.to_string()),
+            // Let the worker infer the useful default from GeoTIFF metadata.
+            projection: if tileforge_core::is_tiff(&body) && params.projection.is_none() {
+                None
+            } else {
+                Some(projection_str.to_string())
+            },
             user_id: claims.0.as_ref().map(|c| c.sub.clone()),
             file_name: params.file_name.clone(),
             reserved_bytes,

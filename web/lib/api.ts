@@ -16,6 +16,8 @@ export interface TileSet {
   created_at: string;
   width: number | null;
   height: number | null;
+  source_epsg: number | null;
+  source_bounds: number[] | null;
 }
 
 export type JobStatus = "queued" | "processing" | "complete" | "failed";

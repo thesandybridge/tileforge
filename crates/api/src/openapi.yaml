@@ -593,6 +593,16 @@ components:
           type: integer
         max_zoom:
           type: integer
+        source_epsg:
+          type: [integer, "null"]
+          description: EPSG code detected from a GeoTIFF source
+        source_bounds:
+          type: [array, "null"]
+          description: Source bounds ordered west, south, east, north
+          minItems: 4
+          maxItems: 4
+          items:
+            type: number
         created_at:
           type: string
           format: date-time

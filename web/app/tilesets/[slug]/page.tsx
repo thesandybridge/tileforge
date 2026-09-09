@@ -270,6 +270,20 @@ const map = new maplibregl.Map({
                   <p className="mt-1 font-medium">{tileset.width} &times; {tileset.height}</p>
                 </div>
               )}
+              {tileset.source_epsg && (
+                <div>
+                  <p className="text-muted-foreground text-xs uppercase tracking-wider">Source CRS</p>
+                  <p className="mt-1 font-medium">EPSG:{tileset.source_epsg}</p>
+                </div>
+              )}
+              {tileset.source_bounds?.length === 4 && (
+                <div className="sm:col-span-2">
+                  <p className="text-muted-foreground text-xs uppercase tracking-wider">Source Bounds</p>
+                  <p className="mt-1 font-mono text-xs">
+                    {tileset.source_bounds.map((value) => value.toFixed(5)).join(", ")}
+                  </p>
+                </div>
+              )}
               <div>
                 <p className="text-muted-foreground text-xs uppercase tracking-wider">Visibility</p>
                 <p className="mt-1 font-medium">{tileset.public ? "Public" : "Private"}</p>

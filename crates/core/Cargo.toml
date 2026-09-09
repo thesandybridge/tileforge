@@ -6,7 +6,7 @@ edition = "2021"
 [features]
 default = ["parallel"]
 parallel = ["rayon"]
-tiff = ["image/tiff"]
+tiff = ["image/tiff", "dep:tiff"]
 
 [dependencies]
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
@@ -15,3 +15,4 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 pmtiles = { version = "=0.19.2", default-features = false, features = ["write"] }
 thiserror = "2"
 rayon = { version = "1.10", optional = true }
+tiff = { version = "0.10", optional = true }

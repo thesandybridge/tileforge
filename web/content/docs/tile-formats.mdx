@@ -14,7 +14,7 @@ TileForge accepts the following image formats as input:
 | TIFF/GeoTIFF | No | Yes | Standard GIS/satellite imagery format |
 
 <CalloutCard title="TIFF/GeoTIFF Support" variant="info">
-  TIFF and GeoTIFF files are supported on the server-side API and worker for Pro users. The browser-based WASM processor does not support TIFF to keep the bundle size small.
+  TIFF and GeoTIFF files are supported on the server-side API and worker for Pro users. TileForge reads EPSG and north-up source bounds from standard GeoTIFF tags and preserves them with the tileset. A global EPSG:4326 raster automatically uses Mercator when no projection is supplied. Cropped and projected rasters retain their source metadata without claiming to reproject them. The browser-based WASM processor does not support TIFF to keep the bundle size small.
 </CalloutCard>
 
 ## Output Formats

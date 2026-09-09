@@ -15,7 +15,7 @@ use tileforge_shared::{progress_key, tile_s3_prefix};
 
 const TILESET_COLUMNS: &str =
     "id, user_id, name, slug, projection, tile_size, min_zoom, max_zoom, \
-     tile_count, size_bytes, storage_path, public, created_at, width, height";
+     tile_count, size_bytes, storage_path, public, created_at, width, height, source_epsg, source_bounds";
 
 #[derive(Serialize, sqlx::FromRow, utoipa::ToSchema)]
 pub struct TileSetRow {
@@ -34,6 +34,8 @@ pub struct TileSetRow {
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub width: Option<i32>,
     pub height: Option<i32>,
+    pub source_epsg: Option<i32>,
+    pub source_bounds: Option<Vec<f64>>,
 }
 
 #[derive(Deserialize)]

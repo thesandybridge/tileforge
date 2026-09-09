@@ -400,6 +400,7 @@ async fn process_job(
         .await
         .map_err(|e| format!("S3 download failed: {e}"))?;
     let image_bytes = resp.to_vec();
+    let source_metadata = tileforge_core::read_geotiff_metadata(&image_bytes);
 
     // Check if we'll use streaming (to avoid double-decode for small images)
     let will_stream = should_use_streaming(&image_bytes, STREAMING_THRESHOLD);
@@ -437,6 +438,9 @@ async fn process_job(
     let projection = match job.projection.as_deref() {
         Some("mercator") => Projection::Mercator,
         Some("isometric") => Projection::Isometric,
+        None if source_metadata.as_ref().is_some_and(|metadata| metadata.is_global_geographic()) => {
+            Projection::Mercator
+        }
         _ => Projection::Flat,
     };
 
@@ -599,7 +603,11 @@ async fn process_job(
                     format!("Tileset {short_id}")
                 });
             let slug = &job.job_id;
-            let projection = job.projection.as_deref().unwrap_or("flat");
+            let projection = match job.projection.as_deref() {
+                Some(value) => value,
+                None if source_metadata.as_ref().is_some_and(|metadata| metadata.is_global_geographic()) => "mercator",
+                None => "flat",
+            };
             let storage_path = tile_s3_prefix(&job.job_id);
             let total_size = (zip_bytes.len() + pmtiles_bytes.len()) as i64;
 
@@ -614,8 +622,8 @@ async fn process_job(
             let height_i32 = img_height as i32;
 
             let result = sqlx::query(
-                "INSERT INTO tile_sets (user_id, name, slug, projection, tile_size, min_zoom, max_zoom, tile_count, size_bytes, storage_path, public, width, height)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, false, $11, $12)
+                "INSERT INTO tile_sets (user_id, name, slug, projection, tile_size, min_zoom, max_zoom, tile_count, size_bytes, storage_path, public, width, height, source_epsg, source_bounds)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, false, $11, $12, $13, $14)
                  ON CONFLICT (user_id, slug) DO NOTHING",
             )
             .bind(user_id)
@@ -630,6 +638,8 @@ async fn process_job(
             .bind(&storage_path)
             .bind(width_i32)
             .bind(height_i32)
+            .bind(source_metadata.as_ref().and_then(|metadata| metadata.epsg).map(i32::from))
+            .bind(source_metadata.as_ref().and_then(|metadata| metadata.bounds.map(Vec::from)))
             .execute(pool)
             .await;
 
