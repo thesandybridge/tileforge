@@ -95,7 +95,9 @@ export function Navbar() {
   const { setOpen: setCommandPaletteOpen } = useCommandPalette();
 
   return (
-    <nav className="border-border/50 border-b sticky top-0 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 z-50">
+    <>
+    <div className="h-[57px] shrink-0" aria-hidden />
+    <nav className="border-border/50 fixed inset-x-0 top-0 z-40 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
       <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-4 md:px-6">
         {/* Logo - always visible */}
         <Logo />
@@ -166,5 +168,6 @@ export function Navbar() {
         </div>
       </div>
     </nav>
+    </>
   );
 }
