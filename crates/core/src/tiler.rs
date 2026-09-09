@@ -23,6 +23,8 @@ pub enum TilerError {
     PngDecode(png::DecodingError),
     #[error("write error: {0}")]
     Write(String),
+    #[error("TIFF decode error: {0}")]
+    TiffDecode(String),
 }
 
 /// Default memory threshold (256 MB) above which streaming is used.
@@ -216,11 +218,11 @@ impl Tiler {
         } else if !is_png && is_large {
             // Non-PNG (JPEG etc): full decode but strip-based tile extraction
             // Avoids creating resized copies at each zoom level
-            let img = image::load_from_memory(bytes)?;
+            let img = decode_image(bytes)?;
             let streaming = crate::streaming::StreamingTiler::new(self.config.clone());
             streaming.process_image(&img, tile_writer, on_progress)
         } else {
-            let img = image::load_from_memory(bytes)?;
+            let img = decode_image(bytes)?;
             self.process_image(&img, tile_writer, on_progress)
         }
     }
@@ -236,7 +238,7 @@ impl Tiler {
         TW: TileWriter,
         F: Fn(TileProgress),
     {
-        let img = image::load_from_memory(bytes)?;
+        let img = decode_image(bytes)?;
         self.process_image(&img, tile_writer, on_progress)
     }
 
@@ -526,6 +528,16 @@ impl Tiler {
             max_zoom,
         })
     }
+}
+
+fn decode_image(bytes: &[u8]) -> Result<DynamicImage, TilerError> {
+    #[cfg(feature = "tiff")]
+    if crate::streaming::is_tiff(bytes) {
+        return image::load_from_memory(bytes).or_else(|_| {
+            crate::geotiff::decode_tiff_image(bytes).map_err(TilerError::TiffDecode)
+        });
+    }
+    Ok(image::load_from_memory(bytes)?)
 }
 
 pub(crate) fn encode_tile(tile: &RgbaImage, tile_size: u32, format: TileFormat, quality: u8) -> Result<Vec<u8>, TilerError> {
