@@ -40,7 +40,8 @@ export function TilesetGridSkeleton({ count = 4 }: { count?: number }) {
 
 export function TilesetDetailSkeleton() {
   return (
-    <div className="mx-auto max-w-3xl px-6 py-10">
+    {/* Keep the loading shell's container identical to the loaded detail page. */}
+    <div className="mx-auto w-full max-w-3xl px-4 py-10 sm:px-6">
       {/* Header */}
       <div className="flex items-start gap-3">
         <Skeleton className="mt-1 h-6 w-6 rounded" />
