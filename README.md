@@ -5,11 +5,11 @@
 <h1 align="center">Tileforge</h1>
 
 <p align="center">
-  Slice any image into <a href="https://wiki.openstreetmap.org/wiki/Slippy_map_tilenames">XYZ map tiles</a> — entirely in your browser, powered by Rust and WebAssembly.
+  Slice images into <a href="https://wiki.openstreetmap.org/wiki/Slippy_map_tilenames">XYZ map tiles</a> locally with Rust and WebAssembly or through the hosted processing service.
 </p>
 
 <p align="center">
-  <a href="https://github.com/thesandybridge/tileforge/actions"><img src="https://github.com/thesandybridge/tileforge/actions/workflows/wasm-build.yml/badge.svg" alt="WASM Build" /></a>
+  <a href="https://github.com/thesandybridge/tileforge/actions/workflows/ci.yml"><img src="https://github.com/thesandybridge/tileforge/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
   <img src="https://img.shields.io/badge/rust-stable-orange" alt="Rust" />
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="License" /></a>
 </p>
@@ -20,7 +20,7 @@
 
 Tileforge takes a single large image and slices it into a directory tree of small square tiles organized as `{zoom}/{x}/{y}.png` — the standard XYZ tile format used by Leaflet, Mapbox GL, OpenLayers, and every major mapping library.
 
-**No server-side processing.** The web UI runs the entire pipeline in a Web Worker using compiled-to-WASM Rust. Your images never leave your machine.
+Local mode runs the pipeline in a Web Worker using Rust compiled to WebAssembly, so the source image stays on your device. Pro users can explicitly select Server mode for larger jobs; Server mode uploads the source to the Tileforge API for processing and persistent storage.
 
 There's also a native CLI for batch processing and scripting.
 
@@ -136,7 +136,7 @@ tiles/{job_id}/thumbnail.jpg      # 480px JPEG thumbnail
 
 ### Why the WASM Worker lives in `public/`
 
-Turbopack cannot bundle WASM imports inside Web Workers. The worker and WASM glue are plain scripts in `public/`, loaded via `importScripts()`. The React hook creates the worker with `new Worker("/tileforge.worker.js")`.
+Turbopack cannot bundle WASM imports inside Web Workers. The worker and WASM glue are plain scripts in `public/`, loaded via `importScripts()`. The React provider loads a versioned worker URL, and the production Docker build compiles and copies the matching WASM artifacts.
 
 ---
 
@@ -218,13 +218,13 @@ cd crates/wasm
 wasm-pack build --target no-modules --out-dir ../../web/public/wasm --release
 ```
 
-#### Run just the web UI (browser-only mode, no server deps)
+#### Run the web UI
 
 ```bash
 cd web && npm install && npm run dev
 ```
 
-Requires Redis and S3 to be configured. See environment variables below.
+Local processing works without the Rust services. Authentication, Server mode, saved tilesets, and account features require their corresponding database, queue, and object-storage services.
 
 ### Environment Variables
 
@@ -301,15 +301,25 @@ Interactive API documentation is available via Swagger UI at `/swagger-ui` when 
 | POST   | `/api/notifications/read`           | Required | Mark all notifications as read              |
 | DELETE | `/api/notifications`                | Required | Clear all notifications                     |
 | POST   | `/api/keys`                         | Required | Create API key (Pro only)                   |
-| GET    | `/api/keys`                         | Required | Get current API key                         |
-| DELETE | `/api/keys`                         | Required | Revoke API key                              |
+| GET    | `/api/keys`                         | Required | List API keys and CLI devices               |
+| DELETE | `/api/keys`                         | Required | Revoke all API keys                         |
+| POST   | `/api/keys/cli`                     | Required | Authorize a CLI device                      |
+| DELETE | `/api/keys/self`                    | API key  | Revoke the calling credential               |
+| PATCH  | `/api/keys/{key_id}`                | Required | Rename an API key or CLI device             |
+| DELETE | `/api/keys/{key_id}`                | Required | Revoke one API key or CLI device            |
+| GET/POST | `/api/projects`                   | Required | List or create projects                     |
+| PATCH/DELETE | `/api/projects/{project_id}`  | Required | Update or delete a project                  |
+| GET    | `/api/jobs`                         | Required | List persistent processing jobs             |
+| GET    | `/api/jobs/{job_id}`                | Required | Get processing job state                    |
+| POST   | `/api/jobs/{job_id}/retry`          | Required | Retry a failed job                          |
+| POST   | `/api/jobs/{job_id}/cancel`         | Required | Cancel a queued or active job               |
 
 ---
 
 ## CLI Usage
 
 ```bash
-tileforge <IMAGE> [OPTIONS]
+tileforge tiles <IMAGE> [OPTIONS]
 ```
 
 ### Options
@@ -330,16 +340,22 @@ tileforge <IMAGE> [OPTIONS]
 
 ```bash
 # Basic usage — auto-selects processing strategy
-tileforge world_map.png -o tiles.zip
+tileforge tiles world_map.png -o tiles.zip
 
 # Mercator projection for an equirectangular world map
-tileforge equirect_world.png -o mercator_tiles.zip --projection mercator
+tileforge tiles equirect_world.png -o mercator_tiles.zip --projection mercator
 
 # Custom tile size and zoom range
-tileforge large_image.jpg -o tiles.zip --tile-size 512 --max-zoom 6
+tileforge tiles large_image.jpg -o tiles.zip --tile-size 512 --max-zoom 6
 
 # Force streaming mode for a huge PNG
-tileforge huge.png -o tiles.zip --streaming
+tileforge tiles huge.png -o tiles.zip --streaming
+
+# Authenticate this device through the browser, then use hosted jobs
+tileforge auth login
+tileforge auth status
+tileforge cloud submit globe.tif --projection mercator --wait
+tileforge cloud jobs
 ```
 
 ### Output format
@@ -361,9 +377,9 @@ Compatible with Leaflet, Mapbox GL JS, OpenLayers, MapLibre, Google Maps, and an
 
 ## Web UI
 
-1. **Drop or browse** for an image (PNG, JPEG, WebP)
+1. **Drop or browse** for an image (PNG, JPEG, WebP, TIFF, or GeoTIFF)
 2. **Configure** tile size, max zoom level, and projection
-3. **Process** — runs entirely in a Web Worker via WASM
+3. **Process** — choose private Local mode or Pro Server mode
 4. **Preview** — interactive Leaflet map rendered from the in-memory tiles
 5. **Download** — single ZIP file ready to deploy
 
@@ -415,7 +431,7 @@ This means lower zoom levels are generated with no additional source image acces
 
 ## CI/CD
 
-A GitHub Actions workflow (`.github/workflows/wasm-build.yml`) automatically rebuilds the WASM output whenever files under `crates/` change on the `main` branch. The built artifacts are committed back to `web/public/wasm/`.
+GitHub Actions runs Rust tests, Clippy, a WASM bridge check, the Next.js production build, and auth policy tests for pushes and pull requests. The production `web/Dockerfile` builds the release WASM bundle before compiling the Next.js application; generated artifacts are not committed.
 
 ---
 

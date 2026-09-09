@@ -28,7 +28,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Run tests
-        run: cargo test --release --workspace --exclude tileforge-wasm
+        run: RUSTFLAGS="-D warnings" cargo test --release --workspace --exclude tileforge-wasm
 
       - name: Run clippy
         run: cargo clippy --workspace --exclude tileforge-wasm -- -D warnings
