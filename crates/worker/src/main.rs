@@ -243,10 +243,6 @@ async fn run_nats_loop(
                 if delivery_count >= 5 {
                     tracing::warn!(job_id = %job.job_id, "max retries reached, terminating");
                     let _ = msg.ack_with(AckKind::Term).await;
-                    bucket
-                        .delete_object(&upload_s3_key(&job.job_id))
-                        .await
-                        .ok();
                     // Release storage reservation on permanent failure
                     if let (Some(pool), Some(uid), Some(reserved)) =
                         (db, &job.user_id, job.reserved_bytes)
@@ -315,12 +311,6 @@ async fn run_redis_loop(
 
         let result = process_job(&job, bucket, conn, db).await;
 
-        // Always clean up the upload from S3
-        bucket
-            .delete_object(&upload_s3_key(&job.job_id))
-            .await
-            .ok();
-
         if let Err(e) = result {
             tracing::error!(job_id = %job.job_id, "job failed: {e}");
             let progress = JobProgress {
@@ -358,6 +348,8 @@ async fn run_redis_loop(
                         .await;
                 }
             }
+        } else {
+            bucket.delete_object(&upload_s3_key(&job.job_id)).await.ok();
         }
     }
 }

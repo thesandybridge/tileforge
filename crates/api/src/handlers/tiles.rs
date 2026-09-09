@@ -1,7 +1,7 @@
 use axum::{
     body::Bytes,
     extract::{Path, Query, State},
-    http::{header, StatusCode},
+    http::{header, HeaderMap, StatusCode},
     response::{
         sse::{Event, KeepAlive},
         IntoResponse, Response, Sse,
@@ -69,6 +69,17 @@ fn validate_tile_params(params: &TileParams) -> Result<(u32, Projection), ApiErr
     Ok((tile_size, projection))
 }
 
+fn validate_idempotency_key(key: Option<&str>) -> Result<Option<&str>, ApiError> {
+    if key.is_some_and(|value| {
+        value.is_empty() || value.len() > 128 || value.chars().any(char::is_control)
+    }) {
+        return Err(ApiError::InvalidField(
+            "Idempotency-Key must be 1-128 printable characters".into(),
+        ));
+    }
+    Ok(key)
+}
+
 async fn reserve_storage(
     state: &AppState,
     user: &crate::auth::UserClaims,
@@ -95,6 +106,7 @@ async fn enqueue_async(
     state: &AppState,
     body: &Bytes,
     job: TileJob,
+    idempotency_key: Option<&str>,
 ) -> Result<Response, ApiError> {
     let (mut redis, bucket) = match (&state.redis, &state.bucket) {
         (Some(r), Some(b)) => (r.clone(), b.clone()),
@@ -105,14 +117,8 @@ async fn enqueue_async(
         }
     };
 
-    // Upload image bytes to S3
-    bucket
-        .put_object(&upload_s3_key(&job.job_id), body)
-        .await
-        .map_err(|e| ApiError::Processing(format!("S3 upload failed: {e}")))?;
-
-    // Create the durable record before publishing so progress survives a
-    // browser disconnect and the worker can update it immediately.
+    // Claim the idempotency key before uploading or publishing. A concurrent
+    // repeat gets the original job ID and never creates duplicate work.
     if let (Some(db), Some(user_id)) = (&state.db, &job.user_id) {
         let user_id = Uuid::parse_str(user_id).map_err(|_| ApiError::Unauthorized)?;
         let job_id = Uuid::parse_str(&job.job_id)
@@ -125,18 +131,55 @@ async fn enqueue_async(
             "scale": job.scale,
             "background_color": job.background_color,
         });
-        sqlx::query(
-            "INSERT INTO jobs (id, user_id, status, file_name, parameters)
-             VALUES ($1, $2, 'queued', $3, $4)
-             ON CONFLICT (id) DO NOTHING",
+        let inserted: Option<(Uuid,)> = sqlx::query_as(
+            "INSERT INTO jobs (id, user_id, status, file_name, parameters, payload, idempotency_key)
+             VALUES ($1, $2, 'queued', $3, $4, $5, $6)
+             ON CONFLICT (user_id, idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING
+             RETURNING id",
         )
         .bind(job_id)
         .bind(user_id)
         .bind(&job.file_name)
         .bind(parameters)
-        .execute(db)
+        .bind(serde_json::to_value(&job).map_err(|error| ApiError::Processing(error.to_string()))?)
+        .bind(idempotency_key)
+        .fetch_optional(db)
         .await
         .map_err(|error| ApiError::Db(error.to_string()))?;
+        if inserted.is_none() {
+            let existing: (Uuid,) = sqlx::query_as(
+                "SELECT id FROM jobs WHERE user_id = $1 AND idempotency_key = $2",
+            )
+            .bind(user_id)
+            .bind(idempotency_key)
+            .fetch_one(db)
+            .await
+            .map_err(|error| ApiError::Db(error.to_string()))?;
+            if let Some(reserved) = job.reserved_bytes {
+                let _ = sqlx::query("SELECT release_storage_reservation($1, $2)")
+                    .bind(user_id).bind(reserved).execute(db).await;
+            }
+            return Ok((StatusCode::ACCEPTED, Json(AcceptedResponse {
+                job_id: existing.0.to_string(),
+            })).into_response());
+        }
+    }
+
+    if let Err(error) = bucket.put_object(&upload_s3_key(&job.job_id), body).await {
+        if let (Some(db), Ok(job_id), Some(user_id)) = (
+            &state.db,
+            Uuid::parse_str(&job.job_id),
+            job.user_id.as_deref().and_then(|value| Uuid::parse_str(value).ok()),
+        ) {
+            let message = format!("S3 upload failed: {error}");
+            let _ = sqlx::query("UPDATE jobs SET status = 'failed', error = $2, updated_at = now() WHERE id = $1")
+                .bind(job_id).bind(&message).execute(db).await;
+            if let Some(reserved) = job.reserved_bytes {
+                let _ = sqlx::query("SELECT release_storage_reservation($1, $2)")
+                    .bind(user_id).bind(reserved).execute(db).await;
+            }
+        }
+        return Err(ApiError::Processing(format!("S3 upload failed: {error}")));
     }
 
     // Set initial progress in Redis
@@ -153,15 +196,34 @@ async fn enqueue_async(
     let job_id = job.job_id.clone();
     let job_json = serde_json::to_string(&job).unwrap();
 
-    if let Some(ref nats) = state.nats {
-        nats.publish(NATS_JOBS_SUBJECT, job_json.into())
-            .await
-            .map_err(|e| ApiError::Processing(format!("NATS publish failed: {e}")))?
-            .await
-            .map_err(|e| ApiError::Processing(format!("NATS publish ack failed: {e}")))?;
+    let publish_result = if let Some(ref nats) = state.nats {
+        match nats.publish(NATS_JOBS_SUBJECT, job_json.into()).await {
+            Ok(ack) => ack.await.map(|_| ()).map_err(|error| format!("NATS publish ack failed: {error}")),
+            Err(error) => Err(format!("NATS publish failed: {error}")),
+        }
+    } else {
+        redis.lpush::<_, _, ()>(REDIS_JOBS_KEY, &job_json).await
+            .map_err(|error| format!("Redis publish failed: {error}"))
+    };
+    if let Err(error) = publish_result {
+        if let (Some(db), Ok(job_id), Some(user_id)) = (
+            &state.db,
+            Uuid::parse_str(&job.job_id),
+            job.user_id.as_deref().and_then(|value| Uuid::parse_str(value).ok()),
+        ) {
+            let _ = sqlx::query("UPDATE jobs SET status = 'failed', error = $2, updated_at = now() WHERE id = $1")
+                .bind(job_id).bind(&error).execute(db).await;
+            if let Some(reserved) = job.reserved_bytes {
+                let _ = sqlx::query("SELECT release_storage_reservation($1, $2)")
+                    .bind(user_id).bind(reserved).execute(db).await;
+            }
+        }
+        return Err(ApiError::Processing(error));
+    }
+
+    if state.nats.is_some() {
         tracing::info!(job_id = %job_id, "enqueued async job via NATS");
     } else {
-        let _: redis::RedisResult<()> = redis.lpush(REDIS_JOBS_KEY, &job_json).await;
         tracing::info!(job_id = %job_id, "enqueued async job via Redis (NATS not configured)");
     }
 
@@ -205,6 +267,7 @@ pub async fn process_tiles(
     State(state): State<AppState>,
     claims: OptionalClaims,
     Query(params): Query<TileParams>,
+    headers: HeaderMap,
     body: Bytes,
 ) -> Result<Response, ApiError> {
     if body.is_empty() {
@@ -218,6 +281,13 @@ pub async fn process_tiles(
     let projection_str = params.projection.as_deref().unwrap_or("flat");
 
     let is_pro = claims.0.as_ref().is_some_and(|c| c.plan == Plan::Pro);
+    let idempotency_key = headers.get("idempotency-key")
+        .map(|value| value.to_str().map_err(|_| ApiError::InvalidField("invalid Idempotency-Key".into())))
+        .transpose()?;
+    let idempotency_key = validate_idempotency_key(idempotency_key)?;
+    if idempotency_key.is_some() && !is_pro {
+        return Err(ApiError::Forbidden);
+    }
 
     if tileforge_core::is_tiff(&body) && !is_pro {
         return Err(ApiError::FormatRequiresPro("TIFF/GeoTIFF".into()));
@@ -249,7 +319,7 @@ pub async fn process_tiles(
             scale: params.scale,
             background_color: params.background_color.clone(),
         };
-        return enqueue_async(&state, &body, job).await;
+        return enqueue_async(&state, &body, job, idempotency_key).await;
     }
 
     // Sync path
@@ -511,6 +581,14 @@ mod tests {
     }
 
     // ---- validate_tile_params ----
+
+    #[test]
+    fn validates_idempotency_keys() {
+        assert_eq!(validate_idempotency_key(Some("import-2026-09-09")).unwrap(), Some("import-2026-09-09"));
+        assert!(validate_idempotency_key(Some("")).is_err());
+        assert!(validate_idempotency_key(Some("line\nbreak")).is_err());
+        assert!(validate_idempotency_key(Some(&"x".repeat(129))).is_err());
+    }
 
     #[test]
     fn default_params() {

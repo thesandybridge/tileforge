@@ -3,12 +3,14 @@ use axum::{
     Json,
 };
 use serde::{Deserialize, Serialize};
+use redis::AsyncCommands;
+use tileforge_shared::{progress_key, upload_s3_key, TileJob, NATS_JOBS_SUBJECT, REDIS_JOBS_KEY};
 use uuid::Uuid;
 
 use crate::{
     auth::{parse_user_id, Claims},
     error::ApiError,
-    state::{require_db, AppState},
+    state::{require_bucket, require_db, AppState, QUOTA_PRO_BYTES},
 };
 
 #[derive(Debug, Serialize, sqlx::FromRow)]
@@ -25,6 +27,52 @@ pub struct JobRow {
     created_at: chrono::DateTime<chrono::Utc>,
     updated_at: chrono::DateTime<chrono::Utc>,
     completed_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+pub async fn retry_job(
+    State(state): State<AppState>,
+    Claims(user): Claims,
+    Path(job_id): Path<Uuid>,
+) -> Result<Json<JobRow>, ApiError> {
+    let db = require_db(&state)?;
+    let bucket = require_bucket(&state)?;
+    let user_id = parse_user_id(&user)?;
+    let record: Option<(String, Option<serde_json::Value>)> = sqlx::query_as(
+        "SELECT status, payload FROM jobs WHERE id = $1 AND user_id = $2 FOR UPDATE",
+    )
+    .bind(job_id).bind(user_id).fetch_optional(&db).await
+    .map_err(|error| ApiError::Db(error.to_string()))?;
+    let Some((status, Some(payload))) = record else { return Err(ApiError::NotFound); };
+    if status != "failed" { return Err(ApiError::Conflict("only failed jobs can be retried".into())); }
+    let job: TileJob = serde_json::from_value(payload)
+        .map_err(|_| ApiError::Conflict("job cannot be retried because its payload is unavailable".into()))?;
+    bucket.head_object(upload_s3_key(&job.job_id)).await
+        .map_err(|_| ApiError::Conflict("source upload is no longer available".into()))?;
+
+    if let Some(reserved) = job.reserved_bytes {
+        let allowed: (bool,) = sqlx::query_as("SELECT reserve_storage($1, $2, $3)")
+            .bind(user_id).bind(reserved).bind(QUOTA_PRO_BYTES).fetch_one(&db).await
+            .map_err(|error| ApiError::Db(error.to_string()))?;
+        if !allowed.0 { return Err(ApiError::QuotaExceeded); }
+    }
+
+    let job_json = serde_json::to_string(&job).map_err(|error| ApiError::Processing(error.to_string()))?;
+    if let Some(ref nats) = state.nats {
+        nats.publish(NATS_JOBS_SUBJECT, job_json.into()).await
+            .map_err(|error| ApiError::Processing(error.to_string()))?.await
+            .map_err(|error| ApiError::Processing(error.to_string()))?;
+    } else if let Some(mut redis) = state.redis.clone() {
+        let _: () = redis.lpush(REDIS_JOBS_KEY, job_json).await
+            .map_err(|error| ApiError::Processing(error.to_string()))?;
+        let _: () = redis.del(progress_key(&job.job_id)).await
+            .map_err(|error| ApiError::Processing(error.to_string()))?;
+    } else {
+        return Err(ApiError::ServiceUnavailable("job queue unavailable".into()));
+    }
+
+    sqlx::query("UPDATE jobs SET status = 'queued', progress = 0, error = NULL, updated_at = now(), completed_at = NULL WHERE id = $1")
+        .bind(job_id).execute(&db).await.map_err(|error| ApiError::Db(error.to_string()))?;
+    get_job(State(state), Claims(user), Path(job_id)).await
 }
 
 #[derive(Deserialize)]

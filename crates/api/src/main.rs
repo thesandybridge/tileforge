@@ -320,6 +320,13 @@ fn build_router(state: AppState, rate_limit: RateLimit, config: &AppConfig) -> R
                 rate_limit_progress,
             )),
         )
+        .route(
+            "/api/jobs/{job_id}/retry",
+            post(jobs::retry_job).layer(middleware::from_fn_with_state(
+                rate_limit.clone(),
+                rate_limit_mutations,
+            )),
+        )
         // Tilesets
         .route(
             "/api/tilesets",

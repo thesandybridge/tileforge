@@ -32,6 +32,15 @@ Authorization: Bearer tf_your_api_key
 <binary image data>
 ```
 
+Automated clients should include an `Idempotency-Key` header of up to 128 characters. Repeating a Pro submission with the same key returns the original job ID without uploading or processing the image twice.
+
+Failed durable jobs can be queued again while their source upload remains available:
+
+```bash
+curl -X POST "https://api.tileforge.sandybridge.io/api/jobs/JOB_ID/retry" \
+  -H "Authorization: Bearer YOUR_API_KEY"
+```
+
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `tile_size` | integer | `256` | Tile size in pixels: `128`, `256`, or `512` |

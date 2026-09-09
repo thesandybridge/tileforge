@@ -90,6 +90,12 @@ paths:
           in: query
           schema:
             type: string
+        - name: Idempotency-Key
+          in: header
+          description: Pro clients can safely repeat a submission with the same key to receive the original job ID.
+          schema:
+            type: string
+            maxLength: 128
       requestBody:
         required: true
         content:
@@ -145,6 +151,25 @@ paths:
           description: Requested PMTiles byte range
         '404':
           description: Tileset not found or inaccessible
+
+  /api/jobs/{job_id}/retry:
+    post:
+      tags: [Tiles]
+      summary: Retry a failed processing job
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: job_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Job queued again
+        '409':
+          description: Job is not failed or its source upload has expired
 
   /api/tiles/{job_id}/progress:
     get:
