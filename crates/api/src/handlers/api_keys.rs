@@ -78,6 +78,29 @@ pub async fn create_api_key(
         .into_response())
 }
 
+/// Creates an additional key for a CLI login without rotating service keys.
+pub async fn create_cli_api_key(
+    State(state): State<AppState>,
+    Claims(user): Claims,
+) -> Result<Response, ApiError> {
+    if user.plan != Plan::Pro { return Err(ApiError::Forbidden); }
+    let db = require_db(&state)?;
+    let user_id = parse_user_id(&user)?;
+    let random_bytes: [u8; 16] = OsRng.gen();
+    let raw_key = format!("tf_{}", hex::encode(random_bytes));
+    let key_hash = hex::encode(Sha256::digest(raw_key.as_bytes()));
+    let key_prefix = raw_key[..11].to_string();
+    let row = sqlx::query_as::<_, ApiKeyRow>(
+        "INSERT INTO api_keys (user_id, key_hash, key_prefix, name)
+         VALUES ($1, $2, $3, 'TileForge CLI') RETURNING id, key_prefix, created_at",
+    )
+    .bind(user_id).bind(key_hash).bind(&key_prefix).fetch_one(&db).await
+    .map_err(|error| ApiError::Db(error.to_string()))?;
+    Ok((StatusCode::CREATED, Json(ApiKeyCreatedResponse {
+        id: row.id, key: raw_key, key_prefix: row.key_prefix, created_at: row.created_at,
+    })).into_response())
+}
+
 pub async fn get_api_key(
     State(state): State<AppState>,
     Claims(user): Claims,

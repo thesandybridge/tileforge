@@ -319,6 +319,13 @@ fn build_router(state: AppState, rate_limit: RateLimit, config: &AppConfig) -> R
                     rate_limit_mutations,
                 )),
         )
+        .route(
+            "/api/keys/cli",
+            post(api_keys::create_cli_api_key).layer(middleware::from_fn_with_state(
+                rate_limit.clone(),
+                rate_limit_mutations,
+            )),
+        )
         // Persistent processing jobs
         .route(
             "/api/jobs",

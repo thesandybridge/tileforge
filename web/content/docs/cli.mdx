@@ -1,6 +1,6 @@
 # CLI
 
-The TileForge CLI generates map tiles from the command line.
+The TileForge CLI generates tiles locally and can submit jobs to the hosted service.
 
 ## Installation
 
@@ -22,6 +22,30 @@ The binary will be at `target/release/tileforge`.
 
 ```bash
 tileforge <INPUT> [OPTIONS]
+```
+
+## Sign in
+
+```bash
+tileforge auth login
+```
+
+The command opens TileForge in your browser. After GitHub sign-in, authorize the CLI to create a separate API key for this computer. The credential is stored in `~/.config/tileforge/credentials` with user-only permissions on Unix. Existing API keys remain active.
+
+Use `tileforge auth status` to check the local credential or `tileforge auth logout` to remove it. Headless environments can set `TILEFORGE_API_KEY` instead.
+
+## Cloud jobs
+
+```bash
+# Submit safely, wait for processing, and print the final status
+tileforge cloud submit map.png --idempotency-key map-v1 --wait
+
+tileforge cloud jobs
+tileforge cloud status JOB_ID --wait
+tileforge cloud retry JOB_ID
+tileforge cloud cancel JOB_ID
+tileforge cloud download JOB_ID -o tiles.zip
+tileforge cloud download JOB_ID --pmtiles -o tiles.pmtiles
 ```
 
 ### Basic Examples

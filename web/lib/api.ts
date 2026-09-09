@@ -219,6 +219,14 @@ export async function createApiKey(token: string): Promise<ApiKeyCreated> {
   return handleResponse<ApiKeyCreated>(res);
 }
 
+export async function createCliApiKey(token: string): Promise<ApiKeyCreated> {
+  const res = await fetch(`${API_URL}/api/keys/cli`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return handleResponse<ApiKeyCreated>(res);
+}
+
 export async function revokeApiKey(token: string): Promise<void> {
   const res = await fetch(`${API_URL}/api/keys`, {
     method: "DELETE",
