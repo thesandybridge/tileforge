@@ -12,6 +12,9 @@ export type WorkerRequest =
   | {
       type: "process";
       imageBytes: ArrayBuffer;
+      rgbBytes?: ArrayBuffer;
+      imageWidth?: number;
+      imageHeight?: number;
       tileSize: number;
       minZoom?: number;
       maxZoom?: number;

@@ -1,4 +1,4 @@
-importScripts("/wasm/tileforge_wasm.js?v=3");
+importScripts("/wasm/tileforge_wasm.js?v=4");
 
 let ready = false;
 
@@ -8,7 +8,7 @@ function post(msg, transfer) {
 
 async function init() {
   try {
-    await wasm_bindgen("/wasm/tileforge_wasm_bg.wasm?v=3");
+    await wasm_bindgen("/wasm/tileforge_wasm_bg.wasm?v=4");
     ready = true;
     post({ type: "ready" });
   } catch (e) {
@@ -47,6 +47,7 @@ function process(msg) {
     }
 
     const input = new Uint8Array(msg.imageBytes);
+    const rgb = msg.rgbBytes ? new Uint8Array(msg.rgbBytes) : null;
 
     const progressCallback = function (tilesDone, tilesTotal, zoom) {
       post({ type: "progress", tilesDone: tilesDone, tilesTotal: tilesTotal, zoom: zoom });
@@ -54,7 +55,9 @@ function process(msg) {
 
     if (msg.includePmtiles) {
       // Process with both ZIP and PMTiles output
-      const result = processTilesWithPmtiles(input, config, progressCallback);
+      const result = rgb
+        ? wasm_bindgen.processRgbTilesWithPmtiles(rgb, msg.imageWidth, msg.imageHeight, config, progressCallback)
+        : processTilesWithPmtiles(input, config, progressCallback);
       const zipBuffer = result.zipBytes.buffer;
       const pmtilesBuffer = result.pmtilesBytes.buffer;
 
@@ -69,7 +72,9 @@ function process(msg) {
       post(response, transfers);
     } else {
       // Process ZIP only (default)
-      const zipData = processTiles(input, config, progressCallback);
+      const zipData = rgb
+        ? wasm_bindgen.processRgbTiles(rgb, msg.imageWidth, msg.imageHeight, config, progressCallback)
+        : processTiles(input, config, progressCallback);
       const buffer = zipData.buffer;
       post({ type: "complete", zipBytes: buffer }, [buffer]);
     }

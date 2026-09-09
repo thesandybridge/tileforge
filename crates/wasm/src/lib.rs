@@ -1,3 +1,4 @@
+use image::{DynamicImage, RgbImage};
 use tileforge_core::{
     BackgroundColor, PmTilesTileWriter, Projection, ScaleMetadata, SharedBuffer, TeeTileWriter,
     TileConfig, TileFormat, TileWriter, Tiler, ZipTileWriter,
@@ -68,10 +69,18 @@ impl WasmTileConfig {
     }
 
     #[wasm_bindgen(js_name = setFormat)]
-    pub fn set_format(&mut self, format: u8) { self.format = match format { 1 => TileFormat::Jpeg, 2 => TileFormat::Webp, _ => TileFormat::Png }; }
+    pub fn set_format(&mut self, format: u8) {
+        self.format = match format {
+            1 => TileFormat::Jpeg,
+            2 => TileFormat::Webp,
+            _ => TileFormat::Png,
+        };
+    }
 
     #[wasm_bindgen(js_name = setQuality)]
-    pub fn set_quality(&mut self, quality: u8) { self.quality = quality.clamp(1, 100); }
+    pub fn set_quality(&mut self, quality: u8) {
+        self.quality = quality.clamp(1, 100);
+    }
 
     /// Set scale metadata mode: "pixels_per_unit" or "units_per_tile".
     #[wasm_bindgen(js_name = setScaleMode)]
@@ -103,19 +112,18 @@ impl WasmTileConfig {
             .as_ref()
             .and_then(|hex| BackgroundColor::from_hex(hex));
 
-        let scale_metadata = if self.scale_mode.is_some()
-            || self.scale_value.is_some()
-            || self.scale_unit.is_some()
-        {
-            Some(ScaleMetadata {
-                mode: self.scale_mode.clone(),
-                value: self.scale_value,
-                unit: self.scale_unit.clone(),
-                bounds: None,
-            })
-        } else {
-            None
-        };
+        let scale_metadata =
+            if self.scale_mode.is_some() || self.scale_value.is_some() || self.scale_unit.is_some()
+            {
+                Some(ScaleMetadata {
+                    mode: self.scale_mode.clone(),
+                    value: self.scale_value,
+                    unit: self.scale_unit.clone(),
+                    bounds: None,
+                })
+            } else {
+                None
+            };
 
         TileConfig {
             tile_size: self.tile_size,
@@ -190,6 +198,34 @@ pub fn process_tiles(
     Ok(zip_writer.into_inner().unwrap().into_inner())
 }
 
+#[wasm_bindgen(js_name = processRgbTiles)]
+pub fn process_rgb_tiles(
+    rgb_bytes: &[u8],
+    width: u32,
+    height: u32,
+    config: &WasmTileConfig,
+    on_progress: &js_sys::Function,
+) -> Result<Vec<u8>, JsError> {
+    let image = RgbImage::from_raw(width, height, rgb_bytes.to_vec())
+        .ok_or_else(|| JsError::new("GeoTIFF decoder returned incomplete RGB data"))?;
+    let core_config = config.to_core_config();
+    let format = core_config.format;
+    let tiler = Tiler::new(core_config);
+    let mut writer = ZipTileWriter::with_format(std::io::Cursor::new(Vec::new()), format);
+    let js_this = JsValue::NULL;
+    tiler
+        .process_image(&DynamicImage::ImageRgb8(image), &mut writer, |p| {
+            let _ = on_progress.call3(
+                &js_this,
+                &p.tiles_done.into(),
+                &p.tiles_total.into(),
+                &p.zoom.into(),
+            );
+        })
+        .map_err(|e| JsError::new(&e.to_string()))?;
+    Ok(writer.into_inner().unwrap().into_inner())
+}
+
 /// Process image bytes into both ZIP and PMTiles archives.
 /// `on_progress` is called with (tiles_done, tiles_total, current_zoom).
 #[wasm_bindgen(js_name = processTilesWithPmtiles)]
@@ -214,8 +250,9 @@ pub fn process_tiles_with_pmtiles(
 
     // Create PMTiles writer with SharedBuffer so we can extract bytes after finalize
     let pmtiles_buffer = SharedBuffer::new();
-    let pmtiles_writer = PmTilesTileWriter::with_format(pmtiles_buffer.cursor(), min_zoom, max_zoom, format)
-        .map_err(|e| JsError::new(&e.to_string()))?;
+    let pmtiles_writer =
+        PmTilesTileWriter::with_format(pmtiles_buffer.cursor(), min_zoom, max_zoom, format)
+            .map_err(|e| JsError::new(&e.to_string()))?;
 
     // Create tee writer to write to both
     let mut tee_writer = TeeTileWriter::new(zip_writer, pmtiles_writer);
@@ -233,7 +270,8 @@ pub fn process_tiles_with_pmtiles(
         .map_err(|e| JsError::new(&e.to_string()))?;
 
     // Finalize both writers (writes PMTiles headers/directory)
-    tee_writer.finish()
+    tee_writer
+        .finish()
         .map_err(|e| JsError::new(&e.to_string()))?;
 
     let (zip_writer, _pmtiles_writer) = tee_writer.into_inner();
@@ -247,5 +285,45 @@ pub fn process_tiles_with_pmtiles(
     Ok(TileOutput {
         zip_bytes,
         pmtiles_bytes,
+    })
+}
+
+#[wasm_bindgen(js_name = processRgbTilesWithPmtiles)]
+pub fn process_rgb_tiles_with_pmtiles(
+    rgb_bytes: &[u8],
+    width: u32,
+    height: u32,
+    config: &WasmTileConfig,
+    on_progress: &js_sys::Function,
+) -> Result<TileOutput, JsError> {
+    let image = RgbImage::from_raw(width, height, rgb_bytes.to_vec())
+        .ok_or_else(|| JsError::new("GeoTIFF decoder returned incomplete RGB data"))?;
+    let core_config = config.to_core_config();
+    let format = core_config.format;
+    let min_zoom = core_config.min_zoom.unwrap_or(0) as u8;
+    let max_zoom = core_config.max_zoom.unwrap_or(8) as u8;
+    let tiler = Tiler::new(core_config);
+    let zip_writer = ZipTileWriter::with_format(std::io::Cursor::new(Vec::new()), format);
+    let pmtiles_buffer = SharedBuffer::new();
+    let pmtiles_writer =
+        PmTilesTileWriter::with_format(pmtiles_buffer.cursor(), min_zoom, max_zoom, format)
+            .map_err(|e| JsError::new(&e.to_string()))?;
+    let mut writer = TeeTileWriter::new(zip_writer, pmtiles_writer);
+    let js_this = JsValue::NULL;
+    tiler
+        .process_image(&DynamicImage::ImageRgb8(image), &mut writer, |p| {
+            let _ = on_progress.call3(
+                &js_this,
+                &p.tiles_done.into(),
+                &p.tiles_total.into(),
+                &p.zoom.into(),
+            );
+        })
+        .map_err(|e| JsError::new(&e.to_string()))?;
+    writer.finish().map_err(|e| JsError::new(&e.to_string()))?;
+    let (zip_writer, _) = writer.into_inner();
+    Ok(TileOutput {
+        zip_bytes: zip_writer.into_inner().unwrap().into_inner(),
+        pmtiles_bytes: pmtiles_buffer.take_bytes(),
     })
 }

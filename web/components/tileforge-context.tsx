@@ -188,6 +188,25 @@ interface TileforgeContextValue {
   isProcessingQueue: boolean;
 }
 
+function isTiffBuffer(bytes: ArrayBuffer): boolean {
+  if (bytes.byteLength < 4) return false;
+  const header = new Uint8Array(bytes, 0, 4);
+  return (
+    (header[0] === 0x49 && header[1] === 0x49 && (header[2] === 0x2a || header[2] === 0x2b) && header[3] === 0) ||
+    (header[0] === 0x4d && header[1] === 0x4d && header[2] === 0 && (header[3] === 0x2a || header[3] === 0x2b))
+  );
+}
+
+async function decodeGeoTiff(bytes: ArrayBuffer) {
+  const { fromArrayBuffer } = await import("geotiff");
+  const tiff = await fromArrayBuffer(bytes);
+  const image = await tiff.getImage();
+  const width = image.getWidth();
+  const height = image.getHeight();
+  const rgb = await image.readRGB({ interleave: true });
+  return { rgbBytes: new Uint8Array(rgb).slice().buffer, width, height };
+}
+
 const TileforgeContext = createContext<TileforgeContextValue>({
   status: "idle",
   progress: null,
@@ -271,7 +290,7 @@ export function TileforgeProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     // Public engine assets have stable filenames, so version the request to
     // prevent a browser or CDN from pairing a new UI with an old decoder.
-    const worker = new Worker("/tileforge.worker.js?v=3");
+    const worker = new Worker("/tileforge.worker.js?v=4");
     workerRef.current = worker;
 
     worker.onmessage = (e: MessageEvent<WorkerResponse>) => {
@@ -326,15 +345,28 @@ export function TileforgeProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const process = useCallback(
-    (imageBytes: ArrayBuffer, opts: ProcessOpts = {}) => {
+    async (imageBytes: ArrayBuffer, opts: ProcessOpts = {}) => {
       if (!workerRef.current) return;
       fileNameRef.current = opts.fileName ?? null;
       startTimeRef.current = performance.now();
       dispatch({ type: "processing" });
 
+      let raster: Awaited<ReturnType<typeof decodeGeoTiff>> | undefined;
+      if (isTiffBuffer(imageBytes)) {
+        try {
+          raster = await decodeGeoTiff(imageBytes);
+        } catch (error) {
+          dispatch({ type: "error", message: `GeoTIFF decode error: ${error instanceof Error ? error.message : String(error)}` });
+          return;
+        }
+      }
+
       const msg: WorkerRequest = {
         type: "process",
         imageBytes,
+        rgbBytes: raster?.rgbBytes,
+        imageWidth: raster?.width,
+        imageHeight: raster?.height,
         tileSize: opts.tileSize ?? DEFAULT_TILE_SIZE,
         minZoom: opts.minZoom,
         maxZoom: opts.maxZoom,
@@ -346,7 +378,8 @@ export function TileforgeProvider({ children }: { children: ReactNode }) {
         format: opts.format,
         quality: opts.quality,
       };
-      workerRef.current.postMessage(msg, [imageBytes]);
+      const transfers = raster ? [imageBytes, raster.rgbBytes] : [imageBytes];
+      workerRef.current.postMessage(msg, transfers);
     },
     [],
   );

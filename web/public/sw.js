@@ -1,8 +1,8 @@
-const CACHE_NAME = "tileforge-v3";
+const CACHE_NAME = "tileforge-v4";
 const PRECACHE_ASSETS = [
-  "/wasm/tileforge_wasm.js?v=3",
-  "/wasm/tileforge_wasm_bg.wasm?v=3",
-  "/tileforge.worker.js?v=3",
+  "/wasm/tileforge_wasm.js?v=4",
+  "/wasm/tileforge_wasm_bg.wasm?v=4",
+  "/tileforge.worker.js?v=4",
 ];
 
 // Install: precache WASM and worker files
