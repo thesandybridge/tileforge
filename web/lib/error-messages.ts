@@ -36,7 +36,7 @@ const ERROR_PATTERNS: Array<{
     friendly: {
       title: "Invalid Image",
       message: "The file couldn't be read as a valid image.",
-      suggestion: "Make sure the file is a valid PNG, JPEG, or WebP image. Try opening it in an image editor and re-saving it.",
+      suggestion: "Make sure the file is a valid PNG, JPEG, WebP, TIFF, or GeoTIFF image. Try opening it in an image editor and re-saving it.",
     },
   },
   {

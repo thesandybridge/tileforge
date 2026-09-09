@@ -89,6 +89,11 @@ function calcTotalTiles(minZoom: number, maxZoom: number): number {
   return total;
 }
 
+function isSupportedImageFile(file: File, allowTiff: boolean): boolean {
+  if (file.type.startsWith("image/")) return true;
+  return allowTiff && /\.tiff?$/i.test(file.name);
+}
+
 function SavePresetButton({ onSave }: { onSave: (name: string) => void }) {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
@@ -278,7 +283,7 @@ export default function Home() {
   }, [form.tileSize]);
 
   const handleFiles = useCallback(async (files: FileList) => {
-    const imageFiles = Array.from(files).filter((f) => f.type.startsWith("image/"));
+    const imageFiles = Array.from(files).filter((file) => isSupportedImageFile(file, session?.user?.plan === PLAN_PRO));
     if (imageFiles.length === 0) return;
 
     // Single file: use existing flow
@@ -298,7 +303,7 @@ export default function Home() {
       }
       await addToQueue(file, imageInfo);
     }
-  }, [handleFile, addToQueue]);
+  }, [handleFile, addToQueue, session?.user?.plan]);
 
   const onDrop = useCallback(
     (e: React.DragEvent) => {
@@ -465,8 +470,8 @@ export default function Home() {
                 onDragOver={(e) => {
                   e.preventDefault();
                   // Check if dragged items contain image files
-                  const hasImage = Array.from(e.dataTransfer.items).some(
-                    (item) => item.kind === "file" && item.type.startsWith("image/")
+                  const hasImage = Array.from(e.dataTransfer.files).some((file) =>
+                    isSupportedImageFile(file, session?.user?.plan === PLAN_PRO)
                   );
                   dispatch({ type: hasImage ? "DRAG_HOVER" : "DRAG_INVALID" });
                 }}

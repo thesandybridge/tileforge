@@ -1,4 +1,4 @@
-const CACHE_NAME = "tileforge-v1";
+const CACHE_NAME = "tileforge-v2";
 const PRECACHE_ASSETS = [
   "/wasm/tileforge_wasm.js",
   "/wasm/tileforge_wasm_bg.wasm",
@@ -31,27 +31,22 @@ self.addEventListener("activate", (event) => {
   self.clients.claim();
 });
 
-// Fetch: serve WASM and worker files from cache, fallback to network
+  // Engine assets change independently of the Next.js bundle. Always check the
+  // network first so a deploy cannot keep running an old decoder indefinitely.
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
 
   // Only intercept requests for WASM and worker files
   if (url.pathname.startsWith("/wasm/") || url.pathname.endsWith(".worker.js")) {
     event.respondWith(
-      caches.match(event.request).then((cachedResponse) => {
-        if (cachedResponse) {
-          return cachedResponse;
-        }
-        // If not in cache, fetch from network and cache it
-        return fetch(event.request).then((networkResponse) => {
+      fetch(event.request, { cache: "no-store" }).then((networkResponse) => {
           // Clone the response before caching
           const responseToCache = networkResponse.clone();
           caches.open(CACHE_NAME).then((cache) => {
             cache.put(event.request, responseToCache);
           });
           return networkResponse;
-        });
-      })
+        }).catch(() => caches.match(event.request))
     );
   }
 });
