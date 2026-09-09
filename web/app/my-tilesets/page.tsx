@@ -166,15 +166,6 @@ export default function MyTilesetsPage() {
                   <Link key={job.id} href={`/tilesets/${encodeURIComponent(job.id)}`}>
                     {content}
                   </Link>
-                  <div className="px-6 pb-5">
-                    <Select value={ts.project_id ?? "unfiled"} onValueChange={(value) => projectActions.assign.mutate({ slug: ts.slug, projectId: value === "unfiled" ? null : value })}>
-                      <SelectTrigger className="h-8"><SelectValue placeholder="Unfiled" /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="unfiled">Unfiled</SelectItem>
-                        {projects.map((project) => <SelectItem key={project.id} value={project.id}>{project.name}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
-                  </div>
                 ) : (
                   <div key={job.id}>{content}</div>
                 );
@@ -279,6 +270,15 @@ export default function MyTilesetsPage() {
                       </div>
                     </CardContent>
                   </Link>
+                  <div className="px-6 pb-5">
+                    <Select value={ts.project_id ?? "unfiled"} onValueChange={(value) => projectActions.assign.mutate({ slug: ts.slug, projectId: value === "unfiled" ? null : value })}>
+                      <SelectTrigger className="h-8"><SelectValue placeholder="Unfiled" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="unfiled">Unfiled</SelectItem>
+                        {projects.map((project) => <SelectItem key={project.id} value={project.id}>{project.name}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
                   <AlertDialogTrigger asChild>
                     <Button
                       variant="ghost"
