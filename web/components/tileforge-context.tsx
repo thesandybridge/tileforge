@@ -204,7 +204,11 @@ async function decodeGeoTiff(bytes: ArrayBuffer) {
   const width = image.getWidth();
   const height = image.getHeight();
   const rgb = await image.readRGB({ interleave: true });
-  return { rgbBytes: new Uint8Array(rgb).slice().buffer, width, height };
+  const rgbView = rgb instanceof Uint8Array ? rgb : Uint8Array.from(rgb);
+  const rgbBytes = rgbView.byteOffset === 0 && rgbView.byteLength === rgbView.buffer.byteLength
+    ? rgbView.buffer
+    : rgbView.slice().buffer;
+  return { rgbBytes, width, height };
 }
 
 const TileforgeContext = createContext<TileforgeContextValue>({
@@ -299,7 +303,7 @@ export function TileforgeProvider({ children }: { children: ReactNode }) {
 
       // Public engine assets have stable filenames, so version the request to
       // prevent a browser or CDN from pairing a new UI with an old decoder.
-      const worker = new Worker("/tileforge.worker.js?v=7");
+      const worker = new Worker("/tileforge.worker.js?v=8");
       workerRef.current = worker;
 
       worker.onmessage = (e: MessageEvent<WorkerResponse>) => {
@@ -398,7 +402,9 @@ export function TileforgeProvider({ children }: { children: ReactNode }) {
 
       const msg: WorkerRequest = {
         type: "process",
-        imageBytes,
+        // Once a GeoTIFF is decoded, retaining its compressed source in the
+        // worker only increases peak memory; the tiler consumes RGB instead.
+        imageBytes: raster ? undefined : imageBytes,
         rgbBytes: raster?.rgbBytes,
         imageWidth: raster?.width,
         imageHeight: raster?.height,
@@ -413,7 +419,7 @@ export function TileforgeProvider({ children }: { children: ReactNode }) {
         format: opts.format,
         quality: opts.quality,
       };
-      const transfers = raster ? [imageBytes, raster.rgbBytes] : [imageBytes];
+      const transfers = raster ? [raster.rgbBytes] : [imageBytes];
       workerRef.current.postMessage(msg, transfers);
     },
     [],

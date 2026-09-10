@@ -11,7 +11,7 @@ export type WorkerRequest =
   | { type: "init" }
   | {
       type: "process";
-      imageBytes: ArrayBuffer;
+      imageBytes?: ArrayBuffer;
       rgbBytes?: ArrayBuffer;
       imageWidth?: number;
       imageHeight?: number;

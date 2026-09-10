@@ -1,4 +1,4 @@
-importScripts("/wasm/tileforge_wasm.js?v=7");
+importScripts("/wasm/tileforge_wasm.js?v=8");
 
 let ready = false;
 
@@ -8,7 +8,7 @@ function post(msg, transfer) {
 
 async function init() {
   try {
-    await wasm_bindgen("/wasm/tileforge_wasm_bg.wasm?v=7");
+    await wasm_bindgen("/wasm/tileforge_wasm_bg.wasm?v=8");
     ready = true;
     post({ type: "ready" });
   } catch (e) {
@@ -47,7 +47,7 @@ function process(msg) {
       if (msg.scaleMetadata.unit) config.setScaleUnit(msg.scaleMetadata.unit);
     }
 
-    const input = new Uint8Array(msg.imageBytes);
+    const input = msg.imageBytes ? new Uint8Array(msg.imageBytes) : null;
     const rgb = msg.rgbBytes ? new Uint8Array(msg.rgbBytes) : null;
 
     const progressCallback = function (tilesDone, tilesTotal, zoom) {
