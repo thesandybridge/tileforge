@@ -1,4 +1,4 @@
-importScripts("/wasm/tileforge_wasm.js?v=6");
+importScripts("/wasm/tileforge_wasm.js?v=7");
 
 let ready = false;
 
@@ -8,7 +8,7 @@ function post(msg, transfer) {
 
 async function init() {
   try {
-    await wasm_bindgen("/wasm/tileforge_wasm_bg.wasm?v=6");
+    await wasm_bindgen("/wasm/tileforge_wasm_bg.wasm?v=7");
     ready = true;
     post({ type: "ready" });
   } catch (e) {
@@ -54,7 +54,7 @@ function process(msg) {
       post({ type: "progress", tilesDone: tilesDone, tilesTotal: tilesTotal, zoom: zoom });
     };
 
-    if (msg.includePmtiles) {
+    if (msg.output === "both") {
       // Process with both ZIP and PMTiles output
       const result = rgb
         ? wasm_bindgen.processRgbTilesWithPmtiles(rgb, msg.imageWidth, msg.imageHeight, config, progressCallback)
@@ -81,6 +81,12 @@ function process(msg) {
       }
 
       post(response, transfers);
+    } else if (msg.output === "pmtiles") {
+      const pmtilesData = rgb
+        ? wasm_bindgen.processRgbTilesPmtiles(rgb, msg.imageWidth, msg.imageHeight, config, progressCallback)
+        : wasm_bindgen.processTilesPmtiles(input, config, progressCallback);
+      const buffer = pmtilesData.buffer;
+      post({ type: "complete", pmtilesBytes: buffer }, [buffer]);
     } else {
       // Process ZIP only (default)
       const zipData = rgb

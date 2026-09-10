@@ -45,8 +45,8 @@ export interface ProcessOpts {
   backgroundColor?: string;
   /** Scale metadata for measurements */
   scaleMetadata?: ScaleMetadata;
-  /** Whether to also generate PMTiles output (WASM only) */
-  includePmtiles?: boolean;
+  /** Which local archive(s) to generate (WASM only) */
+  output?: "zip" | "pmtiles" | "both";
   format?: "png" | "jpeg" | "webp";
   quality?: number;
 }
@@ -97,7 +97,7 @@ type TileforgeAction =
   | { type: "processing" }
   | { type: "progress"; progress: TileforgeProgress }
   | { type: "clear_progress" }
-  | { type: "complete"; zipBlob: Blob; durationMs: number; pmtilesUrl?: string; pmtilesBlob?: Blob }
+  | { type: "complete"; zipBlob?: Blob; durationMs: number; pmtilesUrl?: string; pmtilesBlob?: Blob }
   | { type: "error"; message: string }
   | { type: "set_pmtiles_url"; url: string }
   | { type: "reset"; workerReady: boolean };
@@ -130,7 +130,7 @@ function reducer(state: TileforgeState, action: TileforgeAction): TileforgeState
       return {
         ...state,
         status: "done",
-        zipBlob: action.zipBlob,
+        zipBlob: action.zipBlob ?? null,
         pmtilesBlob: action.pmtilesBlob ?? null,
         durationMs: action.durationMs,
         pmtilesUrl: action.pmtilesUrl ?? state.pmtilesUrl,
@@ -268,8 +268,8 @@ export function TileforgeProvider({ children }: { children: ReactNode }) {
     // Skip notifications during batch processing - batch has its own notification
     if (isProcessingQueue) return;
 
-    if (prev === "processing" && curr === "done" && state.zipBlob) {
-      const zipUrl = URL.createObjectURL(state.zipBlob);
+    if (prev === "processing" && curr === "done" && (state.zipBlob || state.pmtilesBlob)) {
+      const zipUrl = state.zipBlob ? URL.createObjectURL(state.zipBlob) : undefined;
       add({
         type: "processing_complete",
         title: "Processing complete!",
@@ -286,7 +286,7 @@ export function TileforgeProvider({ children }: { children: ReactNode }) {
         message: state.error,
       });
     }
-  }, [state.status, state.zipBlob, state.pmtilesUrl, state.error, add, isProcessingQueue]);
+  }, [state.status, state.zipBlob, state.pmtilesBlob, state.pmtilesUrl, state.error, add, isProcessingQueue]);
 
   // Boot WASM worker once
   useEffect(() => {
@@ -299,7 +299,7 @@ export function TileforgeProvider({ children }: { children: ReactNode }) {
 
       // Public engine assets have stable filenames, so version the request to
       // prevent a browser or CDN from pairing a new UI with an old decoder.
-      const worker = new Worker("/tileforge.worker.js?v=6");
+      const worker = new Worker("/tileforge.worker.js?v=7");
       workerRef.current = worker;
 
       worker.onmessage = (e: MessageEvent<WorkerResponse>) => {
@@ -322,7 +322,9 @@ export function TileforgeProvider({ children }: { children: ReactNode }) {
             });
             break;
           case "complete": {
-            const zipBlob = new Blob([msg.zipBytes], { type: "application/zip" });
+            const zipBlob = msg.zipBytes
+              ? new Blob([msg.zipBytes], { type: "application/zip" })
+              : undefined;
             const pmtilesBlob = msg.pmtilesBytes
               ? new Blob([msg.pmtilesBytes], { type: "application/octet-stream" })
               : undefined;
@@ -407,7 +409,7 @@ export function TileforgeProvider({ children }: { children: ReactNode }) {
         scale: opts.scale,
         backgroundColor: opts.backgroundColor,
         scaleMetadata: opts.scaleMetadata,
-        includePmtiles: opts.includePmtiles,
+        output: opts.output,
         format: opts.format,
         quality: opts.quality,
       };

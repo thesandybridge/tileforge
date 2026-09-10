@@ -135,7 +135,7 @@ interface FormState {
   // Advanced options
   scale: number | null;
   backgroundColor: string | null;
-  includePmtiles: boolean;
+  output: "zip" | "pmtiles" | "both";
   format: "png" | "jpeg" | "webp";
   quality: number;
   // Scale metadata for measurements
@@ -154,7 +154,7 @@ type FormAction =
   | { type: "PROJECTION_CHANGED"; projection: "flat" | "mercator" | "isometric" }
   | { type: "SCALE_CHANGED"; scale: number | null }
   | { type: "BACKGROUND_COLOR_CHANGED"; backgroundColor: string | null }
-  | { type: "INCLUDE_PMTILES_CHANGED"; includePmtiles: boolean }
+  | { type: "OUTPUT_CHANGED"; output: "zip" | "pmtiles" | "both" }
   | { type: "FORMAT_CHANGED"; format: "png" | "jpeg" | "webp" }
   | { type: "QUALITY_CHANGED"; quality: number }
   | { type: "SCALE_MODE_CHANGED"; scaleMode: "none" | "pixels_per_unit" | "units_per_tile" }
@@ -177,7 +177,7 @@ const initialFormState: FormState = {
   dragState: "idle",
   scale: null,
   backgroundColor: null,
-  includePmtiles: false,
+  output: "zip",
   format: "png",
   quality: 85,
   scaleMode: "none",
@@ -215,8 +215,8 @@ function formReducer(state: FormState, action: FormAction): FormState {
       return { ...state, scale: action.scale };
     case "BACKGROUND_COLOR_CHANGED":
       return { ...state, backgroundColor: action.backgroundColor };
-    case "INCLUDE_PMTILES_CHANGED":
-      return { ...state, includePmtiles: action.includePmtiles };
+    case "OUTPUT_CHANGED":
+      return { ...state, output: action.output };
     case "FORMAT_CHANGED":
       return { ...state, format: action.format };
     case "QUALITY_CHANGED":
@@ -349,9 +349,9 @@ export default function Home() {
     if (form.mode === "server") {
       processServer(copy, { ...baseOpts, token: session?.accessToken });
     } else {
-      process(copy, { ...baseOpts, includePmtiles: form.includePmtiles });
+      process(copy, { ...baseOpts, output: form.output });
     }
-  }, [process, processServer, form.tileSize, form.minZoom, form.maxZoom, form.projection, form.mode, form.fileName, form.scale, form.backgroundColor, form.includePmtiles, form.scaleMode, form.scaleValue, form.scaleUnit, form.format, form.quality, session?.accessToken]);
+  }, [process, processServer, form.tileSize, form.minZoom, form.maxZoom, form.projection, form.mode, form.fileName, form.scale, form.backgroundColor, form.output, form.scaleMode, form.scaleValue, form.scaleUnit, form.format, form.quality, session?.accessToken]);
 
   const onDownload = useCallback(() => {
     if (!zipBlob) return;
@@ -545,9 +545,9 @@ export default function Home() {
               {largeLocalJob && (
                 <p className="text-sm text-yellow-500">
                   This large local job will create {totalTiles.toLocaleString()} tiles
-                  {form.includePmtiles ? " in both ZIP and PMTiles archives" : " in a ZIP archive"}.
-                  {form.includePmtiles
-                    ? " Disable PMTiles to reduce memory use, or use Server mode for the most reliable result."
+                  {form.output === "both" ? " in both ZIP and PMTiles archives" : ` in a ${form.output === "pmtiles" ? "PMTiles" : "ZIP"} archive`}.
+                  {form.output === "both"
+                    ? " Select a single archive to reduce memory use, or use Server mode for the most reliable result."
                     : " Use Server mode if your browser runs out of memory."}
                 </p>
               )}
@@ -853,19 +853,24 @@ export default function Home() {
                         <label className="text-muted-foreground flex items-center gap-1 text-xs font-medium uppercase tracking-wider">
                           Output Format
                         </label>
-                        <div className="flex items-center gap-3">
-                          <label className="flex cursor-pointer items-center gap-2 text-sm">
-                            <input
-                              type="checkbox"
-                              checked={form.includePmtiles}
-                              onChange={(e) => dispatch({ type: "INCLUDE_PMTILES_CHANGED", includePmtiles: e.target.checked })}
-                              className="h-4 w-4 rounded border-input"
-                            />
-                            Include PMTiles
-                          </label>
-                        </div>
+                        <Select
+                          value={form.output}
+                          onValueChange={(value) => dispatch({
+                            type: "OUTPUT_CHANGED",
+                            output: value as "zip" | "pmtiles" | "both",
+                          })}
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="zip">ZIP</SelectItem>
+                            <SelectItem value="pmtiles">PMTiles</SelectItem>
+                            <SelectItem value="both">ZIP + PMTiles</SelectItem>
+                          </SelectContent>
+                        </Select>
                         <p className="text-muted-foreground text-xs">
-                          Always includes ZIP. PMTiles is a single-file format for web maps.
+                          PMTiles uses the least memory when you need a single-file archive for web maps.
                         </p>
                       </div>
                     )}

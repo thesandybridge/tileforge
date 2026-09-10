@@ -286,6 +286,57 @@ pub fn process_rgb_tiles(
     Ok(writer.into_inner().unwrap().into_inner())
 }
 
+/// Process image bytes directly into a PMTiles archive without also retaining
+/// a ZIP copy. This is the lowest-memory archive option for browser jobs.
+#[wasm_bindgen(js_name = processTilesPmtiles)]
+pub fn process_tiles_pmtiles(
+    image_bytes: &[u8],
+    config: &WasmTileConfig,
+    on_progress: &js_sys::Function,
+) -> Result<Vec<u8>, JsError> {
+    let core_config = config.to_core_config();
+    let format = core_config.format;
+    let min_zoom = core_config.min_zoom.unwrap_or(0) as u8;
+    let max_zoom = core_config.max_zoom.unwrap_or(8) as u8;
+    let buffer = SharedBuffer::new();
+    let mut writer = PmTilesTileWriter::with_format(buffer.cursor(), min_zoom, max_zoom, format)
+        .map_err(|e| JsError::new(&e.to_string()))?;
+
+    Tiler::new(core_config)
+        .process_bytes(image_bytes, &mut writer, progress_callback(on_progress))
+        .map_err(|e| JsError::new(&e.to_string()))?;
+    Ok(buffer.take_bytes())
+}
+
+#[wasm_bindgen(js_name = processRgbTilesPmtiles)]
+pub fn process_rgb_tiles_pmtiles(
+    rgb_bytes: Vec<u8>,
+    width: u32,
+    height: u32,
+    config: &WasmTileConfig,
+    on_progress: &js_sys::Function,
+) -> Result<Vec<u8>, JsError> {
+    let use_streaming = rgb_bytes.len() > STREAMING_THRESHOLD;
+    let image = RgbImage::from_raw(width, height, rgb_bytes)
+        .ok_or_else(|| JsError::new("GeoTIFF decoder returned incomplete RGB data"))?;
+    let core_config = config.to_core_config();
+    let format = core_config.format;
+    let min_zoom = core_config.min_zoom.unwrap_or(0) as u8;
+    let max_zoom = core_config.max_zoom.unwrap_or(8) as u8;
+    let buffer = SharedBuffer::new();
+    let mut writer = PmTilesTileWriter::with_format(buffer.cursor(), min_zoom, max_zoom, format)
+        .map_err(|e| JsError::new(&e.to_string()))?;
+    let image = DynamicImage::ImageRgb8(image);
+    let report = progress_callback(on_progress);
+    if use_streaming {
+        StreamingTiler::new(core_config).process_image(&image, &mut writer, report)
+    } else {
+        Tiler::new(core_config).process_image(&image, &mut writer, report)
+    }
+    .map_err(|e| JsError::new(&e.to_string()))?;
+    Ok(buffer.take_bytes())
+}
+
 /// Process image bytes into both ZIP and PMTiles archives.
 /// `on_progress` is called with (tiles_done, tiles_total, current_zoom).
 #[wasm_bindgen(js_name = processTilesWithPmtiles)]

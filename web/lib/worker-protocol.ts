@@ -25,8 +25,8 @@ export type WorkerRequest =
       backgroundColor?: string;
       /** Scale metadata for measurements */
       scaleMetadata?: ScaleMetadata;
-      /** Whether to also generate PMTiles output */
-      includePmtiles?: boolean;
+      /** Which local archive(s) to generate */
+      output?: "zip" | "pmtiles" | "both";
       format?: "png" | "jpeg" | "webp";
       quality?: number;
     };
@@ -35,5 +35,5 @@ export type WorkerRequest =
 export type WorkerResponse =
   | { type: "ready" }
   | { type: "progress"; tilesDone: number; tilesTotal: number; zoom: number }
-  | { type: "complete"; zipBytes: ArrayBuffer; pmtilesBytes?: ArrayBuffer }
+  | { type: "complete"; zipBytes?: ArrayBuffer; pmtilesBytes?: ArrayBuffer }
   | { type: "error"; message: string };
