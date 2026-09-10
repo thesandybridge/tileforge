@@ -205,9 +205,18 @@ async function decodeGeoTiff(bytes: ArrayBuffer) {
   const height = image.getHeight();
   const rgb = await image.readRGB({ interleave: true });
   const rgbView = rgb instanceof Uint8Array ? rgb : Uint8Array.from(rgb);
-  const rgbBytes = rgbView.byteOffset === 0 && rgbView.byteLength === rgbView.buffer.byteLength
-    ? rgbView.buffer
-    : rgbView.slice().buffer;
+  let rgbBytes: ArrayBuffer;
+  if (
+    rgbView.buffer instanceof ArrayBuffer
+    && rgbView.byteOffset === 0
+    && rgbView.byteLength === rgbView.buffer.byteLength
+  ) {
+    rgbBytes = rgbView.buffer;
+  } else {
+    const copy = new Uint8Array(rgbView.byteLength);
+    copy.set(rgbView);
+    rgbBytes = copy.buffer;
+  }
   return { rgbBytes, width, height };
 }
 
