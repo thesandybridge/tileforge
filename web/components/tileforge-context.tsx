@@ -238,6 +238,8 @@ export function TileforgeProvider({ children }: { children: ReactNode }) {
   const { add } = useNotifications();
   const { updateFromHeaders } = useRateLimit();
   const workerRef = useRef<Worker | null>(null);
+  const workerReadyRef = useRef(false);
+  const restartWorkerRef = useRef<((showLoading: boolean) => void) | null>(null);
   const startTimeRef = useRef<number>(0);
   const sseRef = useRef<EventSource | null>(null);
   const serverAbortRef = useRef<AbortController | null>(null);
@@ -288,57 +290,85 @@ export function TileforgeProvider({ children }: { children: ReactNode }) {
 
   // Boot WASM worker once
   useEffect(() => {
-    // Public engine assets have stable filenames, so version the request to
-    // prevent a browser or CDN from pairing a new UI with an old decoder.
-    const worker = new Worker("/tileforge.worker.js?v=6");
-    workerRef.current = worker;
+    let disposed = false;
+    let recovering = false;
+    const spawnWorker: (showLoading: boolean) => void = (showLoading) => {
+      workerRef.current?.terminate();
+      workerReadyRef.current = false;
+      if (disposed) return;
 
-    worker.onmessage = (e: MessageEvent<WorkerResponse>) => {
-      const msg = e.data;
-      switch (msg.type) {
-        case "ready":
-          dispatch({ type: "ready" });
-          break;
-        case "progress":
-          dispatch({
-            type: "progress",
-            progress: {
-              tilesDone: msg.tilesDone,
-              tilesTotal: msg.tilesTotal,
-              zoom: msg.zoom,
-              percent: (msg.tilesDone / msg.tilesTotal) * 100,
-            },
-          });
-          break;
-        case "complete": {
-          const zipBlob = new Blob([msg.zipBytes], { type: "application/zip" });
-          const pmtilesBlob = msg.pmtilesBytes
-            ? new Blob([msg.pmtilesBytes], { type: "application/octet-stream" })
-            : undefined;
-          dispatch({
-            type: "complete",
-            zipBlob,
-            pmtilesBlob,
-            durationMs: performance.now() - startTimeRef.current,
-          });
-          break;
+      // Public engine assets have stable filenames, so version the request to
+      // prevent a browser or CDN from pairing a new UI with an old decoder.
+      const worker = new Worker("/tileforge.worker.js?v=6");
+      workerRef.current = worker;
+
+      worker.onmessage = (e: MessageEvent<WorkerResponse>) => {
+        const msg = e.data;
+        switch (msg.type) {
+          case "ready":
+            workerReadyRef.current = true;
+            recovering = false;
+            if (showLoading) dispatch({ type: "ready" });
+            break;
+          case "progress":
+            dispatch({
+              type: "progress",
+              progress: {
+                tilesDone: msg.tilesDone,
+                tilesTotal: msg.tilesTotal,
+                zoom: msg.zoom,
+                percent: (msg.tilesDone / msg.tilesTotal) * 100,
+              },
+            });
+            break;
+          case "complete": {
+            const zipBlob = new Blob([msg.zipBytes], { type: "application/zip" });
+            const pmtilesBlob = msg.pmtilesBytes
+              ? new Blob([msg.pmtilesBytes], { type: "application/octet-stream" })
+              : undefined;
+            dispatch({
+              type: "complete",
+              zipBlob,
+              pmtilesBlob,
+              durationMs: performance.now() - startTimeRef.current,
+            });
+            break;
+          }
+          case "error": {
+            // A trapped WASM instance cannot be trusted for the next job. Keep
+            // the error visible while preparing a fresh worker for retry.
+            dispatch({ type: "error", message: msg.message });
+            if (/memory access out of bounds|unreachable|wasm trap/i.test(msg.message)) {
+              spawnWorker(false);
+            }
+            break;
+          }
         }
-        case "error": {
-          // Keep the decoder's original message. InlineError turns it into a
-          // friendly explanation while retaining useful technical details.
-          dispatch({ type: "error", message: msg.message });
-          break;
+      };
+
+      worker.onerror = (event) => {
+        workerReadyRef.current = false;
+        dispatch({ type: "error", message: event.message || "Local processing worker crashed" });
+        if (!recovering) {
+          recovering = true;
+          spawnWorker(false);
         }
-      }
+      };
+
+      if (showLoading) dispatch({ type: "loading" });
+      const init: WorkerRequest = { type: "init" };
+      worker.postMessage(init);
     };
 
-    dispatch({ type: "loading" });
-    const init: WorkerRequest = { type: "init" };
-    worker.postMessage(init);
+    restartWorkerRef.current = spawnWorker;
+    spawnWorker(true);
 
     return () => {
-      worker.terminate();
+      disposed = true;
+      restartWorkerRef.current = null;
+      workerRef.current?.terminate();
       workerRef.current = null;
+      workerReadyRef.current = false;
       sseRef.current?.close();
       sseRef.current = null;
     };
@@ -346,7 +376,10 @@ export function TileforgeProvider({ children }: { children: ReactNode }) {
 
   const process = useCallback(
     async (imageBytes: ArrayBuffer, opts: ProcessOpts = {}) => {
-      if (!workerRef.current) return;
+      if (!workerRef.current || !workerReadyRef.current) {
+        dispatch({ type: "error", message: "Local processing engine is still loading. Try again in a moment." });
+        return;
+      }
       fileNameRef.current = opts.fileName ?? null;
       startTimeRef.current = performance.now();
       dispatch({ type: "processing" });
@@ -543,7 +576,7 @@ export function TileforgeProvider({ children }: { children: ReactNode }) {
   );
 
   const reset = useCallback(() => {
-    dispatch({ type: "reset", workerReady: !!workerRef.current });
+    dispatch({ type: "reset", workerReady: workerReadyRef.current });
   }, []);
 
   const cancel = useCallback(() => {
@@ -553,8 +586,9 @@ export function TileforgeProvider({ children }: { children: ReactNode }) {
     // Close SSE connection
     sseRef.current?.close();
     sseRef.current = null;
-    // Reset state
-    dispatch({ type: "reset", workerReady: !!workerRef.current });
+    // WASM runs synchronously inside its worker, so termination is the only
+    // reliable way to stop a local job. Start a clean worker for the next run.
+    restartWorkerRef.current?.(true);
   }, []);
 
   // ---------------------------------------------------------------------------

@@ -5,6 +5,46 @@ use tileforge_core::{
 };
 use wasm_bindgen::prelude::*;
 
+fn should_report_progress(
+    tiles_done: u32,
+    tiles_total: u32,
+    zoom: u32,
+    last_tiles: u32,
+    last_zoom: Option<u32>,
+) -> bool {
+    let interval = (tiles_total / 200).max(1);
+    tiles_done == tiles_total
+        || last_zoom != Some(zoom)
+        || tiles_done.saturating_sub(last_tiles) >= interval
+}
+
+fn progress_callback<'a>(
+    on_progress: &'a js_sys::Function,
+) -> impl Fn(tileforge_core::TileProgress) + 'a {
+    let last_tiles = std::cell::Cell::new(0u32);
+    let last_zoom = std::cell::Cell::new(None);
+    move |p| {
+        if !should_report_progress(
+            p.tiles_done,
+            p.tiles_total,
+            p.zoom,
+            last_tiles.get(),
+            last_zoom.get(),
+        ) {
+            return;
+        }
+
+        last_tiles.set(p.tiles_done);
+        last_zoom.set(Some(p.zoom));
+        let _ = on_progress.call3(
+            &JsValue::NULL,
+            &p.tiles_done.into(),
+            &p.tiles_total.into(),
+            &p.zoom.into(),
+        );
+    }
+}
+
 #[wasm_bindgen]
 pub struct WasmTileConfig {
     tile_size: u32,
@@ -164,7 +204,7 @@ impl TileOutput {
 
 #[cfg(test)]
 mod tests {
-    use super::TileOutput;
+    use super::{should_report_progress, TileOutput};
 
     #[test]
     fn output_archives_are_moved_instead_of_cloned() {
@@ -177,6 +217,15 @@ mod tests {
         assert!(output.zip_bytes().is_empty());
         assert_eq!(output.pmtiles_bytes(), vec![4, 5]);
         assert!(output.pmtiles_bytes().is_empty());
+    }
+
+    #[test]
+    fn large_jobs_report_bounded_progress() {
+        assert!(should_report_progress(1, 80_000, 8, 0, None));
+        assert!(!should_report_progress(2, 80_000, 8, 1, Some(8)));
+        assert!(should_report_progress(401, 80_000, 8, 1, Some(8)));
+        assert!(should_report_progress(402, 80_000, 7, 401, Some(8)));
+        assert!(should_report_progress(80_000, 80_000, 7, 79_999, Some(7)));
     }
 }
 
@@ -204,16 +253,9 @@ pub fn process_tiles(
     let buf = std::io::Cursor::new(Vec::new());
     let mut zip_writer = ZipTileWriter::with_format(buf, format);
 
-    let js_this = JsValue::NULL;
+    let report = progress_callback(on_progress);
     tiler
-        .process_bytes(image_bytes, &mut zip_writer, |p| {
-            let _ = on_progress.call3(
-                &js_this,
-                &JsValue::from(p.tiles_done),
-                &JsValue::from(p.tiles_total),
-                &JsValue::from(p.zoom),
-            );
-        })
+        .process_bytes(image_bytes, &mut zip_writer, report)
         .map_err(|e| JsError::new(&e.to_string()))?;
 
     Ok(zip_writer.into_inner().unwrap().into_inner())
@@ -233,20 +275,12 @@ pub fn process_rgb_tiles(
     let core_config = config.to_core_config();
     let format = core_config.format;
     let mut writer = ZipTileWriter::with_format(std::io::Cursor::new(Vec::new()), format);
-    let js_this = JsValue::NULL;
     let image = DynamicImage::ImageRgb8(image);
-    let on_progress = |p: tileforge_core::TileProgress| {
-        let _ = on_progress.call3(
-            &js_this,
-            &p.tiles_done.into(),
-            &p.tiles_total.into(),
-            &p.zoom.into(),
-        );
-    };
+    let report = progress_callback(on_progress);
     if use_streaming {
-        StreamingTiler::new(core_config).process_image(&image, &mut writer, on_progress)
+        StreamingTiler::new(core_config).process_image(&image, &mut writer, report)
     } else {
-        Tiler::new(core_config).process_image(&image, &mut writer, on_progress)
+        Tiler::new(core_config).process_image(&image, &mut writer, report)
     }
     .map_err(|e| JsError::new(&e.to_string()))?;
     Ok(writer.into_inner().unwrap().into_inner())
@@ -283,16 +317,9 @@ pub fn process_tiles_with_pmtiles(
     // Create tee writer to write to both
     let mut tee_writer = TeeTileWriter::new(zip_writer, pmtiles_writer);
 
-    let js_this = JsValue::NULL;
+    let report = progress_callback(on_progress);
     tiler
-        .process_bytes(image_bytes, &mut tee_writer, |p| {
-            let _ = on_progress.call3(
-                &js_this,
-                &JsValue::from(p.tiles_done),
-                &JsValue::from(p.tiles_total),
-                &JsValue::from(p.zoom),
-            );
-        })
+        .process_bytes(image_bytes, &mut tee_writer, report)
         .map_err(|e| JsError::new(&e.to_string()))?;
 
     // Finalize both writers (writes PMTiles headers/directory)
@@ -335,20 +362,12 @@ pub fn process_rgb_tiles_with_pmtiles(
         PmTilesTileWriter::with_format(pmtiles_buffer.cursor(), min_zoom, max_zoom, format)
             .map_err(|e| JsError::new(&e.to_string()))?;
     let mut writer = TeeTileWriter::new(zip_writer, pmtiles_writer);
-    let js_this = JsValue::NULL;
     let image = DynamicImage::ImageRgb8(image);
-    let on_progress = |p: tileforge_core::TileProgress| {
-        let _ = on_progress.call3(
-            &js_this,
-            &p.tiles_done.into(),
-            &p.tiles_total.into(),
-            &p.zoom.into(),
-        );
-    };
+    let report = progress_callback(on_progress);
     if use_streaming {
-        StreamingTiler::new(core_config).process_image(&image, &mut writer, on_progress)
+        StreamingTiler::new(core_config).process_image(&image, &mut writer, report)
     } else {
-        Tiler::new(core_config).process_image(&image, &mut writer, on_progress)
+        Tiler::new(core_config).process_image(&image, &mut writer, report)
     }
     .map_err(|e| JsError::new(&e.to_string()))?;
     writer.finish().map_err(|e| JsError::new(&e.to_string()))?;

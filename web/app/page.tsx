@@ -177,7 +177,7 @@ const initialFormState: FormState = {
   dragState: "idle",
   scale: null,
   backgroundColor: null,
-  includePmtiles: true,
+  includePmtiles: false,
   format: "png",
   quality: 85,
   scaleMode: "none",
@@ -322,6 +322,7 @@ export default function Home() {
     : 0;
   const totalTiles = calcTotalTiles(form.minZoom, form.maxZoom);
   const memoryWarning = form.imageInfo && form.imageInfo.decodedMB > 1200;
+  const largeLocalJob = form.mode === "local" && totalTiles >= 50_000;
   const canProcess = form.hasFile && (form.mode === "server" || status === "ready") && status !== "processing" && status !== "waking";
   const showCard = form.mode === "server" || status === "ready" || status === "done" || status === "error" || status === "processing" || status === "waking";
 
@@ -538,6 +539,16 @@ export default function Home() {
                 <p className="text-sm text-yellow-500">
                   This image requires ~{Math.round(form.imageInfo.decodedMB)} MB of memory to decode.
                   Processing may fail on devices with limited RAM.
+                </p>
+              )}
+
+              {largeLocalJob && (
+                <p className="text-sm text-yellow-500">
+                  This large local job will create {totalTiles.toLocaleString()} tiles
+                  {form.includePmtiles ? " in both ZIP and PMTiles archives" : " in a ZIP archive"}.
+                  {form.includePmtiles
+                    ? " Disable PMTiles to reduce memory use, or use Server mode for the most reliable result."
+                    : " Use Server mode if your browser runs out of memory."}
                 </p>
               )}
 
@@ -968,7 +979,7 @@ export default function Home() {
 
               {form.imageInfo && (
                 <p className="text-muted-foreground text-center text-sm">
-                  {totalTiles} tiles &mdash; ~{Math.round(form.imageInfo.decodedMB)} MB peak memory
+                  {totalTiles.toLocaleString()} tiles &mdash; ~{Math.round(form.imageInfo.decodedMB)} MB decoded image
                 </p>
               )}
 
@@ -1050,8 +1061,8 @@ export default function Home() {
               {/* Stats */}
               {status === "done" && durationMs != null && (
                 <p className="text-muted-foreground text-center text-xs">
-                  Done in {(durationMs / 1000).toFixed(1)}s &mdash; {totalTiles} tiles
-                  {form.imageInfo && <> &mdash; peak memory ~{Math.round(form.imageInfo.decodedMB)} MB</>}
+                  Done in {(durationMs / 1000).toFixed(1)}s &mdash; {totalTiles.toLocaleString()} tiles
+                  {form.imageInfo && <> &mdash; decoded image ~{Math.round(form.imageInfo.decodedMB)} MB</>}
                 </p>
               )}
 
