@@ -1,9 +1,162 @@
 use image::{DynamicImage, RgbImage};
+use js_sys::{Function, Object, Reflect, Uint8Array};
+use std::io::{Seek, SeekFrom, Write};
 use tileforge_core::{
     BackgroundColor, PmTilesTileWriter, Projection, ScaleMetadata, SharedBuffer, StreamingTiler,
     TeeTileWriter, TileConfig, TileFormat, TileWriter, Tiler, ZipTileWriter, STREAMING_THRESHOLD,
 };
 use wasm_bindgen::prelude::*;
+
+struct BrowserFile {
+    handle: JsValue,
+    position: u64,
+}
+
+impl BrowserFile {
+    fn new(handle: JsValue) -> Self {
+        Self {
+            handle,
+            position: 0,
+        }
+    }
+
+    fn call(&self, name: &str, args: &js_sys::Array) -> std::io::Result<JsValue> {
+        let method = Reflect::get(&self.handle, &JsValue::from_str(name))
+            .map_err(js_io_error)?
+            .dyn_into::<Function>()
+            .map_err(|_| std::io::Error::other(format!("OPFS handle has no {name} method")))?;
+        Reflect::apply(&method, &self.handle, args).map_err(js_io_error)
+    }
+}
+
+fn js_io_error(value: JsValue) -> std::io::Error {
+    let message = value
+        .as_string()
+        .or_else(|| {
+            Reflect::get(&value, &JsValue::from_str("message"))
+                .ok()?
+                .as_string()
+        })
+        .unwrap_or_else(|| "OPFS write failed".to_string());
+    std::io::Error::other(message)
+}
+
+impl Write for BrowserFile {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let options = Object::new();
+        Reflect::set(
+            &options,
+            &JsValue::from_str("at"),
+            &JsValue::from_f64(self.position as f64),
+        )
+        .map_err(js_io_error)?;
+        // FileSystemSyncAccessHandle.write completes synchronously, so the
+        // temporary zero-copy view remains valid for the entire call.
+        let view = unsafe { Uint8Array::view(buf) };
+        let args = js_sys::Array::of2(&view, &options);
+        let written = self
+            .call("write", &args)?
+            .as_f64()
+            .ok_or_else(|| std::io::Error::other("OPFS write returned no byte count"))?
+            as usize;
+        self.position = self.position.saturating_add(written as u64);
+        Ok(written)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.call("flush", &js_sys::Array::new())?;
+        Ok(())
+    }
+}
+
+impl Seek for BrowserFile {
+    fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
+        let next = match pos {
+            SeekFrom::Start(offset) => offset as i128,
+            SeekFrom::Current(offset) => self.position as i128 + offset as i128,
+            SeekFrom::End(offset) => {
+                let size = self
+                    .call("getSize", &js_sys::Array::new())?
+                    .as_f64()
+                    .ok_or_else(|| std::io::Error::other("OPFS getSize returned no size"))?;
+                size as i128 + offset as i128
+            }
+        };
+        if next < 0 || next > u64::MAX as i128 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "invalid OPFS seek",
+            ));
+        }
+        self.position = next as u64;
+        Ok(self.position)
+    }
+}
+
+enum BrowserArchiveWriter {
+    Zip(ZipTileWriter<BrowserFile>),
+    Pmtiles(PmTilesTileWriter<BrowserFile>),
+    Both(TeeTileWriter<ZipTileWriter<BrowserFile>, PmTilesTileWriter<BrowserFile>>),
+}
+
+impl TileWriter for BrowserArchiveWriter {
+    fn write_tile(
+        &mut self,
+        zoom: u32,
+        x: u32,
+        y: u32,
+        bytes: &[u8],
+    ) -> Result<(), tileforge_core::TilerError> {
+        match self {
+            Self::Zip(writer) => writer.write_tile(zoom, x, y, bytes),
+            Self::Pmtiles(writer) => writer.write_tile(zoom, x, y, bytes),
+            Self::Both(writer) => writer.write_tile(zoom, x, y, bytes),
+        }
+    }
+
+    fn finish(&mut self) -> Result<(), tileforge_core::TilerError> {
+        match self {
+            Self::Zip(writer) => writer.finish(),
+            Self::Pmtiles(writer) => writer.finish(),
+            Self::Both(writer) => writer.finish(),
+        }
+    }
+}
+
+fn browser_writer(
+    config: &TileConfig,
+    zip_handle: Option<JsValue>,
+    pmtiles_handle: Option<JsValue>,
+) -> Result<BrowserArchiveWriter, JsError> {
+    let min_zoom = config.min_zoom.unwrap_or(0) as u8;
+    let max_zoom = config.max_zoom.unwrap_or(8) as u8;
+    match (zip_handle, pmtiles_handle) {
+        (Some(zip), Some(pmtiles)) => {
+            let zip = ZipTileWriter::with_format(BrowserFile::new(zip), config.format);
+            let pmtiles = PmTilesTileWriter::with_format(
+                BrowserFile::new(pmtiles),
+                min_zoom,
+                max_zoom,
+                config.format,
+            )
+            .map_err(|error| JsError::new(&error.to_string()))?;
+            Ok(BrowserArchiveWriter::Both(TeeTileWriter::new(zip, pmtiles)))
+        }
+        (Some(zip), None) => Ok(BrowserArchiveWriter::Zip(ZipTileWriter::with_format(
+            BrowserFile::new(zip),
+            config.format,
+        ))),
+        (None, Some(pmtiles)) => PmTilesTileWriter::with_format(
+            BrowserFile::new(pmtiles),
+            min_zoom,
+            max_zoom,
+            config.format,
+        )
+        .map(BrowserArchiveWriter::Pmtiles)
+        .map_err(|error| JsError::new(&error.to_string())),
+        (None, None) => Err(JsError::new("No OPFS output handle was provided")),
+    }
+}
 
 fn should_report_progress(
     tiles_done: u32,
@@ -237,6 +390,55 @@ pub fn calc_max_zoom(width: u32, height: u32, tile_size: u32) -> u32 {
 #[wasm_bindgen(js_name = calcTotalTiles)]
 pub fn calc_total_tiles(min_zoom: u32, max_zoom: u32) -> u32 {
     Tiler::calc_total_tiles(min_zoom, max_zoom)
+}
+
+/// Process encoded image bytes while writing archives directly to synchronous
+/// OPFS handles owned by the worker.
+#[wasm_bindgen(js_name = processTilesToFiles)]
+pub fn process_tiles_to_files(
+    image_bytes: &[u8],
+    config: &WasmTileConfig,
+    on_progress: &js_sys::Function,
+    zip_handle: Option<JsValue>,
+    pmtiles_handle: Option<JsValue>,
+) -> Result<(), JsError> {
+    let core_config = config.to_core_config();
+    let mut writer = browser_writer(&core_config, zip_handle, pmtiles_handle)?;
+    Tiler::new(core_config)
+        .process_bytes(image_bytes, &mut writer, progress_callback(on_progress))
+        .map_err(|error| JsError::new(&error.to_string()))
+        .map(|_| ())
+}
+
+/// GeoTIFF/RGB variant of `processTilesToFiles`.
+#[wasm_bindgen(js_name = processRgbTilesToFiles)]
+pub fn process_rgb_tiles_to_files(
+    rgb_bytes: Vec<u8>,
+    width: u32,
+    height: u32,
+    config: &WasmTileConfig,
+    on_progress: &js_sys::Function,
+    zip_handle: Option<JsValue>,
+    pmtiles_handle: Option<JsValue>,
+) -> Result<(), JsError> {
+    let use_streaming = rgb_bytes.len() > STREAMING_THRESHOLD;
+    let image = RgbImage::from_raw(width, height, rgb_bytes)
+        .ok_or_else(|| JsError::new("GeoTIFF decoder returned incomplete RGB data"))?;
+    let core_config = config.to_core_config();
+    let mut writer = browser_writer(&core_config, zip_handle, pmtiles_handle)?;
+    let image = DynamicImage::ImageRgb8(image);
+    let result = if use_streaming {
+        StreamingTiler::new(core_config).process_image(
+            &image,
+            &mut writer,
+            progress_callback(on_progress),
+        )
+    } else {
+        Tiler::new(core_config).process_image(&image, &mut writer, progress_callback(on_progress))
+    };
+    result
+        .map_err(|error| JsError::new(&error.to_string()))
+        .map(|_| ())
 }
 
 /// Process image bytes into a zip archive of tiles.

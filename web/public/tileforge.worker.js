@@ -1,4 +1,4 @@
-importScripts("/wasm/tileforge_wasm.js?v=8");
+importScripts("/wasm/tileforge_wasm.js?v=9");
 
 let ready = false;
 
@@ -8,7 +8,7 @@ function post(msg, transfer) {
 
 async function init() {
   try {
-    await wasm_bindgen("/wasm/tileforge_wasm_bg.wasm?v=8");
+    await wasm_bindgen("/wasm/tileforge_wasm_bg.wasm?v=9");
     ready = true;
     post({ type: "ready" });
   } catch (e) {
@@ -16,7 +16,42 @@ async function init() {
   }
 }
 
-function process(msg) {
+async function openDiskOutputs(output) {
+  if (!navigator.storage?.getDirectory) return null;
+
+  const root = await navigator.storage.getDirectory();
+  const wantZip = output === "zip" || output === "both";
+  const wantPmtiles = output === "pmtiles" || output === "both";
+  const zipFile = wantZip
+    ? await root.getFileHandle("tileforge-output.zip", { create: true })
+    : null;
+  const pmtilesFile = wantPmtiles
+    ? await root.getFileHandle("tileforge-output.pmtiles", { create: true })
+    : null;
+
+  if (
+    (zipFile && typeof zipFile.createSyncAccessHandle !== "function")
+    || (pmtilesFile && typeof pmtilesFile.createSyncAccessHandle !== "function")
+  ) {
+    return null;
+  }
+
+  let zipAccess = null;
+  let pmtilesAccess = null;
+  try {
+    zipAccess = zipFile ? await zipFile.createSyncAccessHandle() : null;
+    pmtilesAccess = pmtilesFile ? await pmtilesFile.createSyncAccessHandle() : null;
+    zipAccess?.truncate(0);
+    pmtilesAccess?.truncate(0);
+    return { zipFile, pmtilesFile, zipAccess, pmtilesAccess };
+  } catch (error) {
+    zipAccess?.close();
+    pmtilesAccess?.close();
+    throw error;
+  }
+}
+
+async function process(msg) {
   if (!ready) {
     post({ type: "error", message: "WASM module not initialized" });
     return;
@@ -53,6 +88,48 @@ function process(msg) {
     const progressCallback = function (tilesDone, tilesTotal, zoom) {
       post({ type: "progress", tilesDone: tilesDone, tilesTotal: tilesTotal, zoom: zoom });
     };
+
+    // Dedicated workers can synchronously write OPFS files. Passing those
+    // handles into Rust prevents completed archives from accumulating in the
+    // WASM heap. Browsers without this API use the in-memory path below.
+    let disk = null;
+    try {
+      disk = await openDiskOutputs(msg.output || "zip");
+    } catch (_) {
+      disk = null;
+    }
+
+    if (disk) {
+      try {
+        if (rgb) {
+          wasm_bindgen.processRgbTilesToFiles(
+            rgb,
+            msg.imageWidth,
+            msg.imageHeight,
+            config,
+            progressCallback,
+            disk.zipAccess,
+            disk.pmtilesAccess,
+          );
+        } else {
+          wasm_bindgen.processTilesToFiles(
+            input,
+            config,
+            progressCallback,
+            disk.zipAccess,
+            disk.pmtilesAccess,
+          );
+        }
+      } finally {
+        disk.zipAccess?.close();
+        disk.pmtilesAccess?.close();
+      }
+
+      const zipBlob = disk.zipFile ? await disk.zipFile.getFile() : undefined;
+      const pmtilesBlob = disk.pmtilesFile ? await disk.pmtilesFile.getFile() : undefined;
+      post({ type: "complete", zipBlob, pmtilesBlob });
+      return;
+    }
 
     if (msg.output === "both") {
       // Process with both ZIP and PMTiles output
@@ -109,7 +186,7 @@ self.onmessage = function (e) {
       init();
       break;
     case "process":
-      process(msg);
+      void process(msg);
       break;
   }
 };

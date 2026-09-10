@@ -27,7 +27,15 @@ const ERROR_PATTERNS: Array<{
     friendly: {
       title: "Browser Memory Limit Reached",
       message: "The local job exceeded the browser's WebAssembly memory limit while creating its output archives.",
-      suggestion: "Turn off PMTiles to create only the ZIP, lower the max zoom level, or use Server mode for very large jobs.",
+      suggestion: "Create a single ZIP or PMTiles archive, lower the max zoom level, or use Server mode for very large jobs.",
+    },
+  },
+  {
+    pattern: /quotaexceeded|quota exceeded|storage quota|not enough space/i,
+    friendly: {
+      title: "Not Enough Browser Storage",
+      message: "The browser couldn't reserve enough temporary disk space for the tile archive.",
+      suggestion: "Free some disk space, create a single archive, or use Server mode.",
     },
   },
   // Image decoding errors

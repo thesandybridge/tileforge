@@ -35,5 +35,11 @@ export type WorkerRequest =
 export type WorkerResponse =
   | { type: "ready" }
   | { type: "progress"; tilesDone: number; tilesTotal: number; zoom: number }
-  | { type: "complete"; zipBytes?: ArrayBuffer; pmtilesBytes?: ArrayBuffer }
+  | {
+      type: "complete";
+      zipBytes?: ArrayBuffer;
+      pmtilesBytes?: ArrayBuffer;
+      zipBlob?: Blob;
+      pmtilesBlob?: Blob;
+    }
   | { type: "error"; message: string };

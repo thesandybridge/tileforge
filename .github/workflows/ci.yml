@@ -26,6 +26,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
+          targets: wasm32-unknown-unknown
 
       - name: Cache Rust
         uses: Swatinem/rust-cache@v2
@@ -46,7 +47,7 @@ jobs:
         run: cargo clippy --workspace --exclude tileforge-wasm -- -D warnings
 
       - name: Check WASM bridge
-        run: cargo check --package tileforge-wasm
+        run: cargo check --package tileforge-wasm --target wasm32-unknown-unknown
 
   web-checks:
     runs-on: ubuntu-latest

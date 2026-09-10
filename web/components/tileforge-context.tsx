@@ -312,7 +312,7 @@ export function TileforgeProvider({ children }: { children: ReactNode }) {
 
       // Public engine assets have stable filenames, so version the request to
       // prevent a browser or CDN from pairing a new UI with an old decoder.
-      const worker = new Worker("/tileforge.worker.js?v=8");
+      const worker = new Worker("/tileforge.worker.js?v=9");
       workerRef.current = worker;
 
       worker.onmessage = (e: MessageEvent<WorkerResponse>) => {
@@ -335,12 +335,12 @@ export function TileforgeProvider({ children }: { children: ReactNode }) {
             });
             break;
           case "complete": {
-            const zipBlob = msg.zipBytes
+            const zipBlob = msg.zipBlob ?? (msg.zipBytes
               ? new Blob([msg.zipBytes], { type: "application/zip" })
-              : undefined;
-            const pmtilesBlob = msg.pmtilesBytes
+              : undefined);
+            const pmtilesBlob = msg.pmtilesBlob ?? (msg.pmtilesBytes
               ? new Blob([msg.pmtilesBytes], { type: "application/octet-stream" })
-              : undefined;
+              : undefined);
             dispatch({
               type: "complete",
               zipBlob,
