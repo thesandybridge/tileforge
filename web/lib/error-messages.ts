@@ -25,9 +25,9 @@ const ERROR_PATTERNS: Array<{
   {
     pattern: /memory access out of bounds|unreachable|wasm trap/i,
     friendly: {
-      title: "Processing Failed",
-      message: "The image couldn't be processed due to memory constraints.",
-      suggestion: "Try a smaller image or reduce the max zoom level. Server mode handles larger images better.",
+      title: "Browser Memory Limit Reached",
+      message: "The local job exceeded the browser's WebAssembly memory limit while creating its output archives.",
+      suggestion: "Turn off PMTiles to create only the ZIP, lower the max zoom level, or use Server mode for very large jobs.",
     },
   },
   // Image decoding errors

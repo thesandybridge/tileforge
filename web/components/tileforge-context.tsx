@@ -290,7 +290,7 @@ export function TileforgeProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     // Public engine assets have stable filenames, so version the request to
     // prevent a browser or CDN from pairing a new UI with an old decoder.
-    const worker = new Worker("/tileforge.worker.js?v=5");
+    const worker = new Worker("/tileforge.worker.js?v=6");
     workerRef.current = worker;
 
     worker.onmessage = (e: MessageEvent<WorkerResponse>) => {

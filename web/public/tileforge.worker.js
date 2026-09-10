@@ -1,4 +1,4 @@
-importScripts("/wasm/tileforge_wasm.js?v=5");
+importScripts("/wasm/tileforge_wasm.js?v=6");
 
 let ready = false;
 
@@ -8,7 +8,7 @@ function post(msg, transfer) {
 
 async function init() {
   try {
-    await wasm_bindgen("/wasm/tileforge_wasm_bg.wasm?v=5");
+    await wasm_bindgen("/wasm/tileforge_wasm_bg.wasm?v=6");
     ready = true;
     post({ type: "ready" });
   } catch (e) {
@@ -22,9 +22,10 @@ function process(msg) {
     return;
   }
 
+  let config;
   try {
     const { WasmTileConfig, processTiles, processTilesWithPmtiles } = wasm_bindgen;
-    const config = new WasmTileConfig(msg.tileSize);
+    config = new WasmTileConfig(msg.tileSize);
 
     // Basic options
     if (msg.minZoom !== undefined) config.setMinZoom(msg.minZoom);
@@ -58,8 +59,18 @@ function process(msg) {
       const result = rgb
         ? wasm_bindgen.processRgbTilesWithPmtiles(rgb, msg.imageWidth, msg.imageHeight, config, progressCallback)
         : processTilesWithPmtiles(input, config, progressCallback);
-      const zipBuffer = result.zipBytes.buffer;
-      const pmtilesBuffer = result.pmtilesBytes.buffer;
+      let zipBytes;
+      let pmtilesBytes;
+      try {
+        // These getters move the archives out of the WASM heap. Read each only
+        // once, then release the now-empty Rust wrapper before posting results.
+        zipBytes = result.zipBytes;
+        pmtilesBytes = result.pmtilesBytes;
+      } finally {
+        result.free();
+      }
+      const zipBuffer = zipBytes.buffer;
+      const pmtilesBuffer = pmtilesBytes.buffer;
 
       const transfers = [zipBuffer];
       const response = { type: "complete", zipBytes: zipBuffer };
@@ -80,6 +91,8 @@ function process(msg) {
     }
   } catch (e) {
     post({ type: "error", message: e.message || String(e) });
+  } finally {
+    config?.free();
   }
 }
 

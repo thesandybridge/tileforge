@@ -149,13 +149,34 @@ pub struct TileOutput {
 #[wasm_bindgen]
 impl TileOutput {
     #[wasm_bindgen(getter, js_name = zipBytes)]
-    pub fn zip_bytes(&self) -> Vec<u8> {
-        self.zip_bytes.clone()
+    pub fn zip_bytes(&mut self) -> Vec<u8> {
+        // Returning a cloned archive briefly doubles its memory inside the
+        // WASM heap. Large local jobs can already occupy hundreds of MB, so
+        // move each archive out exactly once while JavaScript takes ownership.
+        std::mem::take(&mut self.zip_bytes)
     }
 
     #[wasm_bindgen(getter, js_name = pmtilesBytes)]
-    pub fn pmtiles_bytes(&self) -> Vec<u8> {
-        self.pmtiles_bytes.clone()
+    pub fn pmtiles_bytes(&mut self) -> Vec<u8> {
+        std::mem::take(&mut self.pmtiles_bytes)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TileOutput;
+
+    #[test]
+    fn output_archives_are_moved_instead_of_cloned() {
+        let mut output = TileOutput {
+            zip_bytes: vec![1, 2, 3],
+            pmtiles_bytes: vec![4, 5],
+        };
+
+        assert_eq!(output.zip_bytes(), vec![1, 2, 3]);
+        assert!(output.zip_bytes().is_empty());
+        assert_eq!(output.pmtiles_bytes(), vec![4, 5]);
+        assert!(output.pmtiles_bytes().is_empty());
     }
 }
 
